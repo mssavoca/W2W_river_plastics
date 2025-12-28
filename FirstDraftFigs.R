@@ -1,4 +1,4 @@
-# River flow and MPs figure ----
+# Figure drafts ----
 
 
 library(dplyr)
@@ -33,14 +33,25 @@ summary_table_largeMPs <- river_MPs_summ %>%
 
 
 # Small MPs over river flow data----
+# Part_dets_summ_river2 <- Part_dets_summ_river %>%
+#   mutate(
+#     particles_per_L = ifelse(
+#       Client_ID_MSSupdate == "CRR20240116SS",
+#       extrap_count / 200,
+#       extrap_count / 400
+#     )
+#   )
+
+
 Part_dets_summ_river2 <- Part_dets_summ_river %>%
-  mutate(
-    particles_per_L = ifelse(
-      Client_ID_MSSupdate == "CRR20240116SS",
-      extrap_count / 200,
-      extrap_count / 400
-    )
+  group_by(Client_ID_MSSupdate, river, date, 
+           material_simple, sample_depth_general) %>% 
+  summarise(
+    particles_per_L = sum(extrap_conc_PPL, na.rm = TRUE),
+    .groups = "drop"
   )
+
+#View(Part_dets_summ_river2)
 
 Part_dets_summ_river2_sum <- Part_dets_summ_river %>%
   mutate(
@@ -63,7 +74,7 @@ flow_scaled <- all_rivers_flow %>%
   group_by(river) %>%
   mutate(
     scale_factor =
-      max(
+      2 * max(                                   # 👈 increase multiplier (try 1.5–3)
         Part_dets_summ_river2_sum$particles_per_L[
           Part_dets_summ_river2_sum$river == first(river)
         ],
@@ -173,7 +184,7 @@ ggsave(
 
 
 
-
+# Large MPs over river flow data----
 # ------------------------------------
 # Scale river flow to large MP concentrations
 # ------------------------------------
@@ -330,18 +341,85 @@ ggsave(
 
 
 
+# boxplot by river and material_simple----
+bp_river_material <- ggplot(
+  Part_dets_summ_river2,
+  aes(
+    x = river,
+    y = particles_per_L
+  )
+) +
+  geom_boxplot(
+    aes(fill = material_simple),
+    outlier.shape = NA,
+    color = "black",                    # keep black outlines
+    linewidth = 0.6,
+    position = position_dodge(width = 0.8),
+    alpha = 0.7
+  ) +
+  geom_jitter(
+    aes(color = material_simple),
+    position = position_jitterdodge(
+      jitter.width = 0.15,
+      dodge.width  = 0.8
+    ),
+    alpha = 0.7,
+    size = 2
+  ) +
+  scale_y_log10() +
+  
+  #facet_grid(.~sample_depth_general) +
+  
+  scale_fill_manual(
+    name = "Material",
+    values = c(
+      "plastic" = "mediumorchid",
+      "organic matter" = "forestgreen",
+      "mineral" = "darkorange2"
+    )
+  ) +
+  scale_color_manual(
+    name = "Material",
+    values = c(
+      "plastic" = "mediumorchid",
+      "organic matter" = "forestgreen",
+      "mineral" = "darkorange2"
+    )
+  ) +
+  labs(
+    x = "River",
+    y = "Particles per L (50–500 µm)"
+  ) +
+  theme_bw(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.background  = element_rect(fill = "white", color = NA),
+    legend.position = "right"
+  )
+bp_river_material
+
+
+ggsave(
+  filename = "boxplot by river and material.pdf",
+  plot = bp_river_material,
+  device = "pdf",
+  width = 7,
+  height = 5,
+  units = "in"
+)
 
 
 
 
 
 
-#River water MPs by depth ----
+
+#River water MPs by depth, probably a supplemental ----
 
 df_plot <- Part_dets_summ_river %>%
   group_by(material_simple, Client_ID_MSSupdate, sample_depth_general) %>%
-  summarize(total_extrap_count = sum(extrap_count, na.rm = TRUE),
-            particles_per_L = total_extrap_count/200) %>%
+  summarize(particles_per_L = sum(extrap_conc_PPL)) %>%
   mutate(
     sample_depth_general = factor(
       sample_depth_general,
@@ -432,8 +510,7 @@ ggsave(
 df_plastic <- Part_dets_summ_river %>%
   filter(material_simple == "plastic") %>%
   group_by(material_class, Client_ID_MSSupdate, sample_depth_general) %>%
-  summarize(total_extrap_count = sum(extrap_count, na.rm = TRUE),
-            particles_per_L = total_extrap_count/200) %>%
+  summarize(particles_per_L = sum(extrap_conc_PPL)) %>%
   mutate(
     sample_depth_general = factor(
       sample_depth_general,
@@ -445,7 +522,7 @@ df_plastic <- Part_dets_summ_river %>%
 # Determine top 5 most common material_class by total count
 top_materials <- df_plastic %>%
   group_by(material_class) %>%
-  summarize(sum_total_extrap_count = sum(total_extrap_count)) %>%
+  summarize(sum_total_extrap_count = sum(particles_per_L)) %>%
   arrange(desc(sum_total_extrap_count)) %>%
   slice_head(n = 5) %>%
   pull(material_class)
@@ -501,7 +578,7 @@ u <- ggplot(df_top_plastic, aes(x = particles_per_L, color = material_short)) +
   geom_density(alpha = 0.4, linewidth = 0.5) +
   geom_rug(alpha = 0.8) +
   
-  # ---- facet-specific median lines ----
+  # ---- facet-specific median lines 
 geom_vline(
   data = median_df,
   aes(xintercept = median_total_count_L, color = material_short),
@@ -513,13 +590,13 @@ geom_vline(
   facet_wrap(~ sample_depth_general, scales = "free", ncol = 1) +
   scale_x_log10() +
   
-  # ---- Set1 palette with PP overridden ----
+  # ---- Set1 palette with PP overridden 
 scale_color_manual(
   name = "Polymer Type",
   values = pal
 ) +
   
-  # ---- two-row legend ----
+  # ---- two-row legend
 guides(
   color = guide_legend(nrow = 2, byrow = TRUE)
 ) +
@@ -672,8 +749,6 @@ ggsave(
 
 
 
-
-
 # -------------------------------
 # Proportional stacked bar plot for BLANKS by sample_type
 # Top 5 polymers + "other"
@@ -777,6 +852,462 @@ ggsave(
   height = 6,
   units = "in"
 )
+
+
+
+
+
+
+
+library(dplyr)
+
+# Add "Other" category to all rows not in top 5
+df_top_plastic <- df_plastic %>%
+  mutate(
+    material_short = case_when(
+      material_class == "poly(propylene)" ~ "polypropylene",
+      material_class == "poly(ethylene)" ~ "polyethylene",
+      material_class == "polystyrenes (polyphenylethylenes, -methylstyrene)" ~ "polystyrene",
+      material_class == "poly(acrylamide/amid)s" ~ "polyacrylamide",
+      material_class == "poly(esters/ethers/diglycidylethers/terephthalates)s" ~ "polyester / PET",
+      !material_class %in% top_materials ~ "Other",  # <-- anything not in top 5
+      TRUE ~ material_class
+    )
+  )
+
+# Reorder factor levels so "Other" appears last
+df_top_plastic <- df_top_plastic %>%
+  mutate(
+    material_short = factor(
+      material_short,
+      levels = c("polypropylene", "polyethylene", "polystyrene", "polyacrylamide", "polyester / PET", "Other")
+    )
+  )
+
+
+
+
+# Define top polymers and include "Other"
+poly_order <- c(
+  "polypropylene",
+  "polystyrene",
+  "polyethylene",
+  "polyester / PET",
+  "polyacrylamide",
+  "other"
+)
+
+# Add "other" category to any material not in top 5
+df_top_plastic <- df_plastic %>%
+  mutate(
+    material_short = case_when(
+      material_class == "poly(propylene)" ~ "polypropylene",
+      material_class == "poly(ethylene)" ~ "polyethylene",
+      material_class == "polystyrenes (polyphenylethylenes, -methylstyrene)" ~ "polystyrene",
+      material_class == "poly(acrylamide/amid)s" ~ "polyacrylamide",
+      material_class == "poly(esters/ethers/diglycidylethers/terephthalates)s" ~ "polyester / PET",
+      TRUE ~ "other"  # everything else
+    ),
+    material_short = factor(material_short, levels = poly_order)
+  )
+
+# Summarize for plotting: median ± MAD
+df_poly_summary <- df_top_plastic %>%
+  group_by(sample_depth_general, material_short) %>%
+  summarise(
+    med_count_L = median(particles_per_L, na.rm = TRUE),
+    mad_count_L = mad(particles_per_L, na.rm = TRUE),  # median absolute deviation
+    n = n(),
+    .groups = "drop"
+  )
+
+# Define base palette for top 5 polymers
+pal <- RColorBrewer::brewer.pal(n = 5, name = "Set1")
+names(pal) <- poly_order[1:5]
+
+# Override polypropylene and add color for Other
+pal["polypropylene"] <- "gray40"
+pal <- c(pal, other = "gray60")  # add Other
+
+
+p_poly_bar <- ggplot(
+  df_poly_summary,
+  aes(
+    x = material_short,
+    y = med_count_L,
+    fill = material_short
+  )
+) +
+  geom_col(width = 0.65, alpha = 0.85) +
+  
+  # ---- upper-only MAD line (no perpendicular hatch)
+  geom_segment(
+    aes(
+      x = material_short,
+      xend = material_short,
+      y = med_count_L,
+      yend = med_count_L + mad_count_L
+    ),
+    linewidth = 0.6
+  ) +
+  
+  facet_wrap(~ sample_depth_general, ncol = 2) +
+  scale_fill_manual(values = pal) +
+  labs(
+    x = NULL,
+    y = "Median microplastic count per L\n(50–500 µm)"
+  ) +
+  theme_bw(base_size = 14) +
+  theme(
+    strip.text = element_text(face = "bold", size = 13),
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+    legend.position = "none",
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.background  = element_rect(fill = "white", color = NA)
+  )
+
+p_poly_bar
+
+
+
+
+
+ggsave(
+  filename = "small polymers by depth_bar.pdf",
+  plot = p_poly_bar,
+  device = "pdf",
+  width = 9.5,
+  height = 3.5,
+  units = "in"
+)
+
+
+
+
+
+
+
+
+
+
+
+# Correlation of large and small MPs in same sample----
+small_MPs <- Part_dets_summ_river2_sum %>%
+  filter(material_simple == "plastic") %>%
+  mutate(
+    sample_key = str_replace(Client_ID_MSSupdate, "(SD|SS)$", "")
+  ) %>%
+  group_by(sample_key) %>%
+  summarise(
+    small_particles_L = sum(particles_per_L, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+
+large_MPs <- river_MPs_summ %>%
+  mutate(
+    sample_key = str_replace(Sample_ID, "(LD|LS)$", "")
+  ) %>%
+  group_by(sample_key) %>%
+  summarise(
+    large_particles_L = sum(MPs_L, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+
+MPs_joined <- small_MPs %>%
+  inner_join(large_MPs, by = "sample_key")
+
+
+
+p_corr <- ggplot(
+  MPs_joined,
+  aes(x = small_particles_L, y = large_particles_L) 
+) +
+  geom_point(size = 2.5, alpha = 0.8) +
+  geom_smooth(
+    method = "lm",
+    se = TRUE,
+    linewidth = 0.8,
+    color = "black"
+  ) +
+ # scale_x_log10() +
+  #scale_y_log10() +
+  labs(
+    x = "Small microplastics (50–500 µm)\nparticles per L",
+    y = "Large microplastics (500–5000 µm)\nparticles per L",
+  ) +
+  theme_minimal(base_size = 12)
+
+p_corr
+
+
+
+# Add marginal densities
+p_corr_marginal <- ggMarginal(
+  p_corr,
+  type = "density",          # marginal density plots
+  fill = "gray80",        # fill color for the marginal densities
+  alpha = 0.5,               # transparency
+  size = 5                   # thickness of marginal plots
+)
+
+p_corr_marginal
+
+
+
+ggsave(
+  filename = "Corr of large and small MPs.pdf",
+  plot = p_corr_marginal,
+  device = "pdf",
+  width = 7.5,
+  height = 4.5,
+  units = "in"
+)
+
+
+cor.test(
+  MPs_joined$small_particles_L,
+  MPs_joined$large_particles_L,
+  method = "spearman"
+)
+
+
+
+
+#Microplastic flux from first flush----
+
+
+flow_scaled <- all_rivers_flow %>%
+  group_by(river) %>%
+  mutate(
+    scale_factor =
+      2 * max(                                   # 👈 increase multiplier (try 1.5–3)
+        Part_dets_summ_river2_sum$particles_per_L[
+          Part_dets_summ_river2_sum$river == first(river)
+        ],
+        na.rm = TRUE
+      ) / max(Flow_m3s, na.rm = TRUE),
+    
+    flow_scaled = Flow_m3s * scale_factor
+  ) %>%
+  ungroup()
+
+
+
+# Relevel river to control facet order
+flow_scaled$river <- factor(
+  flow_scaled$river,
+  levels = c("San Lorenzo", "Pajaro", "Salinas", "Carmel" )
+)
+
+Part_dets_summ_river2_sum$river <- factor(
+  Part_dets_summ_river2_sum$river,
+  levels = c("San Lorenzo", "Pajaro", "Salinas", "Carmel")
+)
+
+
+library(dplyr)
+library(lubridate)
+
+start_date <- ymd("2023-11-15")
+end_date   <- ymd("2024-05-15")
+
+# Flow data restricted to window
+flow_win <- flow_scaled %>%
+  filter(date >= start_date, date <= end_date)
+
+library(dplyr)
+library(lubridate)
+
+storm_windows <- tibble(
+  river = factor(
+    c("San Lorenzo", "Pajaro", "Salinas", "Carmel"),
+    levels = c("San Lorenzo", "Pajaro", "Salinas", "Carmel")
+  ),
+  start = ymd(c(
+    "2023-12-24",  # San Lorenzo
+    "2024-01-16",  # Pajaro
+    "2024-01-30",  # Salinas
+    "2024-01-26"   # Carmel
+  )),
+  end = ymd(c(
+    "2024-01-09",  # San Lorenzo
+    "2024-01-30",  # Pajaro
+    "2024-02-15",  # Salinas
+    "2024-02-15"   # Carmel
+  ))
+)
+
+
+
+
+p_MP_flow_yr1 <- ggplot() +
+  
+  # ---- Storm / peak-flow window shading (behind everything)
+geom_rect(
+  data = storm_windows,
+  aes(
+    xmin = start,
+    xmax = end,
+    ymin = -Inf,
+    ymax = Inf
+  ),
+  inherit.aes = FALSE,
+  fill = "gray70",
+  alpha = 0.35
+) +
+  
+  # ---- Plastic bars only 
+geom_col(
+  data = Part_dets_summ_river2_sum %>%
+    filter(
+      material_simple == "plastic",
+      date >= ymd("2023-11-15"),
+      date <= ymd("2024-05-15")
+    ),
+  aes(x = date, y = particles_per_L),
+  fill = "mediumorchid",
+  alpha = 0.7
+) +
+  
+  # ---- River flow (secondary axis) 
+geom_line(
+  data = flow_scaled %>%
+    filter(
+      date >= ymd("2023-11-15"),
+      date <= ymd("2024-05-15")
+    ),
+  aes(x = date, y = flow_scaled),
+  color = "steelblue2",
+  linewidth = 0.6
+) +
+  
+  facet_wrap(~ river, scales = "free_y", ncol = 1) +
+  
+  scale_y_continuous(
+    name = "Plastic particle count per L (50–500 µm)",
+    sec.axis = sec_axis(
+      ~ . / unique(flow_scaled$scale_factor)[1],
+      name = expression(paste("River flow (m"^3, " s"^-1, ")"))
+    )
+  ) +
+  
+  scale_x_date(
+    limits = c(ymd("2023-11-15"), ymd("2024-05-15")),
+    date_breaks = "1 month",
+    date_labels = "%b %Y"
+  ) +
+  
+  labs(x = "Date") +
+  
+  theme_minimal(base_size = 8) +
+  theme(
+    #axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.text = element_text(face = "bold", size = 8),
+    axis.title.y.right = element_text(color = "steelblue3"),
+    axis.text.y.right  = element_text(color = "steelblue3"),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.background  = element_rect(fill = "white", color = NA),
+    legend.position = "none"
+  )
+
+p_MP_flow_yr1
+
+
+ggsave(
+  filename = "p_MP_flow_yr1.pdf",
+  plot = p_MP_flow_yr1,
+  device = "pdf",
+  width = 4,
+  height = 5,
+  units = "in"
+)
+
+
+
+
+
+
+
+
+
+# scale factor
+scale_factor <- max(all_FF_flow_hourly$MP_flux_cumulative_med, na.rm = TRUE) /
+  max(all_FF_flow_hourly$Flow_m3s, na.rm = TRUE)
+
+
+First_flush_flux <- ggplot(all_FF_flow_hourly, aes(x = date_hour)) +
+  
+  # ---- Cumulative MP flux (median)
+geom_line(
+  aes(y = MP_flux_cumulative_med),
+  color = "mediumorchid",
+  linewidth = 0.6
+) +
+  
+  # ---- Cumulative MP flux (p25 & p75; dotted) 
+geom_line(
+  aes(y = MP_flux_cumulative_p25),
+  color = "mediumorchid",
+  linewidth = 0.4,
+  linetype = "dashed"
+) +
+  
+  geom_line(
+    aes(y = MP_flux_cumulative_p75),
+    color = "mediumorchid",
+    linewidth = 0.4,
+    linetype = "dashed"
+  ) +
+  
+  # ---- Flow (secondary axis; scaled)
+geom_line(
+  aes(y = Flow_m3s * scale_factor),
+  color = "steelblue",
+  linewidth = 0.5
+) +
+  
+  scale_y_continuous(
+    name = "Cumulative microplastic flux (50–500 µm)",
+    labels = comma,
+    sec.axis = sec_axis(
+      ~ . / scale_factor,
+      name = expression(River~flow~(m^3~s^-1))
+    )
+  ) +
+  
+  facet_wrap(~ river, scales = "free", ncol = 1) +
+  
+  labs(x = NULL) +
+  
+  theme_minimal(base_size = 9) +
+  theme(
+    #axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.text = element_text(size = 8, face = "bold"),
+    
+    axis.title.y.left = element_text(color = "mediumorchid"),
+    axis.text.y.left  = element_text(color = "mediumorchid"),
+    
+    axis.title.y.right = element_text(color = "steelblue"),
+    axis.text.y.right  = element_text(color = "steelblue"),
+    
+    panel.grid.minor = element_blank()
+  )
+First_flush_flux
+
+
+ggsave(
+  filename = "First flush flux.pdf",
+  plot = First_flush_flux,
+  device = "pdf",
+  width = 4,
+  height = 5,
+  units = "in"
+)
+
+
+
 
 
 
@@ -921,5 +1452,75 @@ combined_plot <- q / r / s +
     heights = c(1, 1, 1.1)   # slightly more space for bottom axis labels
   )
 combined_plot
+
+
+all_rivers_flow_MPs <- all_rivers_flow %>%
+  mutate(
+    MP_Flow_m3s = case_when(
+      river == "San Lorenzo" ~ Flow_m3s * 1000 * 0.615,
+      river == "Pajaro"      ~ Flow_m3s * 1000 * 0.402,
+      river == "Salinas"     ~ Flow_m3s * 1000 * 0.315,
+      river == "Carmel"      ~ Flow_m3s * 1000 * 0.355,
+      TRUE ~ NA_real_
+    )
+  )
+
+
+
+
+p_MP_flux <- ggplot() +
+  geom_line(
+    data = all_rivers_flow_MPs,
+    aes(x = date, y = MP_Flow_m3s * 86400),
+    color = "mediumorchid",
+    linewidth = 0.6
+  ) +
+  
+  facet_wrap(~ river, scales = "free_y", ncol = 1) +
+  
+  scale_y_continuous(
+    name   = "Total estimated MP flux (50–5000 µm)\nper day",
+    labels = scales::comma
+  ) +
+  
+  scale_x_date(
+    limits = c(ymd("2023-10-01"), ymd("2025-06-01")),
+    date_breaks = "2 months",
+    date_labels = "%b %Y"
+  ) +
+  
+  labs(x = "Date") +
+  
+  theme_minimal(base_size = 13) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.text = element_text(face = "bold", size = 12),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.background  = element_rect(fill = "white", color = NA),
+    legend.position = "none"
+  )
+
+p_MP_flux
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
