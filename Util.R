@@ -4,6 +4,9 @@
 library(tidyverse)
 library(dataRetrieval)
 library(janitor)
+library(ggExtra)
+library(scales)
+library(RColorBrewer)
 
 
 
@@ -82,6 +85,8 @@ Part_dets_summ_river <- Part_dets_summ %>%
 #from: https://waterdata.usgs.gov/
 
 # Define site and dates
+
+#Carmel river USGS flow data
 site <- "11143250"
 startDate <- "2023-09-01"
 endDate   <- "2025-09-01"
@@ -205,4 +210,180 @@ Part_dets_river_full <- Part_dets_summ_river %>%
     all_rivers_flow,
     by = c("date", "river")
   )
+
+
+
+
+
+# Hourly flow data for "first flush" estimates-----
+
+
+flow_quantiles <- all_rivers_flow %>%
+  group_by(river) %>%
+  summarise(
+    p25_flow   = quantile(Flow_m3s, 0.25, na.rm = TRUE),
+    median_flow = median(Flow_m3s, na.rm = TRUE),
+    p75_flow   = quantile(Flow_m3s, 0.75, na.rm = TRUE),
+    p90_flow = quantile(Flow_m3s, 0.90, na.rm = TRUE),
+    n          = sum(!is.na(Flow_m3s)),
+    .groups = "drop"
+  )
+
+View(flow_quantiles)
+
+#select first time in season when it crosses the 90% percentile of flow
+
+
+flow_hourly_SanLorenzo <- readNWISuv(
+  siteNumbers = "11161000",
+  parameterCd = "00060",   # Discharge
+  startDate   = "2023-12-24",
+  endDate     = "2024-01-09"
+)
+
+
+flow_hourly_SanLorenzo_clean <- flow_hourly_SanLorenzo %>%
+  rename(
+    Flow_cfs = X_00060_00000
+  ) %>%
+  mutate(
+    date_time = as.POSIXct(dateTime, tz = "UTC"),
+    Flow_m3s  = Flow_cfs * 0.0283168
+  ) %>%
+  select(site_no, date_time, Flow_cfs, Flow_m3s)
+
+
+
+
+flow_hourly_Pajaro <- readNWISuv(
+  siteNumbers = "11159500",
+  parameterCd = "00060",   # Discharge
+  startDate   = "2024-01-16",
+  endDate     = "2024-01-30"
+)
+
+flow_hourly_Pajaro_clean <- flow_hourly_Pajaro %>%
+  rename(
+    Flow_cfs = X_00060_00000
+  ) %>%
+  mutate(
+    date_time = as.POSIXct(dateTime, tz = "UTC"),
+    Flow_m3s  = Flow_cfs * 0.0283168
+  ) %>%
+  select(site_no, date_time, Flow_cfs, Flow_m3s)
+
+
+
+flow_hourly_Salinas <- readNWISuv(
+  siteNumbers = "11152500",
+  parameterCd = "00060",   # Discharge
+  startDate   = "2024-01-30",
+  endDate     = "2024-02-15"
+)
+
+
+flow_hourly_Salinas_clean <- flow_hourly_Salinas %>%
+  rename(
+    Flow_cfs = X_00060_00000
+  ) %>%
+  mutate(
+    date_time = as.POSIXct(dateTime, tz = "UTC"),
+    Flow_m3s  = Flow_cfs * 0.0283168
+  ) %>%
+  select(site_no, date_time, Flow_cfs, Flow_m3s)
+
+
+
+flow_hourly_Carmel <- readNWISuv(
+  siteNumbers = "11143250",
+  parameterCd = "00060",   # Discharge
+  startDate   = "2024-01-26",
+  endDate     = "2024-02-15"
+)
+
+
+flow_hourly_Carmel_clean <- flow_hourly_Carmel %>%
+  rename(
+    Flow_cfs = X_00060_00000
+  ) %>%
+  mutate(
+    date_time = as.POSIXct(dateTime, tz = "UTC"),
+    Flow_m3s  = Flow_cfs * 0.0283168
+  ) %>%
+  select(site_no, date_time, Flow_cfs, Flow_m3s)
+
+
+# Data in super high res, every 15 minutes
+all_FF_flow <- bind_rows(
+  flow_hourly_SanLorenzo_clean %>%
+    mutate(river = "San Lorenzo"),
+  
+  flow_hourly_Pajaro_clean %>%
+    mutate(river = "Pajaro"),
+  
+  flow_hourly_Salinas_clean %>%
+    mutate(river = "Salinas"),
+  
+  flow_hourly_Carmel_clean %>%
+    mutate(river = "Carmel")
+) 
+
+
+# averaging out data to every hour
+all_FF_flow_hourly <- bind_rows(
+  flow_hourly_SanLorenzo_clean %>%
+    mutate(river = "San Lorenzo"),
+  
+  flow_hourly_Pajaro_clean %>%
+    mutate(river = "Pajaro"),
+  
+  flow_hourly_Salinas_clean %>%
+    mutate(river = "Salinas"),
+  
+  flow_hourly_Carmel_clean %>%
+    mutate(river = "Carmel")
+) %>%
+  mutate(
+    date_hour = floor_date(date_time, unit = "hour"),
+    river = factor(
+      river,
+      levels = c("San Lorenzo", "Pajaro", "Salinas", "Carmel")
+    )
+  ) %>%
+  group_by(river, date_hour) %>%
+  summarise(
+    Flow_m3s = mean(Flow_m3s, na.rm = TRUE),
+    .groups = "drop"
+  ) %>% 
+  mutate(
+    MP_flux_per_hr_yr1 = case_when(
+      river == "San Lorenzo" ~ Flow_m3s * 1000 * 0.771 * 3600,
+      river == "Pajaro"      ~ Flow_m3s * 1000 * 0.390 * 3600,
+      river == "Salinas"     ~ Flow_m3s * 1000 * 0.198 * 3600,
+      river == "Carmel"      ~ Flow_m3s * 1000 * 0.210 * 3600,
+      TRUE ~ NA_real_
+    ),
+    MP_flux_per_hr_p25_yr1 = case_when(
+      river == "San Lorenzo" ~ Flow_m3s * 1000 * 0.203 * 3600,
+      river == "Pajaro"      ~ Flow_m3s * 1000 * 0.083 * 3600,
+      river == "Salinas"     ~ Flow_m3s * 1000 * 0.080 * 3600,
+      river == "Carmel"      ~ Flow_m3s * 1000 * 0.129 * 3600,
+      TRUE ~ NA_real_
+    ),
+    MP_flux_per_hr_p75_yr1 = case_when(
+      river == "San Lorenzo" ~ Flow_m3s * 1000 * 1.525 * 3600,
+      river == "Pajaro"      ~ Flow_m3s * 1000 * 1.333 * 3600,
+      river == "Salinas"     ~ Flow_m3s * 1000 * 0.458 * 3600,
+      river == "Carmel"      ~ Flow_m3s * 1000 * 0.414 * 3600,
+      TRUE ~ NA_real_
+    )
+  ) %>% 
+  arrange(river, date_hour) %>%
+  group_by(river) %>%
+  mutate(
+    MP_flux_cumulative_med = lag(cumsum(MP_flux_per_hr_yr1), default = 0),
+    MP_flux_cumulative_p25 = lag(cumsum(MP_flux_per_hr_p25_yr1), default = 0),
+    MP_flux_cumulative_p75 = lag(cumsum(MP_flux_per_hr_p75_yr1), default = 0)
+  ) %>%
+  ungroup()
 
