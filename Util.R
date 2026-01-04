@@ -7,8 +7,20 @@ library(janitor)
 library(ggExtra)
 library(scales)
 library(RColorBrewer)
+library(broom)
+library(readxl)
 
 
+
+# Define a custom color palette----
+custom_palette <- c(
+  "fiber" = "#E69F00",      # Orange
+  "fragment" = "#56B4E9",   # Light Blue
+  "film" = "#009E73",       # Green
+  "nurdle" = "#F0E442",     # Yellow
+  "foam" = "#0072B2",       # Dark Blue
+  "other" = "#D55E00"       # Red (for any unexpected categories)
+)
 
 #####Bring in data from other proj----
 
@@ -26,6 +38,74 @@ river_MPs_summ <- large_MPs_summ %>%
     date = ymd(date_raw), 
     MPs_L = Total_Count/200
   )
+
+
+
+large_MPs_river_dets_master <- bind_rows(
+  
+  # ---- River + field blank detections
+  readRDS("../W2W_MBNMS/Opt_micro_river_dets_cut.rds") %>%
+    mutate(
+      Morphology = case_when(
+        Morphology %in% c("Fiber", "Fiber Clump", "fiber", "fiber clump", "Fibers", "fibers") ~ "fiber",
+        Morphology %in% c("Fragment", "fragment") ~ "fragment",
+        tolower(Morphology) == "film" ~ "film",
+        Morphology %in% c("Foams", "Foam") ~ "foam",
+        TRUE ~ as.character(Morphology)
+      ),
+      
+      Color = case_when(
+        Color %in% c("Navy blue", "Blue", "Light Blue", "Navy Blue", "Teal", "blue", "Light blue") ~ "blue",
+        tolower(Color) == "clear" ~ "clear",
+        Color %in% c("Black", "Gray", "Gold/Black") ~ "black",
+        Color %in% c("Red", "Maroon", "Pink", "Red/Black/Clear", "Red/Black", "red") ~ "red",
+        Color %in% c("Burgendy", "Tan", "brown", "Brown") ~ "brown",
+        Color %in% c("White", "White/Blue", "Silver", "white") ~ "white",
+        Color %in% c("Green", "Dark Green") ~ "green",
+        Color %in% c("Orange") ~ "orange",
+        Color %in% c("Yellow", "Gold") ~ "yellow",
+        Color %in% c("Purple") ~ "purple",
+        TRUE ~ as.character(Color)
+      ),
+      
+      sample_type = case_when(
+        str_detect(Sample_ID, regex("blank", ignore_case = TRUE)) ~ "field blank",
+        TRUE ~ "river water"
+      )
+    ),
+  
+  # ---- Lab blanks
+  read_xlsx("LabBlanks_10.30.25.xlsx", sheet = 2) %>%
+    rename(
+      Sample_ID    = Blank_ID,
+      Date_Sampled = Date_Picked
+    ) %>%
+    mutate(
+      Morphology = case_when(
+        Morphology %in% c("Fiber", "Fiber Clump", "fiber", "fiber clump", "Fibers", "fibers") ~ "fiber",
+        Morphology %in% c("Fragment", "fragment") ~ "fragment",
+        tolower(Morphology) == "film" ~ "film",
+        Morphology %in% c("Foams", "Foam") ~ "foam",
+        TRUE ~ as.character(Morphology)
+      ),
+      
+      Color = case_when(
+        Color %in% c("Navy blue", "Blue", "Light Blue", "Navy Blue", "Teal", "blue", "Light blue") ~ "blue",
+        tolower(Color) == "clear" ~ "clear",
+        Color %in% c("Black", "Gray", "Gold/Black") ~ "black",
+        Color %in% c("Red", "Maroon", "Pink", "Red/Black/Clear", "Red/Black", "red") ~ "red",
+        Color %in% c("Burgendy", "Tan", "brown", "Brown") ~ "brown",
+        Color %in% c("White", "White/Blue", "Silver", "white") ~ "white",
+        Color %in% c("Green", "Dark Green") ~ "green",
+        Color %in% c("Orange") ~ "orange",
+        Color %in% c("Yellow", "Gold") ~ "yellow",
+        Color %in% c("Purple") ~ "purple",
+        TRUE ~ as.character(Color)
+      ),
+      
+      sample_type = "lab blank"
+    )
+)
 
 
 
@@ -195,8 +275,20 @@ all_rivers_flow <- bind_rows(
 # Add a new column for cubic meters per second
 all_rivers_flow <- all_rivers_flow %>%
   mutate(
-    Flow_m3s = Flow_cfps * 0.0283168
-  )
+    Flow_m3s = Flow_cfps * 0.0283168, 
+    sampling_year = case_when(
+      date < as.Date("2024-10-01")  ~ "Year 1",
+      date >= as.Date("2024-10-01") ~ "Year 2"
+    )
+  ) %>%
+  arrange(river, sampling_year, date) %>%
+  group_by(river, sampling_year) %>%
+  mutate(
+    Flow_m3s_cumsum = cumsum(Flow_m3s * 86400) - first(Flow_m3s)
+  ) %>%
+  ungroup()
+
+
 
 
 

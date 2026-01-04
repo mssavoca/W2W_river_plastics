@@ -12,7 +12,8 @@ depth_order <- c("surface", "subsurface")
 # ---------------------------
 # Small MPs summary----
 # ---------------------------
-small_mp_summary <- Part_dets_summ_river2_sum %>%
+small_mp_summary <- Part_dets_summ_river2 %>%
+  filter(material_simple == "plastic") %>% 
   mutate(
     river = factor(river, levels = river_order),
     sample_depth_general = tolower(sample_depth_general),
