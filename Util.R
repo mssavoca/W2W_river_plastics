@@ -9,7 +9,8 @@ library(scales)
 library(RColorBrewer)
 library(broom)
 library(readxl)
-
+library(tidyr)
+library(knitr)
 
 
 # Define a custom color palette----

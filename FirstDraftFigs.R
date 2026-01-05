@@ -430,6 +430,16 @@ ggsave(
 # Proportional stacked bar plot by river: top 5 polymers + "other"
 # -------------------------------
 
+
+# Desired river display order (north -> south)
+river_order <- c(
+  "San Lorenzo",
+  "Pajaro",
+  "Salinas",
+  "Carmel"
+)
+
+
 # Define top 5 polymers (short names)
 top_materials <- c(
   "polypropylene",
@@ -443,6 +453,7 @@ top_materials <- c(
 df_bar <- Part_dets_summ_river %>%
   filter(material_simple == "plastic") %>%
   mutate(
+    river = factor(river, levels = river_order), 
     # standardize polymer names
     polymer_short = case_when(
       material_class == "poly(propylene)" ~ "polypropylene",

@@ -85,93 +85,198 @@ cor.test(
 
 
 
+# ---- ECDF plots of particle metrics (plastics only, labeled) ----
 
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(stringr)
 
-#River water MPs by depth, probably a supplemental ----
+# North -> south river order
+river_order <- c(
+  "San Lorenzo",
+  "Pajaro",
+  "Salinas",
+  "Carmel"
+)
 
-df_plot <- Part_dets_summ_river %>%
-  group_by(material_simple, Client_ID_MSSupdate, sample_depth_general) %>%
-  summarize(particles_per_L = sum(extrap_conc_PPL)) %>%
+metrics <- c(
+  "max_length_um",
+  "mean_length",
+  "aspect_ratio",
+  "area_um2"
+)
+
+desired_types <- c("river water", "field blank", "lab blank")
+
+# Robust facet label mapping
+metric_labels <- c(
+  max_length_um = "Maximum length (µm)",
+  mean_length   = "Mean length (µm)",
+  aspect_ratio  = "Aspect ratio",
+  area_um2      = "Area (µm²)"
+)
+
+# ----------------------------
+# Clean, filter, long format
+# ----------------------------
+long_metrics <- Part_dets_comb %>%
   mutate(
-    sample_depth_general = factor(
-      sample_depth_general,
-      levels = c("surface", "subsurface")
-    )
-  ) %>% 
-  ungroup()
-
-
-df_medians <- df_plot %>%
-  group_by(sample_depth_general, material_simple) %>%
-  summarize(
-    median_count_L = median(particles_per_L),
-    .groups = "drop"
+    sample_type = str_trim(tolower(sample_type)),
+    sample_location = str_trim(sample_location),
+    material_simple = str_trim(tolower(material_simple))
+  ) %>%
+  filter(
+    material_simple == "plastic",
+    sample_type %in% desired_types
+  ) %>%
+  pivot_longer(
+    cols = all_of(metrics),
+    names_to = "metric",
+    values_to = "value"
+  ) %>%
+  filter(!is.na(value)) %>%
+  mutate(
+    metric = factor(metric, levels = metrics)
   )
 
+# ----------------------------
+# River water only (ordered)
+# ----------------------------
+river_data <- long_metrics %>%
+  filter(sample_type == "river water") %>%
+  mutate(
+    sample_location = factor(sample_location, levels = river_order)
+  )
 
-
-t = ggplot(df_plot, aes(x = particles_per_L, color = material_simple)) +
-  geom_density(alpha = 0.4, linewidth = 0.5) +
-  geom_rug(alpha = 0.8) +
-  
-  # ---- medians by material within each facet ----
-geom_vline(
-  data = df_medians,
-  aes(xintercept = median_count_L, color = material_simple),
-  linetype = "dashed",
-  linewidth = 0.6,
-  show.legend = FALSE
+# ----------------------------
+# ECDF plot
+# ----------------------------
+ggplot(
+  river_data,
+  aes(x = value, color = sample_location)
 ) +
-  
+  stat_ecdf(linewidth = 1) +
   facet_wrap(
-    ~ sample_depth_general,
-    scales = "free",
-    ncol = 1
+    ~ metric,
+    scales = "free_x",
+    labeller = as_labeller(metric_labels)
   ) +
   scale_x_log10() +
-  scale_color_manual(
-    name = "Material",
-    values = c(
-      "plastic" = "mediumorchid",
-      "organic matter" = "forestgreen",
-      "mineral" = "darkorange2"
-    )
-  ) +
   labs(
-    x = "Particle count per L (50–500 µm)",
-    y = "Density"
+    x = "Particle metric value (log scale)",
+    y = "Cumulative proportion",
+    color = "River"
   ) +
   theme_minimal(base_size = 16) +
   theme(
+    legend.position = "right",
     strip.background = element_blank(),
-    strip.placement = "outside",
-    panel.background = element_rect(fill = "white", color = NA),
-    plot.background  = element_rect(fill = "white", color = NA),
-    
-    legend.position = "top",
-    legend.justification = "center",
-    legend.margin = margin(t = 0, b = 0),
-    legend.box.margin = margin(b = -6),
-    legend.spacing.x = unit(0.3, "cm"),
-    
-    legend.title = element_text(size = 12.5),
-    legend.text  = element_text(size = 12),
-    legend.key.size = unit(0.6, "lines"),
-    
-    plot.margin = margin(t = 10, r = 10, b = 10, l = 10)
+    strip.text = element_text(face = "bold")
   )
 
-t
-
-
 ggsave(
-  filename = "all small particles by depth.pdf",
-  plot = t,
+  filename = "Small MPs morphology by river.pdf",
   device = "pdf",
-  width = 7,
+  width = 7.5,
   height = 6,
   units = "in"
 )
+
+
+
+
+# ---- ECDF plots by sample type (plastics only) ----
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(stringr)
+
+metrics <- c(
+  "max_length_um",
+  "mean_length",
+  "aspect_ratio",
+  "area_um2"
+)
+
+desired_types <- c("river water", "field blank", "lab blank")
+
+# Pretty facet labels
+metric_labels <- c(
+  max_length_um = "Maximum length (µm)",
+  mean_length   = "Mean length (µm)",
+  aspect_ratio  = "Aspect ratio",
+  area_um2      = "Area (µm²)"
+)
+
+# Distinct color palette (different from river palette)
+sample_type_colors <- c(
+  "river water" = "#1B9E77",  # teal-green
+  "field blank" = "#D95F02",  # orange
+  "lab blank"   = "#7570B3"   # purple
+)
+
+# ----------------------------
+# Clean, filter, long format
+# ----------------------------
+long_metrics <- Part_dets_comb %>%
+  mutate(
+    sample_type = str_trim(tolower(sample_type)),
+    material_simple = str_trim(tolower(material_simple))
+  ) %>%
+  filter(
+    material_simple == "plastic",
+    sample_type %in% desired_types
+  ) %>%
+  pivot_longer(
+    cols = all_of(metrics),
+    names_to = "metric",
+    values_to = "value"
+  ) %>%
+  filter(!is.na(value)) %>%
+  mutate(
+    metric = factor(metric, levels = metrics),
+    sample_type = factor(sample_type, levels = desired_types)
+  )
+
+# ----------------------------
+# ECDF plot by sample type
+# ----------------------------
+ggplot(
+  long_metrics,
+  aes(x = value, color = sample_type)
+) +
+  stat_ecdf(linewidth = 1) +
+  facet_wrap(
+    ~ metric,
+    scales = "free_x",
+    labeller = as_labeller(metric_labels)
+  ) +
+  scale_x_log10() +
+  scale_color_manual(values = sample_type_colors) +
+  labs(
+    x = "Particle metric value (log scale)",
+    y = "Cumulative proportion",
+    color = "Sample type"
+  ) +
+  theme_minimal(base_size = 16) +
+  theme(
+    legend.position = "right",
+    strip.background = element_blank(),
+    strip.text = element_text(face = "bold")
+  )
+
+
+
+ggsave(
+  filename = "Small MPs morphology by sample type.pdf",
+  device = "pdf",
+  width = 7.5,
+  height = 6,
+  units = "in"
+)
+
 
 
 
@@ -544,6 +649,99 @@ ggsave(
   height = 4,
   units = "in"
 )
+
+
+
+
+
+
+#Extra code below here ----
+#River water MPs by depth, probably a supplemental ----
+
+df_plot <- Part_dets_summ_river %>%
+  group_by(material_simple, Client_ID_MSSupdate, sample_depth_general) %>%
+  summarize(particles_per_L = sum(extrap_conc_PPL)) %>%
+  mutate(
+    sample_depth_general = factor(
+      sample_depth_general,
+      levels = c("surface", "subsurface")
+    )
+  ) %>% 
+  ungroup()
+
+
+df_medians <- df_plot %>%
+  group_by(sample_depth_general, material_simple) %>%
+  summarize(
+    median_count_L = median(particles_per_L),
+    .groups = "drop"
+  )
+
+
+
+t = ggplot(df_plot, aes(x = particles_per_L, color = material_simple)) +
+  geom_density(alpha = 0.4, linewidth = 0.5) +
+  geom_rug(alpha = 0.8) +
+  
+  # ---- medians by material within each facet
+  geom_vline(
+    data = df_medians,
+    aes(xintercept = median_count_L, color = material_simple),
+    linetype = "dashed",
+    linewidth = 0.6,
+    show.legend = FALSE
+  ) +
+  
+  facet_wrap(
+    ~ sample_depth_general,
+    scales = "free",
+    ncol = 1
+  ) +
+  scale_x_log10() +
+  scale_color_manual(
+    name = "Material",
+    values = c(
+      "plastic" = "mediumorchid",
+      "organic matter" = "forestgreen",
+      "mineral" = "darkorange2"
+    )
+  ) +
+  labs(
+    x = "Particle count per L (50–500 µm)",
+    y = "Density"
+  ) +
+  theme_minimal(base_size = 16) +
+  theme(
+    strip.background = element_blank(),
+    strip.placement = "outside",
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.background  = element_rect(fill = "white", color = NA),
+    
+    legend.position = "top",
+    legend.justification = "center",
+    legend.margin = margin(t = 0, b = 0),
+    legend.box.margin = margin(b = -6),
+    legend.spacing.x = unit(0.3, "cm"),
+    
+    legend.title = element_text(size = 12.5),
+    legend.text  = element_text(size = 12),
+    legend.key.size = unit(0.6, "lines"),
+    
+    plot.margin = margin(t = 10, r = 10, b = 10, l = 10)
+  )
+
+t
+
+
+ggsave(
+  filename = "all small particles by depth.pdf",
+  plot = t,
+  device = "pdf",
+  width = 7,
+  height = 6,
+  units = "in"
+)
+
 
 
 

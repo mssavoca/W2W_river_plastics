@@ -12,6 +12,98 @@ depth_order <- c("surface", "subsurface")
 # ---------------------------
 # Small MPs summary----
 # ---------------------------
+
+
+
+# Overall, not by sample location, depth, etc.
+
+Overall_summary_table <- Part_dets_summ %>%
+  filter(sample_type %in% c("river water", "lab blank", "field blank")) %>% 
+  mutate(
+    sample_type = str_trim(tolower(sample_type)),
+    material_simple = str_trim(tolower(material_simple))
+  ) %>%
+  
+  # Sum extrapolated counts per sample first
+  group_by(sample_type, material_simple, Client_ID_MSSupdate) %>%
+  summarize(
+    total_extrap_count = sum(extrap_count, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  
+  # Summary statistics across samples
+  group_by(sample_type, material_simple) %>%
+  summarize(
+    median_count = median(total_extrap_count, na.rm = TRUE),
+    MAD_count    = mad(total_extrap_count, constant = 1, na.rm = TRUE),
+    p25_count    = quantile(total_extrap_count, 0.25, na.rm = TRUE),
+    p75_count    = quantile(total_extrap_count, 0.75, na.rm = TRUE),
+    n_samples    = n_distinct(Client_ID_MSSupdate),
+    .groups = "drop"
+  ) %>%
+  arrange(sample_type, material_simple)
+
+Overall_summary_table
+
+
+
+
+
+# ---- Readable summary table for Word / screenshot ----
+
+
+Overall_summary_table <- Part_dets_summ %>%
+  filter(sample_type %in% c("river water", "lab blank", "field blank")) %>% 
+  mutate(
+    sample_type = str_trim(tolower(sample_type)),
+    material_simple = str_trim(tolower(material_simple))
+  ) %>%
+  
+  # Sum extrapolated counts per sample first
+  group_by(sample_type, material_simple, Client_ID_MSSupdate) %>%
+  summarize(
+    total_extrap_count = sum(extrap_count, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  
+  # Summary statistics across samples
+  group_by(sample_type, material_simple) %>%
+  summarize(
+    median = median(total_extrap_count, na.rm = TRUE),
+    p25    = quantile(total_extrap_count, 0.25, na.rm = TRUE),
+    p75    = quantile(total_extrap_count, 0.75, na.rm = TRUE),
+    n      = n_distinct(Client_ID_MSSupdate),
+    .groups = "drop"
+  ) %>%
+  
+  # Combine into a single readable column
+  mutate(
+    `Median (25th–75th)` = paste0(
+      round(median, 1), " (",
+      round(p25, 1), "–",
+      round(p75, 1), ")"
+    )
+  ) %>%
+  
+  select(
+    Sample_type = sample_type,
+    Material    = material_simple,
+    `Median (25th–75th)`,
+    `n samples` = n
+  ) %>%
+  arrange(Sample_type, Material)
+
+# Print clean table for RStudio viewer / screenshot
+kable(
+  Overall_summary_table,
+  align = c("l", "l", "c", "c"),
+  caption = "Summary of extrapolated microplastic counts by sample type and material. Values shown as median (25th–75th percentile)."
+)
+
+
+
+
+
 small_mp_summary <- Part_dets_summ_river2 %>%
   filter(material_simple == "plastic") %>% 
   mutate(
@@ -31,6 +123,16 @@ small_mp_summary <- Part_dets_summ_river2 %>%
     `MPs per L (50–500 µm)` = sprintf("%.3f (%.3f–%.3f)", median_val, p25, p75)
   ) %>%
   select(river, `Sample depth`, `MPs per L (50–500 µm)`, n)
+
+
+
+
+
+
+
+
+
+
 
 # ---------------------------
 # Large MPs summary----
