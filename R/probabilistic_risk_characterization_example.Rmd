@@ -1,0 +1,662 @@
+---
+title: "Probabilistic Microplastics Risk Characterization"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, message = FALSE, warning = FALSE
+)
+set.seed(1)
+```
+
+# 1. Overview
+
+This R Markdown document demonstrates an **end-to-end, fully probabilistic** workflow for microplastics risk characterization in freshwater surface water:
+
+1. **Raw particle data → power-law slope (alpha) via C-PSD** (cumulative PSD, binned approach).
+2. **Monitoring concentrations → correction / rescaling** (e.g., mesh/LOD rescaling; optional other bias terms).
+3. **Environmental Exposure Distribution (EED)** using an **empirical bootstrap** (non-parametric).
+4. **Hazard threshold distribution** using **pSSD++** (from the `ToMEx2.0_EcoToxRisk` repository).
+5. **Risk characterization** by Monte Carlo pairing of **exposure** and **hazard** distributions.
+
+The workflow mirrors approaches used in probabilistic microplastics ERA, including Monte Carlo propagation of correction factors and rescaling (e.g., Coffin et al. 2022) and probabilistic threshold derivation (pSSD++ as described in Coffin et al. 2026).  
+
+# 2. Packages
+
+```{r}
+pkgs <- c("tidyverse", "truncnorm", "fitdistrplus")
+to_install <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
+if (length(to_install) > 0) install.packages(to_install)
+lapply(pkgs, library, character.only = TRUE)
+
+# pSSD++ package (GitHub)
+if (!requireNamespace("devtools", quietly = TRUE)) install.packages("devtools")
+# install from github unless library(PSSDplusplus) is not already installed
+if (!requireNamespace("PSSDplusplus", quietly = TRUE)) {
+  devtools::install_github("ScottCoffin/ToMEx2.0_EcoToxRisk", upgrade = "never", subdir = "package", build_vignettes = FALSE)
+}
+library(PSSDplusplus)
+```
+
+# 3. Load data
+
+## 3.1 Raw particle-length observations
+
+In practice, this would come from microscopy/Raman/FTIR particle measurements (a table of individual particles).  
+Here we simulate raw particle lengths for one freshwater site.
+
+```{r}
+n_particles <- 5000
+# Simulate a heavy-tailed particle length distribution (µm), bounded to 1–5000 µm
+raw_particles <- tibble(
+  particle_id = seq_len(n_particles),
+  length_um = pmin(pmax(rlnorm(n_particles, meanlog = log(120), sdlog = 1.0), 1), 5000),
+  shape = sample(c("fragment", "fiber"), n_particles, replace = TRUE, prob = c(0.8, 0.2))
+)
+
+summary(raw_particles$length_um)
+```
+
+## 3.2 Monitoring concentration observations (site replicates)
+
+Here we simulate monitoring replicate concentrations (particles/L) that were *reported for a limited size range* (e.g., 300–5000 µm typical of net tows).  
+
+```{r}
+monitoring <- tibble(
+  sample_id = paste0("S", sprintf("%02d", 1:40)),
+  # measured concentration for LOD=300 µm to 5000 µm (particles/L)
+  C_measured_pL = rlnorm(40, meanlog = log(0.12), sdlog = 0.9),
+  Lmin_measured_um = 300,
+  Lmax_measured_um = 5000
+)
+head(monitoring)
+```
+
+# 4. Step 1 — Derive power-law alpha via C-PSD (binned cumulative PSD)
+
+## 4.1 C-PSD fitting function (binned cumulative method)
+
+The C-PSD approach fits the **cumulative** particle size distribution (counts ≥ L) using **binned** data, which can yield more coherent slopes/intercepts than MLE on raw data in some datasets (see discussion contrasting MLE vs C-PSD in the draft manuscript).  
+
+Below is a minimal, transparent implementation aligned with the C-PSD method in the Segur et al. draft:
+
+- Bin particle lengths (default bin = 10 µm).
+- Compute cumulative counts `N(≥L)` using the **lower bin bound** (not the midpoint).
+- Fit a line on log-log scale: `log10 N(≥L) = a_cpsd * log10(L_low) + b_cpsd` over a chosen fitting range.
+- Use `a = a_cpsd - 1` to map to the corresponding *differential* PSD exponent.
+- Optionally apply the **bias-corrected lower size bound** method (MP#max rule) to define the lower fit limit.
+
+```{r}
+bin_psd <- function(length_um, bin_um = 10) {
+  stopifnot(all(is.finite(length_um)))
+  length_um <- length_um[length_um > 0]
+
+  # Start bins at the minimum observed size (rounded down) to avoid L=0 in the fit
+  min_edge <- floor(min(length_um, na.rm = TRUE) / bin_um) * bin_um
+  max_edge <- ceiling(max(length_um, na.rm = TRUE) / bin_um) * bin_um
+  if (max_edge <= min_edge) {
+    stop("Bin range too small for histogram.")
+  }
+  breaks <- seq(min_edge, max_edge, by = bin_um)
+
+  h <- hist(length_um, breaks = breaks, plot = FALSE)
+  tibble(
+    L_low = h$breaks[-length(h$breaks)],
+    L_high = h$breaks[-1],
+    L_mid = h$mids,
+    L_geom = sqrt(h$breaks[-length(h$breaks)] * h$breaks[-1]),
+    n = h$counts,
+    bin_width = h$breaks[-1] - h$breaks[-length(h$breaks)],
+    bn_psd = h$counts / (h$breaks[-1] - h$breaks[-length(h$breaks)])
+  )
+}
+
+# Bias-corrected lower size bound (MP#max rule)
+# If the BN-PSD peak is not in the smallest bin, treat that as evidence of low bias
+# and set L_lower_POD = 2 * geometric mean of the peak bin.
+infer_lower_pod <- function(bins) {
+  bins2 <- bins |>
+    filter(is.finite(L_low), L_low > 0, n > 0, is.finite(bn_psd))
+
+  if (nrow(bins2) == 0) {
+    return(list(L_lower_pod_um = NA_real_, bias_detected = FALSE, mpmax_bin = NULL))
+  }
+
+  bins2 <- bins2 |> arrange(L_low)
+  max_idx <- which.max(bins2$bn_psd)
+  bias_detected <- max_idx > 1
+  mpmax_bin <- bins2[max_idx, , drop = FALSE]
+
+  L_lower_pod_um <- if (bias_detected) {
+    2 * mpmax_bin$L_geom
+  } else {
+    min(bins2$L_low)
+  }
+
+  list(
+    L_lower_pod_um = as.numeric(L_lower_pod_um),
+    bias_detected = bias_detected,
+    mpmax_bin = mpmax_bin
+  )
+}
+
+# Upper LOD inference via tail-slump detection in C-PSD residuals
+infer_upper_lod <- function(df_cpsd,
+                            min_points = 6,
+                            tail_k = 4,
+                            run_k = 3,
+                            z = 1.5,
+                            N_min = 10,
+                            min_nonzero_tail = 3,
+                            require_slope_stability = FALSE,
+                            slope_tol = 0.08) {
+
+  df_cpsd <- df_cpsd |>
+    dplyr::arrange(L_low)
+
+  if (nrow(df_cpsd) < min_points) {
+    return(list(
+      L_upper_lod_um = max(df_cpsd$L_high, na.rm = TRUE),
+      flagged = FALSE,
+      diagnostics = NULL
+    ))
+  }
+
+  # candidates only from supported bins
+  candidates <- sort(unique(df_cpsd$L_high[df_cpsd$n > 0]))
+  candidates <- candidates[candidates > min(df_cpsd$L_low, na.rm = TRUE)]
+  if (length(candidates) == 0) {
+    return(list(
+      L_upper_lod_um = max(df_cpsd$L_high, na.rm = TRUE),
+      flagged = FALSE,
+      diagnostics = NULL
+    ))
+  }
+
+  results <- vector("list", length(candidates))
+  names(results) <- as.character(candidates)
+  prev_slope <- NA_real_
+
+  supported_max <- max(df_cpsd$L_high[df_cpsd$N_ge >= N_min], na.rm = TRUE)
+  hard_cap <- max(df_cpsd$L_high[df_cpsd$n > 0], na.rm = TRUE)
+  supported_max <- min(supported_max, hard_cap, na.rm = TRUE)
+  if (!is.finite(supported_max)) supported_max <- hard_cap
+
+  for (i in seq_along(candidates)) {
+    L_up <- candidates[length(candidates) - i + 1]  # descending
+    if (is.finite(supported_max) && L_up > supported_max) next
+    sub <- df_cpsd |> dplyr::filter(L_high <= L_up)
+
+    if (nrow(sub) < min_points) next
+
+    fit <- lm(log10(N_ge) ~ log10(L_low), data = sub)
+    r <- resid(fit)
+    sigma <- sd(r, na.rm = TRUE)
+
+    sub2 <- sub |>
+      dplyr::mutate(resid = r) |>
+      dplyr::arrange(L_low)
+    tail_df <- utils::tail(sub2, tail_k)
+
+    slump_flag <- FALSE
+    if (sum(tail_df$n > 0, na.rm = TRUE) < min_nonzero_tail) {
+      slump_flag <- TRUE
+    }
+    strong_neg <- tail_df$resid < (-z * sigma)
+    slump_flag <- slump_flag || (sum(strong_neg, na.rm = TRUE) >= run_k)
+
+    slope <- unname(coef(fit)[2])
+    stable_flag <- TRUE
+    if (require_slope_stability && is.finite(prev_slope)) {
+      stable_flag <- abs(slope - prev_slope) <= slope_tol
+    }
+
+    results[[as.character(L_up)]] <- list(
+      L_up = L_up,
+      n = nrow(sub),
+      slope = slope,
+      intercept = unname(coef(fit)[1]),
+      r2 = summary(fit)$r.squared,
+      sigma = sigma,
+      slump_flag = slump_flag,
+      stable_flag = stable_flag
+    )
+
+    if (!slump_flag && stable_flag) {
+      diag_df <- dplyr::bind_rows(lapply(results, function(x) {
+        if (is.null(x)) NULL else as.data.frame(x)
+      }))
+      return(list(
+        L_upper_lod_um = L_up,
+        flagged = TRUE,
+        diagnostics = diag_df
+      ))
+    }
+
+    prev_slope <- slope
+  }
+
+  fallback <- sort(unique(df_cpsd$L_high), decreasing = TRUE)
+  L_fallback <- if (length(fallback) >= 2) fallback[2] else fallback[1]
+  diag_df <- dplyr::bind_rows(lapply(results, function(x) {
+    if (is.null(x)) NULL else as.data.frame(x)
+  }))
+
+  list(
+    L_upper_lod_um = L_fallback,
+    flagged = TRUE,
+    diagnostics = diag_df
+  )
+}
+
+fit_cpsd <- function(length_um,
+                     bin_um = 10,
+                     fit_range_um = c(NA, NA),
+                     lower_pod_method = c("mpmax", "none"),
+                     upper_lod_method = c("tail_resid", "none"),
+                     min_points = 5,
+                     upper_min_points = 6,
+                     tail_k = 4,
+                     run_k = 3,
+                     z = 1.5,
+                     N_min = 10,
+                     min_nonzero_tail = 3,
+                     require_slope_stability = FALSE,
+                     slope_tol = 0.08) {
+
+  lower_pod_method <- match.arg(lower_pod_method)
+  upper_lod_method <- match.arg(upper_lod_method)
+  bins <- bin_psd(length_um, bin_um = bin_um)
+
+  lower_pod <- list(L_lower_pod_um = NA_real_, bias_detected = FALSE, mpmax_bin = NULL)
+  if (lower_pod_method == "mpmax") {
+    lower_pod <- infer_lower_pod(bins)
+  }
+
+  # Default fit range: start at bias-corrected lower POD (if defined), end at max bin high
+  fit_range_um <- fit_range_um
+  if (is.na(fit_range_um[1])) {
+    fit_range_um[1] <- if (is.finite(lower_pod$L_lower_pod_um)) {
+      lower_pod$L_lower_pod_um
+    } else {
+      min(bins$L_low[bins$L_low > 0], na.rm = TRUE)
+    }
+  }
+  if (is.na(fit_range_um[2])) {
+    fit_range_um[2] <- max(bins$L_high, na.rm = TRUE)
+  }
+
+  df0 <- bins |>
+    arrange(L_low) |>
+    mutate(N_ge = rev(cumsum(rev(n)))) |>
+    filter(L_low > 0,
+           L_low >= fit_range_um[1],
+           N_ge > 0)
+
+  upper_lod <- list(L_upper_lod_um = fit_range_um[2], flagged = FALSE, diagnostics = NULL)
+  if (upper_lod_method == "tail_resid") {
+    upper_lod <- infer_upper_lod(
+      df_cpsd = df0,
+      min_points = upper_min_points,
+      tail_k = tail_k,
+      run_k = run_k,
+      z = z,
+      N_min = N_min,
+      min_nonzero_tail = min_nonzero_tail,
+      require_slope_stability = require_slope_stability,
+      slope_tol = slope_tol
+    )
+    fit_range_um[2] <- min(fit_range_um[2], upper_lod$L_upper_lod_um, na.rm = TRUE)
+  }
+
+  df <- df0 |>
+    filter(L_high <= fit_range_um[2])
+
+  if (nrow(df) < min_points) {
+    stop("Not enough bins in the fit range to fit the C-PSD model.")
+  }
+
+  # Linear fit in log-log space for the cumulative distribution
+  fit <- lm(log10(N_ge) ~ log10(L_low), data = df)
+  coefs <- coef(fit)
+  fit_summ <- summary(fit)
+  se_a_cpsd <- unname(fit_summ$coefficients["log10(L_low)", "Std. Error"])
+  se_b_cpsd <- unname(fit_summ$coefficients["(Intercept)", "Std. Error"])
+
+  a_cpsd <- unname(coefs[2])
+  b_cpsd <- unname(coefs[1])      # intercept of log10(N_ge)
+  b_cpsd_lin <- 10^b_cpsd         # b' in N_ge = b' * L^(a')
+  a_psd <- a_cpsd - 1             # a' = a + 1
+  b_psd <- -b_cpsd_lin * a_cpsd   # b = -b' * (a + 1) = -b' * a'
+
+  list(
+    data = df,
+    bins = bins,
+    fit = fit,
+    fit_range_um = fit_range_um,
+    lower_pod_um = lower_pod$L_lower_pod_um,
+    lower_pod_bias_detected = lower_pod$bias_detected,
+    mpmax_bin = lower_pod$mpmax_bin,
+    upper_lod_um = upper_lod$L_upper_lod_um,
+    upper_lod_diagnostics = upper_lod$diagnostics,
+    a_cpsd = a_cpsd,          # slope in log10 N_ge vs log10 L_low
+    b_cpsd = b_cpsd,          # log10 intercept for N_ge
+    se_a_cpsd = se_a_cpsd,    # Std. Error of a_cpsd
+    se_b_cpsd = se_b_cpsd,    # Std. Error of b_cpsd (log10 scale)
+    b_cpsd_lin = b_cpsd_lin,  # linear intercept b'
+    a_psd = a_psd,            # differential exponent
+    se_a_psd = se_a_cpsd,     # same as se_a_cpsd (shift by -1 doesn't change SE)
+    b_psd = b_psd             # differential intercept
+  )
+}
+```
+
+## 4.2 Fit C-PSD to the example raw particle data
+
+```{r}
+cpsd_fit_frag <- fit_cpsd(raw_particles |> filter(shape == "fragment") |> pull(length_um),
+                          bin_um = 10,
+                          fit_range_um = c(NA, 2000),
+                          lower_pod_method = "mpmax")
+
+cpsd_fit_fiber <- fit_cpsd(raw_particles |> filter(shape == "fiber") |> pull(length_um),
+                           bin_um = 10,
+                           fit_range_um = c(NA, 2000),
+                           lower_pod_method = "mpmax")
+
+cpsd_fit_frag$a_psd
+cpsd_fit_fiber$a_psd
+cpsd_fit_frag$lower_pod_um
+cpsd_fit_fiber$lower_pod_um
+```
+
+```{r}
+plot_cpsd <- function(fit_obj, title = "") {
+  df <- fit_obj$data
+  ggplot(df, aes(x = log10(L_low), y = log10(N_ge))) +
+    geom_point(alpha = 0.7) +
+    geom_abline(intercept = fit_obj$b_cpsd, slope = fit_obj$a_cpsd) +
+    labs(
+  title = title,
+  x = expression(log[10] * (Length~","~mu*m)),
+  y = expression(log[10] * (Cumulative~count~","~N(geq~L)))
+)
+
+}
+plot_cpsd(cpsd_fit_frag, "C-PSD fit — fragments") 
+plot_cpsd(cpsd_fit_fiber, "C-PSD fit — fibers")
+```
+
+## 4.3 Convert alpha to a *distribution* for Monte Carlo propagation
+
+Following the probabilistic rescaling approach (e.g., Coffin et al. 2022), treat alpha as uncertain and represent it by a distribution (commonly normal, truncated to plausible bounds).  
+
+Here we:
+- Take the fitted `a_psd` (differential exponent) as the mean.
+- Use a user-specified SD (or derive it from regression SE, or from literature priors).
+- Truncate to a plausible range (e.g., [-6, -1.1]) so integrals converge.
+
+```{r}
+alpha_dist <- function(mu, sd, n = 10000, lower = -6, upper = -1.1) {
+  truncnorm::rtruncnorm(n, a = lower, b = upper, mean = mu, sd = sd)
+}
+
+alpha_frag <- alpha_dist(
+  mu = cpsd_fit_frag$a_psd,
+  sd = ifelse(is.finite(cpsd_fit_frag$se_a_psd), cpsd_fit_frag$se_a_psd, 0.25),
+  n = 20000
+)
+alpha_fiber <- alpha_dist(
+  mu = cpsd_fit_fiber$a_psd,
+  sd = ifelse(is.finite(cpsd_fit_fiber$se_a_psd), cpsd_fit_fiber$se_a_psd, 0.25),
+  n = 20000
+)
+summary(alpha_frag)
+```
+
+# 5. Step 2 — Rescale measured concentrations to a common size range
+
+## 5.1 Power-law integration for rescaling factors
+
+If the **differential PSD** follows `dN/dL = k * L^a`, then the concentration in a size interval `[L1, L2]` is proportional to:
+
+`N(L1, L2) = k/(a+1) * (L2^(a+1) - L1^(a+1))` (for `a != -1`).
+
+Thus the **rescaling factor** to convert a measured size range to a target range is:
+
+`CF = N(L_target_min, L_target_max) / N(L_meas_min, L_meas_max)`.
+
+```{r}
+rescale_factor <- function(a, L_meas_min, L_meas_max, L_tar_min, L_tar_max) {
+  stopifnot(a < -1)  # ensure convergence for extrapolations to small L
+  num <- (L_tar_max^(a+1) - L_tar_min^(a+1)) / (a+1)
+  den <- (L_meas_max^(a+1) - L_meas_min^(a+1)) / (a+1)
+  num / den
+}
+
+# Bias-corrected lower POD bound (Segur et al. draft, MP#max rule)
+# Replace the reported Lmin with a bias-corrected L_lower_POD when the BN-PSD shows
+# low-bias at small sizes.
+monitoring <- monitoring |>
+  mutate(
+    Lmin_biascorr_um = pmax(Lmin_measured_um, cpsd_fit_frag$lower_pod_um, na.rm = TRUE)
+  )
+
+L_meas_min_use <- median(monitoring$Lmin_biascorr_um, na.rm = TRUE)
+L_meas_max_use <- median(monitoring$Lmax_measured_um, na.rm = TRUE)
+
+# Example: convert net-tow-like 300–5000 µm to 1–5000 µm using alpha_frag draws
+cf_rescale <- rescale_factor(
+  a = alpha_frag,
+  L_meas_min = L_meas_min_use, L_meas_max = L_meas_max_use,
+  L_tar_min  = 1,   L_tar_max  = 5000
+)
+
+quantile(cf_rescale, c(0.05, 0.5, 0.95))
+```
+
+## 5.2 Optional additional bias terms as probability distributions
+
+Illustrative examples mirroring Coffin et al. 2022:
+- A **fiber correction factor** (often right-skewed; can be fit in log space),
+- A **plastic proportion factor** (0–1; beta distribution; truncated at 1),
+- Multiply factors to obtain a **combined correction factor**.
+
+Here we simulate these terms; in an analysis you would fit them to data.
+
+```{r}
+n_mc <- 20000
+
+# Simulated multiplicative factors (replace with your fitted distributions)
+fiber_cf   <- rlnorm(n_mc, meanlog = log(2.0), sdlog = 0.5)      # >1
+plastic_pf <- pmin(rbeta(n_mc, shape1 = 20, shape2 = 3), 1.0)   # 0–1
+
+combined_cf <- cf_rescale * fiber_cf * plastic_pf
+quantile(combined_cf, c(0.05, 0.5, 0.95))
+```
+
+## 5.3 Apply probabilistic correction to monitoring data
+
+We treat each monitoring sample's corrected concentration as:
+
+`C_corrected = C_measured * combined_cf_draw`, with `combined_cf_draw` sampled in Monte Carlo.
+
+This yields a **distribution per monitoring sample**, and a pooled exposure distribution across samples.
+
+```{r}
+# For simplicity, assume the same CF distribution applies to each sample.
+# If CF depends on site/method/shape, build CF distributions per strata and apply accordingly.
+
+C_corrected_draws <- monitoring |>
+  mutate(idx = row_number()) |>
+  tidyr::crossing(draw = 1:3000) |>
+  mutate(
+    cf = sample(combined_cf, size = n(), replace = TRUE),
+    C_corrected_pL = C_measured_pL * cf
+  )
+
+C_corrected_draws |>
+  summarise(p05 = quantile(C_corrected_pL, 0.05),
+            p50 = quantile(C_corrected_pL, 0.50),
+            p95 = quantile(C_corrected_pL, 0.95))
+```
+
+# 6. Step 3 — Environmental Exposure Distribution (EED) via empirical bootstrap
+
+Because environmental monitoring data are typically sparse and highly skewed, a **nonparametric bootstrap** is often a strong default:
+
+- Resample (with replacement) the corrected sample-level concentrations.
+- Compute the empirical CDF and desired percentiles per bootstrap replicate.
+- This avoids heavy reliance on a parametric distribution family selection for EEDs.
+
+```{r}
+bootstrap_eed <- function(x, n_boot = 5000, probs = c(0.5, 0.95)) {
+  x <- x[is.finite(x)]
+  stopifnot(length(x) >= 5)
+  boot_stats <- replicate(n_boot, {
+    xb <- sample(x, size = length(x), replace = TRUE)
+    as.numeric(quantile(xb, probs = probs, names = FALSE))
+  })
+  boot_df <- as.data.frame(t(boot_stats))
+  names(boot_df) <- paste0("q", probs*100)
+  boot_df
+}
+
+# Use one corrected draw per sample (to isolate EED uncertainty from correction-factor uncertainty),
+# then optionally repeat over CF draws as a second uncertainty layer.
+# Here we "collapse" each sample to its median corrected value, then bootstrap across samples.
+C_sample_median <- C_corrected_draws |>
+  group_by(sample_id) |>
+  summarise(C_corr_med = median(C_corrected_pL), .groups = "drop")
+
+eed_boot <- bootstrap_eed(C_sample_median$C_corr_med, n_boot = 3000, probs = c(0.5, 0.95))
+summary(eed_boot)
+```
+
+```{r}
+# Visualize the bootstrap uncertainty in EED percentiles
+eed_boot |>
+  tidyr::pivot_longer(cols = everything(), names_to = "stat", values_to = "value") |>
+  ggplot(aes(x = value)) +
+  geom_histogram(bins = 40) +
+  facet_wrap(~stat, scales = "free") +
+  labs(x = "particles/L", y = "count", title = "Empirical bootstrap distributions of EED percentiles")
+```
+
+# 7. Step 4 — Bespoke hazard thresholds using pSSD++ (ToMEx2.0_EcoToxRisk)
+
+## 7.1 Example toxicity dataset
+
+In a real workflow, you would start with aligned toxicity records (e.g., ToMEx 2.0 records aligned to an ERM using bioaccessibility models and particle traits).  
+Here we simulate a small toxicity dataset with multiple observations per species.
+
+```{r}
+tox <- tibble(
+  species = rep(paste0("sp_", 1:25), each = 4),
+  endpoint = sample(c("NOEC", "EC10", "LOEC"), 25*4, replace = TRUE, prob = c(0.6, 0.3, 0.1)),
+  # toxicity values already in a common ERM (e.g., particles/L aligned to exposure pathway)
+  effect_value = rlnorm(25*4, meanlog = log(50), sdlog = 0.8)
+)
+
+tox |> group_by(species) |> summarise(n = n(), med = median(effect_value)) |> head()
+```
+
+## 7.2 Derive a pSSD++ hazard threshold distribution
+
+The exact exported function names depend on the package implementation. The code block below:
+- attempts to call a function named `PSSDplusplus_threshold()` if it exists;
+- otherwise, it falls back to an **illustrative pSSD-like** approach (empirical species distributions + Monte Carlo over species means),
+  so the rest of the document remains executable.
+
+Replace the “fallback” portion with the package’s actual function call once you confirm the API.
+
+```{r}
+derive_pssdpp_threshold <- function(tox_df, hcx = 0.05, n_sim = 2000) {
+  # If the package exposes a threshold function, use it.
+  # You can inspect available exported objects with:
+  # ls("package:<your_pkg_name>")
+  if (pssd_pkg_loaded) {
+    exported <- try(getNamespaceExports(pssd_pkg_name), silent = TRUE)
+    if (!inherits(exported, "try-error")) {
+      if ("PSSDplusplus_threshold" %in% exported) {
+        fn <- get("PSSDplusplus_threshold", envir = asNamespace(pssd_pkg_name))
+        return(fn(tox_df, hcx = hcx, n_sim = n_sim))
+      }
+    }
+  }
+
+  # --- Fallback: empirical species-level Monte Carlo (pSSD-like) ---
+  # 1) Build species-level empirical distributions
+  sp_list <- split(tox_df$effect_value, tox_df$species)
+
+  # 2) For each sim: draw one value per species, compute HCx empirically
+  hc <- replicate(n_sim, {
+    draws <- vapply(sp_list, function(v) sample(v, 1), numeric(1))
+    as.numeric(quantile(draws, probs = hcx, names = FALSE))
+  })
+  tibble(HCx = hc)
+}
+
+haz <- derive_pssdpp_threshold(tox, hcx = 0.05, n_sim = 3000)
+haz |> summarise(p05 = quantile(HCx, 0.05), p50 = quantile(HCx, 0.5), p95 = quantile(HCx, 0.95))
+```
+
+```{r}
+ggplot(haz, aes(x = HCx)) +
+  geom_histogram(bins = 50) +
+  labs(x = "HC5 (particles/L)", y = "count", title = "Hazard threshold distribution (HC5)")
+```
+
+# 8. Step 5 — Risk characterization using joint distributions (Monte Carlo)
+
+We now combine:
+- **Exposure**: bootstrap distribution (e.g., EED 95th percentile) or full empirical sample distribution.
+- **Hazard**: pSSD++-derived HC5 distribution.
+
+A common probabilistic risk metric is:
+- **Risk Quotient (RQ)**: `RQ = Exposure / Hazard`.
+- **Probability of exceedance**: `P(RQ > 1)`.
+
+Below we compute RQ using:
+- exposure = `EED q95` from bootstrap (one draw per iteration)
+- hazard = `HC5` from hazard distribution
+
+```{r}
+n_risk <- 10000
+E_draw <- sample(eed_boot$q95, n_risk, replace = TRUE)
+H_draw <- sample(haz$HCx, n_risk, replace = TRUE)
+
+RQ <- E_draw / H_draw
+
+risk_summary <- tibble(RQ = RQ) |>
+  summarise(
+    P_exceed = mean(RQ > 1),
+    RQ_p50 = median(RQ),
+    RQ_p95 = quantile(RQ, 0.95),
+    RQ_p99 = quantile(RQ, 0.99)
+  )
+
+risk_summary
+```
+
+```{r}
+ggplot(tibble(RQ = RQ), aes(x = RQ)) +
+  geom_histogram(bins = 60) +
+  scale_x_log10() +
+  labs(x = "Risk Quotient (Exposure / Hazard) [log10 scale]", y = "count",
+       title = "Monte Carlo risk quotient distribution")
+```
+
+# 9. Extensions you will likely want in the real analysis
+
+1. **Stratify particle traits** (shape/polymer/size bins) and propagate through ERM alignments (freshwater environment-specific trait distributions).
+2. **Treat censoring / non-detects** explicitly (e.g., survival models or multiple imputation), then bootstrap.
+3. **Two-dimensional Monte Carlo (MC2D)** to separately handle:
+   - *uncertainty* (e.g., correction factors, hazard model uncertainty),
+   - *variability* (true spatial/temporal variability in exposure).
+4. **Sensitivity analysis** to identify dominant uncertainty contributors (e.g., alpha, plastic proportion, analytical recovery).
