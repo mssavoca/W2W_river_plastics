@@ -26,8 +26,7 @@ custom_palette <- c(
 #####Bring in data from other proj----
 
 #large microplastics----
-
-large_MPs_summ <- readRDS("../W2W_MBNMS/Opt_micro_all_cut.rds")
+large_MPs_summ <- readRDS("data_input/Opt_micro_all_cut.rds")
 
 river_MPs_summ <- large_MPs_summ %>% 
   filter(sample_type == "river water") %>% 
@@ -45,7 +44,7 @@ river_MPs_summ <- large_MPs_summ %>%
 large_MPs_river_dets_master <- bind_rows(
   
   # ---- River + field blank detections
-  readRDS("../W2W_MBNMS/Opt_micro_river_dets_cut.rds") %>%
+  readRDS("data_input/Opt_micro_river_dets_cut.rds") %>%
     mutate(
       Morphology = case_when(
         Morphology %in% c("Fiber", "Fiber Clump", "fiber", "fiber clump", "Fibers", "fibers") ~ "fiber",
@@ -112,9 +111,9 @@ large_MPs_river_dets_master <- bind_rows(
 
 
 # Small microplastics----
-Part_dets_comb <- readRDS("../W2W_MBNMS/Part_dets_comb.rds")
+Part_dets_comb <- readRDS("data_input/Part_dets_comb.rds")
 
-Part_dets_summ <- readRDS("../W2W_MBNMS/Part_dets_summ.rds")
+Part_dets_summ <- readRDS("data_input/Part_dets_summ.rds")
 
 
 
