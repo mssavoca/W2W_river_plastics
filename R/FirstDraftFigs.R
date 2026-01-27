@@ -1,7 +1,5 @@
 # Main Figure drafts ----
-
-
-source("Util.R")
+source("R/Util.R")
 
 library(dplyr)
 library(lubridate)
@@ -180,7 +178,7 @@ p_small
 # 
 # 
 ggsave(
-  filename = "river_small particle_flow_dual_axis_vert.png",
+  filename = "figures/river_small_particle_flow_dual_axis_vert.png",
   plot = p_small,
   width = 6,
   height = 8,
@@ -338,7 +336,7 @@ p_large_vert
 # 
 # 
 ggsave(
-  filename = "river_large particle_flow_dual_axis_vert.png",
+  filename = "figures/river_large_particle_flow_dual_axis_vert.png",
   plot = p_large_vert,
   width = 5,
   height = 8,
@@ -412,7 +410,7 @@ bp_river_material
 
 
 ggsave(
-  filename = "boxplot by river and material.pdf",
+  filename = "figures/boxplot_by_river_and_material.pdf",
   plot = bp_river_material,
   device = "pdf",
   width = 7,
@@ -528,7 +526,7 @@ v
 
 
 ggsave(
-  filename = "small plastics by river.pdf",
+  filename = "figures/small_plastics_by_river.pdf",
   plot = v,
   device = "pdf",
   width = 7,
@@ -634,7 +632,7 @@ w
 
 
 ggsave(
-  filename = "small plastics by blanks.pdf",
+  filename = "figures/small_plastics_by_blanks.pdf",
   plot = w,
   device = "pdf",
   width = 3.35,
@@ -756,7 +754,7 @@ p_poly_bar
 
 
 ggsave(
-  filename = "small polymers by depth_bar.pdf",
+  filename = "figures/small_polymers_by_depth_bar.pdf",
   plot = p_poly_bar,
   device = "pdf",
   width = 9.5,
@@ -804,19 +802,12 @@ Part_dets_summ_river2$river <- factor(
   levels = c("San Lorenzo", "Pajaro", "Salinas", "Carmel")
 )
 
-
-library(dplyr)
-library(lubridate)
-
 start_date <- ymd("2023-11-15")
 end_date   <- ymd("2024-05-15")
 
 # Flow data restricted to window
 flow_win <- flow_scaled %>%
   filter(date >= start_date, date <= end_date)
-
-library(dplyr)
-library(lubridate)
 
 storm_windows <- tibble(
   river = factor(
@@ -915,7 +906,7 @@ p_MP_flow_yr1
 
 
 ggsave(
-  filename = "p_MP_flow_yr1.pdf",
+  filename = "figures/p_MP_flow_yr1.pdf",
   plot = p_MP_flow_yr1,
   device = "pdf",
   width = 4,
@@ -994,7 +985,7 @@ First_flush_flux
 
 
 ggsave(
-  filename = "First flush flux.pdf",
+  filename = "figures/First_flush_flux.pdf",
   plot = First_flush_flux,
   device = "pdf",
   width = 4,
