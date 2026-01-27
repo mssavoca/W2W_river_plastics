@@ -1,0 +1,4404 @@
+1
+
+Title: Using the power law size distribution to extrapolate and compare microplastic
+
+2
+
+number and mass concentrations in environmental media
+
+3
+
+Key words: Contaminant, pollution, alignment, harmonization, atmosphere, ocean, soil,
+
+4
+
+sediment, biota, seawater, freshwater, risk, nanoplastic, macroplastic
+
+5
+
+Théo Segur1*, Ian Hough2, Nela Dobiasova2, Didier Voisin2, Camille Richon3, Hélène Angot2,
+
+6
+
+Jennie L. Thomas2, Jeroen E. Sonke1*
+
+7
+
+1
+
+8
+
+France.
+
+9
+
+2
+
+Univ. Grenoble Alpes, CNRS, IRD, Grenoble INP, IGE, Grenoble, France.
+
+10
+
+3
+
+Laboratoire des sciences de l'Environnement Marin, CNRS, IRD, Ifremer, Université de Brest,
+
+11
+
+Plouzané, France
+
+Géosciences Environnement Toulouse, CNRS/IRD/Université de Toulouse, 31400 Toulouse,
+
+12
+13
+
+*Corresponding authors: jeroen.sonke@cnrs.fr, theo.segur@get.omp.eu
+
+14
+15
+
+ABSTRACT
+
+16
+
+Microplastic (MP) number concentrations in the environment increase exponentially with
+
+17
+
+decreasing particle size. Studies reporting environmental MP concentrations typically do so for
+
+18
+
+variable MP size ranges, depending on sampling, processing and analytical detection methods.
+
+19
+
+This leads to difficulties in intercomparison and extrapolation of studies, which is critical for
+
+20
+
+data reviews, plastic dispersion modeling, and environmental and human health risk
+
+21
+
+assessment. In this study, we summarize the current understanding of the MP particle size
+
+22
+
+distribution (PSD), based on the power law model. We highlight how standard linear regression
+
+23
+
+of the power law slope is strongly biased by data binning, and show that fitting a cumulative
+
+24
+
+PSD (C-PSD) removes the binning bias. The existing MP size-alignment framework is
+1
+
+25
+
+extended to C-PSDs to extrapolate observed MP number and mass concentrations to the full
+
+26
+
+MP size range (1 to 5000 µm, noted MP1-5000µm), or any other sub-size range. We confront the
+
+27
+
+C-PSD power law model with 62 published ocean and atmosphere PSDs from the literature,
+
+28
+
+compiled in the MPsizeBase open access database. Fitted power law slopes for fragments (-
+
+29
+
+2.76±0.62) are steeper than for fibers (-1.84±0.38), reflecting fragmentation dimensionality.
+
+30
+
+Among MP fragments, PSD slopes do not vary significantly between the atmosphere, surface
+
+31
+
+and subsurface ocean. We further demonstrate that the large discrepancy between surface ocean
+
+32
+
+MP concentrations measured by net tows and discrete, pumped samples arise primarily from
+
+33
+
+their different minimum detectable sizes. After aligning datasets to a common size range,
+
+34
+
+fragment concentrations converge to within a factor of 10. In contrast, fiber concentrations from
+
+35
+
+net tows remain lower than those from pumped samples, consistent with sampling losses and
+
+36
+
+detection limitations for elongated particles. Across all 62 MP PSD datasets analysed, size-
+
+37
+
+aligned 𝑀𝑃1−5000µ𝑚 number and mass concentrations are respectively 600x and 3x higher than
+
+38
+
+reported concentrations, reflecting the high abundance of small particles predicted by the power
+
+39
+
+law PSD. Together, these findings highlight that size extrapolation to a common range is
+
+40
+
+essential to intercompare datasets and to distinguish environmental patterns from
+
+41
+
+methodological artifacts.
+
+42
+43
+
+INTRODUCTION
+
+44
+
+Microplastics (MPs) are typically defined as plastic particles with length ranging from 1 to
+
+45
+
+5,000 µm (Thompson et al., 2024). However, observations of MPs in the environment rarely
+
+46
+
+cover this formal size range. More specifically, each combination of sampling and analytical
+
+47
+
+detection methods permits quantification of a certain MP size range. In the surface ocean, a
+
+48
+
+typical method for sampling MP is by plankton, neuston or manta net tows with a mesh size of
+
+2
+
+49
+
+around 300–330 µm retaining large MP above this cutoff. In air, high volume samplers can
+
+50
+
+filter the thousands of m3 needed to retrieve larger airborne MP. Initially, large MP
+
+51
+
+identification in net tows or on high volume filter samples was done by manual sorting and
+
+52
+
+counting under optical microscopes (Hidalgo-Ruz et al., 2012). The subsequent use of
+
+53
+
+analytical tools such as spectroscopy and mass spectrometry has enabled the quantification of
+
+54
+
+ever smaller MP particles sampled with smaller net mesh down to 25 µm or pumped filtration
+
+55
+
+down to 10, 5, or even <1 µm. FTIR protocols have been developed to determine the number
+
+56
+
+of MPs and identify polymers down to 10–20 µm (Nava et al., 2021; Rathore et al., 2023).
+
+57
+
+Raman spectroscopy techniques lowered the limit of MP detection down to 1–2 µm (Nava et
+
+58
+
+al., 2021). Finally, pyrolysis-gas chromatography-MS can identify and quantify the mass of all
+
+59
+
+MP sizes, including nanoplastics (NPs) smaller than 1 µm; however, it does not provide detailed
+
+60
+
+information on MP or NP particle size distribution. Since smaller MP (< 25 µm) are far more
+
+61
+
+abundant than larger MP, smaller sample amounts are generally needed to observe them,
+
+62
+
+permitting the use of in situ pumps of Niskin bottles to explore the deep ocean, and low volume
+
+63
+
+airborne pumped samples to achieve daily time resolution. The observed MP size range for each
+
+64
+
+sampling and detection method combination is dictated by the limit of detection (LOD) of the
+
+65
+
+specific methods on the lower end, or by the sample volume and occurrence of less abundant,
+
+66
+
+larger MPs on the higher end.
+
+67
+
+The variability in reported MP size ranges, alongside the exponential increase in MP
+
+68
+
+count with decreasing MP size, complicates MP concentration intercomparison. Studies
+
+69
+
+reporting an abundance of small MPs cannot be directly compared to those reporting a smaller
+
+70
+
+number of larger MPs, as the difference in MP concentration reflects the underlying exponential
+
+71
+
+particle size distribution (PSD) rather than the actual level of MP pollution. To make robust
+
+72
+
+comparisons of MP pollution in the environment, MP data must be expressed on the same
+
+73
+
+number or mass concentration scale, i.e. over the same particle size range. This is crucial for
+
+3
+
+74
+
+any concentration comparison, whether for estimating the mass balance of MPs in the
+
+75
+
+environment, conducting risk assessment analyses, or determining environmentally relevant
+
+76
+
+concentrations for exposure experiments.
+
+77
+
+Microscopy-based studies have repeatedly shown the exponentially increasing number
+
+78
+
+of MP particles with decreasing size. The power law is the most commonly used model to
+
+79
+
+describe the PSD of environmental MP, as first reported by Cózar et al. (2014) for global surface
+
+80
+
+ocean MP observations. Since then, this model has been used to describe PSDs of MPs in water,
+
+81
+
+sediment, soil, the atmosphere, and biota (Cózar et al., 2014; Kaandorp et al., 2021, 2023; Kooi
+
+82
+
+et al., 2021; Kooi and Koelmans, 2019; Yakovenko et al., 2025). A formal PSD analysis
+
+83
+
+framework based on the power law has been proposed and used to intercompare PSDs and
+
+84
+
+extrapolate MP concentration data to default MP size ranges (Kooi et al., 2021; Kooi and
+
+85
+
+Koelmans, 2019). This framework has been employed in human risk assessments (Koelmans
+
+86
+
+et al., 2020; Yakovenko et al., 2025) and marine MP mass balance studies (Kaandorp et al.,
+
+87
+
+2021). However, complications arise for PSDs that aggregate MP counts in binned histograms.
+
+88
+
+Binned MP size histograms, reported by the majority of studies, lead to biased power law fits
+
+89
+
+that depend on bin size (Leusch et al., 2023). As most studies do not provide their raw data, i.e.
+
+90
+
+the size of each observed MP particle, wider use of the power law model to extrapolate and
+
+91
+
+size-align MP concentrations is not possible.
+
+92
+
+Building on previous research (Kooi et al., 2021; Kooi and Koelmans, 2019; Leusch et
+
+93
+
+al., 2023), in this study we examine bias in power law fitting due to variations in reported PSD
+
+94
+
+bin size and propose and validate a new approach to fitting cumulative PSD data that removes
+
+95
+
+binning bias. We propose a framework for extrapolating observed microplastic (MP) number
+
+96
+
+and mass concentrations over a restricted range to any MP size range of choice (e.g. the usual
+
+97
+
+1–5000 µm MP size range). To this end, we utilise the recently compiled MPsizeBase database
+
+98
+
+(Sonke et al., 2025b), comprising 40 microscopy studies reporting 62 MP PSDs, and 113 MP
+4
+
+99
+
+concentration data points for fibres and fragments in various environmental compartments,
+
+100
+
+including the atmosphere (both indoor and outdoor), the surface ocean, and the deep ocean. We
+
+101
+
+confront these PSDs with the power law model to gain insight into methodological artifacts,
+
+102
+
+plastic fragmentation and particle size sorting processes. Finally, we examine PSD and size-
+
+103
+
+aligned MP concentration variability in the natural environment.
+
+104
+
+The remainder of this paper is structured as follows. We first introduce the theoretical
+
+105
+
+basis of power law PSDs and their relevance for microplastic fragmentation (Sect. 1). We then
+
+106
+
+describe how microplastic concentrations and PSDs from different studies can be
+
+107
+
+intercompared (Sect. 2), before examining how binning choices introduce systematic bias in
+
+108
+
+power law fitting (Sect. 3). Using reference datasets, we introduce and validate an alternative
+
+109
+
+approach to PSD fitting that removes binning bias. We subsequently address the conversion of
+
+110
+
+MP number concentrations to mass concentrations (Sect. 4). Building on this methodological
+
+111
+
+framework, we analyze environmental MP PSDs, focusing on the influence of detection limits,
+
+112
+
+sampling strategies, and analytical methods on PSD properties (Sect. 5). Finally, we apply our
+
+113
+
+approach to extrapolate and intercompare environmental MP concentrations across common
+
+114
+
+size ranges (Sect. 6) and discuss extrapolation strategies that do not rely on cumulative PSD
+
+115
+
+fitting (Sect. 7).
+
+116
+
+5
+
+117
+118
+
+Figure 1: Fractal plastic fragmentation model that produces ever smaller plastic and
+
+119
+
+eventually microplastic (MP) particles, assuming that plastic breaks into smaller pieces in a
+
+120
+
+self-similar manner, i.e., the size distribution follows a power law. a) Three MP shapes of
+
+121
+
+simplified dimension, d, are considered: fibers (d=1), sheets, representing bottles, containers,
+
+122
+
+bags, mulch and wrappings (d=2), and fragments, representing various 3-dimensional debris
+
+123
+
+(d=3). Nn is the number of particles of size Ln. N0 and L0 is the initial number and size of the
+
+124
+
+particles, respectively. b) Particle size distributions for fiber, film and fragment shapes. Image
+
+125
+
+and model inspired by Cózar et al., 2014; Kaandorp et al., 2021; Turcotte, 1986.
+
+126
+127
+128
+
+6
+
+129
+
+1. Power law theory
+
+130
+
+Natural and engineered materials fragment due to weakening of molecular surface structure by
+
+131
+
+UV radiation, and chemical or enzymatic oxidation, followed by erosion along microcracks
+
+132
+
+which is accelerated by physical abrasion and temperature oscillations. Such fragmentation of
+
+133
+
+large plastic objects and debris produces smaller plastic particles, including MP and
+
+134
+
+nanoplastic. The particle size distribution (PSD) of MP particles often follows a particular
+
+135
+
+statistical relationship (the probability density function) between particle size, L (length), and
+
+136
+
+abundance, N (number), called a power law (Kaandorp et al., 2021; Kooi and Koelmans, 2019;
+
+137
+
+Leusch et al., 2023). The power law probability density function is:
+𝑁(𝐿) = 𝑏. 𝐿𝑎
+
+138
+
+Eq.(1)
+
+139
+
+where 𝑎 and 𝑏 are the slope and the intercept of the power law model, respectively. In a log-
+
+140
+
+log space, Eq.(1) describes a straight line of slope 𝑎 and intercept 𝑙𝑜𝑔(𝑏).
+
+141
+
+To understand why the power law appears during fragmentation processes, we build a
+
+142
+
+simplified MP fractal fragmentation model based on Kaandorp et al., 2021 (Kaandorp et al.,
+
+143
+
+2021). Figure 1.a illustrates the repeated fragmentation of three simplified plastic shapes of
+
+144
+
+dimension d: fibers (d=1), sheets, representing bottles, containers, bags, mulch and wrappings
+
+145
+
+(d=2), and fragments, representing various 3-dimensional debris (d=3). At each fragmentation
+
+146
+
+step, the main length of the particles is divided by f=2, and the number of plastic particles
+
+147
+
+increases exponentially in order to keep the total volume (and mass) of plastic constant.
+
+148
+
+Because the volume expressions for fibers, sheets and fragments are proportional to L, L2 and
+
+149
+
+L3 respectively, the number of particles during fragmentation increases faster for fragments,
+
+150
+
+than for sheets, than for fibers with decreasing particle size. This can be visualized by plotting
+
+151
+
+log(N) as a function of log(L) (Figure 1.b), which linearizes the power law so that the exponent
+
+152
+
+a can be estimated from the linearized slope. Under these idealized fragmentation
+
+7
+
+153
+
+circumstances, the slope coefficient for the fiber (a = -1), sheet (a = -2), and fragment (a = -3)
+
+154
+
+PSD corresponds to the dimension of the shape, d. Note that the power law distribution holds
+
+155
+
+for any fragmentation factor f >1.
+
+156
+
+Table 1. Fictional MP fragmentation example. Four samples are considered (Frag 1, Frag 2,
+
+157
+
+Film, and Fiber), corresponding to the 3 MP shapes considered in this study (fiber dimension,
+
+158
+
+d=1, film d=2 and fragment d=3). A particle size distribution (PSD) for each sample was
+
+159
+
+generated following the power law distribution in Eq.(1) with b=106 and a=-d. Each PSD is
+
+160
+
+deliberately sampled in a different size range, and the observed number concentration (MP#
+
+161
+
+#
+m-3) is reported. Using the power law coefficients in Eq.(2), the extrapolated 𝑀𝑃1−5000µ𝑚
+
+162
+
+number concentration is calculated. As samples Frag 1 and Frag 2 were generated with the
+
+163
+
+#
+same PSD, they have the same 𝑀𝑃1−5000µ𝑚
+concentrations. However, as their observation
+
+164
+
+ranges were different, their original reported MP concentrations were different.
+
+165
+#
+Observation Reported Power law Extrapolated 𝑀𝑃1−5000µ𝑚
+Sample size range concentration equation
+concentration
+[µm]
+[MP# m-3]
+𝑏 𝑥𝑎
+[ MP# m-3]
+Frag 1
+1 - 10
+4 950
+1000 L-3
+5 000
+-3
+Frag 2
+50 - 250
+2
+1000 L
+5 000
+Film
+10 - 100
+900
+1000 L-2
+9 998
+Fiber 250 - 1 000
+29957
+1000 L-1
+85 172
+
+166
+167
+
+8
+
+168
+169
+
+Figure 2 : Fictional example of reported MP PSD in the literature (a.) and the corresponding
+
+170
+
+power laws in bin-normalized MP number concentrations (b., MP# m-3 µm-1). Fragment size
+
+171
+
+range (Frag 1, Frag 2) is varied on purpose, and so is bin size for fibers (a).
+
+172
+173
+
+2. Intercomparing MP concentrations and PSDs
+
+174
+
+As indicated in the introduction, measurements of MP in the environment are often made over
+
+175
+
+different MP size ranges, depending on the sampling and analytical techniques. In addition,
+
+176
+
+studies tend to bin MP number observations in widely variable bin ranges to report PSD
+
+177
+
+histograms. This variability leads to difficulties for intercomparison of studies, which is critical
+
+178
+
+in MP science. Previous studies have suggested that binned PSD data can be normalized for bin
+
+179
+
+size and extrapolated using the power law, so that different studies can be compared on an
+
+180
+
+identical numeric basis (Kaandorp et al., 2021; Leusch et al., 2023). To illustrate this, we
+
+181
+
+generate a fictional dataset of 4 samples whose distribution follows Eq.(1): two fragment
+
+182
+
+samples of different measured size range, (a = -3), one for films (a = -2) and one for fibers (a
+
+183
+
+= -1). The intercept is the same for all samples (b= 106). Figure 2.a shows how fragmentation
+
+184
+
+produces different PSD histograms, and how the use of variable size bins (1, 10, 25, 50 µm)
+
+9
+
+185
+
+affects visualization of the PSD, with a wider bin size for fibers and films leading to an apparent
+
+186
+
+increase in MP number concentration (MP# m-3). In addition, the 4 chosen samples deliberately
+
+187
+
+cover different MP size ranges, reflecting potentially different analytical techniques. This
+
+188
+
+disparity implies that the MP concentrations of 29957, 900, 4950 and 2 MP# m-3 reported
+
+189
+
+alongside the histograms are not directly comparable. Sample Frag 1 seems to be 2000 times
+
+190
+
+more concentrated than sample Frag 2. To allow intercomparison of the measurements, we first
+
+191
+
+normalize the reported MP concentration in each bin by dividing it by its bin size, and plot the
+
+192
+
+log of the normalized MP concentration (MP# m-3 µm-1) as a function of the log of MP size
+
+193
+
+(µm, geometric mean of the bin boundaries, following Leusch et al., 2023 method (Leusch et
+
+194
+
+al., 2023)) (Figure 2.b). The PSD thus obtained will be referred to as Bin-Normalized PSD (BN-
+
+195
+
+PSD). Similar to Figure 1.b, we observe in Figure 2.b that MP shape affects the power law
+
+196
+
+slope. For all shapes, fragmentation leads to more abundant small MP, but the effect is stronger
+
+197
+
+for fragments, than for sheets, than for films, as seen in the more negative slope a.
+
+198
+
+In order to intercompare the MP number concentrations of the four normalized sample
+
+199
+
+PSDs, we can use the power law to extrapolate the sample observations (data points in Figure
+
+200
+
+2.b) to a shared MP size range, such as the full MP size range (1-5000 µm) or any sub-range.
+
+201
+
+To do so, we integrate the power law PSD, Eq.(1), between the chosen particle size limits:
+𝐿
+
+𝑀𝑃𝐿#1 − 𝐿2 µ𝑚 = ∫𝐿 2
+
+202
+
+1
+
+𝐿
+
+𝑁(𝐿) 𝑑𝐿 = ∫𝐿 2
+1
+
+𝑏
+
+𝑏. 𝐿𝑎 𝑑𝐿 = 𝑎+1 . (𝐿2 𝑎+1 − 𝐿1 𝑎+1 ) Eq.(2)
+
+203
+
+Where 𝑀𝑃𝐿#1 − 𝐿2 µ𝑚 [MP# m-3] is the MP number concentration within size range 𝐿1 to 𝐿2 [µm].
+
+204
+
+𝑏 [MP m-3 µm-a] and 𝑎 [-] are the intercept and the slope of the power law model, as illustrated
+
+205
+
+in Figure 2.b, respectively. L is the MP length [µm]. Note that in practice, the slope coefficient
+
+206
+
+a should be lower than -1 for this integral to converge. Applying Eq.(2) to our 4 fictional
+
+207
+
+examples for the size range of 𝐿1 = 1 µm to 𝐿2 = 5000 µm, we obtain the following directly
+
+208
+
+#
+comparable 𝑀𝑃1−5000µ𝑚
+concentrations of: 85 172 MP# m-3 for fibers, 9 998 MP# m-3 for films,
+
+209
+
+5 000 MP# m-3 for fragment analysis 1 and 5 000 MP# m-3 for fragment analysis 2 (Table 1).
+10
+
+210
+
+#
+We thus observe that extrapolated 𝑀𝑃1−5000µ𝑚
+are higher for films than for fragment 1, contrary
+
+211
+
+to the originally reported concentrations. Importantly, even though the two fragment samples
+
+212
+
+reported different MP size ranges, used different bin sizes to report the data, and reported
+
+213
+
+#
+different MP concentrations, the extrapolated 𝑀𝑃1−5000µ𝑚
+are identical. In summary, this
+
+214
+
+fictional example illustrates how to compare proverbial apples and oranges, by converting them
+
+215
+
+all into bananas.
+
+216
+
+Unfortunately, real world published MP PSD histograms do not behave like ideal PSDs,
+
+217
+
+and it has been observed that power law slope depends directly on the chosen PSD bin size
+
+218
+
+(Leusch et al., 2023). That is dramatic because an inaccurate slope directly leads to erroneous
+
+219
+
+MP concentration extrapolation using Eq.(2), and it makes it impossible to compare slopes
+
+220
+
+between datasets to understand MP size sorting in nature. If the raw data is available, it is
+
+221
+
+possible to fit the power law to an unbinned, raw particle number PSD (Clauset et al., 2009) as
+
+222
+
+applied by Kooi et al., (Kooi et al., 2021). However, since most published MP observations do
+
+223
+
+not provide this raw data, we have developed an alternative method to overcome binning bias.
+
+224
+225
+
+3. Binning bias
+
+226
+
+3.1. Datasets of reference
+
+227
+
+To further evaluate the effect of bin size on the BN-PSD slope, we obtained three raw MP
+
+228
+
+number data sets from Lu et al. (2022), Perera et al. (2022) and Ueda et al. (2025), for
+
+229
+
+stormwater, indoor air, and coastal marine surface water respectively. By raw data we mean
+
+230
+
+that the authors reported the length and other dimensions of each individual MP particle
+
+231
+
+observed. For Ueda et al. (2025), we selected the sub-dataset with the most particles (Fragment
+
+232
+
+in Site D, sampled with a pump system). The Lu et al. (2022) and Perera et al. (2022) datasets
+
+233
+
+were provided by Leusch et al. (2023). To obtain a reference slope and intercept for each
+11
+
+234
+
+dataset, we use the Clauset et al. (2009) maximum likelihood estimation (MLE) method that
+
+235
+
+derives a best power law fit to raw particle size data. The MLE reference slopes are -1.75, -1.90
+
+236
+
+and -2.94 for Lu et al. (2022), Perera et al. (2022) and Ueda et al. (2025) respectively (see
+
+237
+
+Figure 3.a and Table 2). The MLE intercept is calculated according to the formula provided by
+
+238
+
+Clauset et al. (2009):
+
+239
+
+𝑏 = −(𝑎 + 1) 𝐿𝑚𝑖𝑛
+
+240
+
+where Lmin is the lower size bound of the power law, i.e. the lower MP size limit for which the
+
+241
+
+power law applies. An estimation of Lmin is provided by the MLE algorithm (Clauset et al.,
+
+242
+
+2009).
+
+243
+
+3.2. Bin-Normalized PSD method
+
+244
+
+Once the reference parameters are known for each of the 3 raw datasets, we apply to each of
+
+245
+
+them the classic BN-PSD method. First, we generated binned PSD histograms with bin size
+
+246
+
+incrementing from 1µm to 100 µm for each raw data set. We then plot the BN-PSD (x = log of
+
+247
+
+the geometric mean size of each bin, y = log of the bin MP concentration divided by the bin
+
+248
+
+width) and use standard linear regression to derive power law slope (a) and intercept (b). We
+
+249
+
+use these parameters to extrapolate the observed MP# concentrations to the full 1-5000 µm MP
+
+250
+
+size range. Table 2 summarises the parameters obtained as a function of bin size. Bin size does
+
+251
+
+not affect every dataset in the same way. Figure 3.b clearly illustrates how the BN-PSD power
+
+252
+
+law slope for all three datasets is systematically higher (less negative) than the MLE reference
+
+253
+
+#
+slopes. Consequently, the BN-PSD intercept and extrapolated 𝑀𝑃1−5000µ𝑚
+concentrations are
+
+254
+
+also offset and therefore inaccurate. The Lu et al. (2022) et Ueda et al. (2025) slopes are
+
+255
+
+relatively invariant with bin size, with an average RSD of 6% and 5% respectively. The BN-
+
+256
+
+PSD method overestimated the Lu et al. (2022) et Ueda et al. (2025) MLE reference slopes by
+
+257
+
++0.28 (+16%) and +0.36 (+12%) respectively. In the case of Perera et al. (2022), the bin size
+
+−(𝑎+1)
+
+12
+
+Eq.(3)
+
+258
+
+used to aggregate data had a strong impact on the slope by the BN-PSD method: at bin size
+
+259
+
+1µm, the slope was -0.05, and this estimate decreases to -1.46 for 100 µm bins (Table 2, Figure
+
+260
+
+3.a). As bin size increases, the BN-PSD slope estimate gets closer to the MLE estimation. No
+
+261
+
+regression was performed if the number of points was less than 3. The observed BN-PSD
+
+262
+
+deviations from the theoretical MLE slope (Figure 3.a) propagate to the estimation of the
+
+263
+
+intercept (Figure 3.b) and to the extrapolated concentration (Figure 3.c). Knowing that bin
+
+264
+
+dependence and bias may arise in any binned dataset without warning signs, we explore in the
+
+265
+
+next section an alternative method to derive accurate power law fits for binned data.
+
+266
+
+Table 2. Average estimated parameters (slope, log intercept, log MP1-5000µm concentration) for
+
+267
+
+three power law PSD fitting methods: bin-normalized particle size distribution (BN-PSD) fits
+
+268
+
+the bin-normalized MP concentration against the geometric bin size in log log space (bin width
+
+269
+
+varied from 1-100 µm); C-PSD fits the cumulative MP concentration against the lower bin
+
+270
+
+bound (bin width varied from 1-100 µm) in log log space; MLE (maximum likelihood
+
+271
+
+estimation) fits the raw unbinned data following Clauset et al. (2009) and gives an estimate of
+
+272
+
+the parameters a and b independent of bin size. Values are averaged over all bin sizes tested,
+
+273
+
+and uncertainties are 1 standard deviation.
+Parameter
+slope (a)
+log intercept
+(log10(b))
+#
+log10 𝑀𝑃1−5000µ𝑚
+
+Method
+BN-PSD
+C-PSD
+MLE
+BN-PSD
+C-PSD
+MLE
+BN-PSD
+C-PSD
+MLE
+
+Lu et al. (2022)
+-1.47±0.09
+-1.63±0.02
+-1.75
+4.1±0.22
+4.48±0.05
+4.71
+4.42±0.14
+4.68±0.04
+4.84
+
+Perera et al. (2022)
+-0.81±0.36
+-1.64±0.02
+-1.9
+1.12±0.82
+3.26±0.06
+3.84
+2.58±0.25
+3.45±0.04
+3.88
+
+Ueda et al. (2025)
+-2.6±0.14
+-2.88±0.05
+-2.94
+5.83±0.28
+6.38±0.11
+6.47
+5.63±0.24
+6.11±0.1
+6.18
+
+274
+275
+
+3.3. Cumulative PSD method
+
+276
+
+One alternative method to the BN-PSD is apparent in Virkar and Clauset (2014, Figure 1) who
+
+277
+
+showed that power law fitting of a cumulative binned PSD (C-PSD) returns acceptably precise
+
+13
+
+278
+
+and accurate slope values, similar to the MLE. The C-PSD curve corresponds to the number (or
+
+279
+
+concentration) of MP with length greater than L1. In a C-PSD the number of MP counts (or
+
+280
+
+number concentrations) is added up in each successively smaller bin, and the obtained
+
+281
+
+concentration is plotted against the lower bound of each bin in log-log space. The resulting
+
+282
+
+distribution is linear over most of the PSD, and far less sensitive to bin size. The C-PSD is
+
+283
+
+defined as:
++∞
+
+𝑀𝑃#>𝐿1 = ∫𝐿
+
+284
+
+1
+
+−𝑏
+
+𝑁(𝐿) 𝑑𝐿 = 𝑎 + 1 𝐿1 𝑎+1 = 𝑏′𝐿1 𝑎′
+
+Eq.(4)
+
+285
+
+where 𝑀𝑃#>𝐿1 [MP# m-3] is the cumulative number concentration of MP whose size is greater
+
+286
+
+than L1 [µm] (lower size of any bins). In log-log space, the C-PSD also follows a power law of
+
+287
+
+slope 𝑎′ = 𝑎 + 1 (meaning the original BN-PSD slope is shifted by +1) and intercept of 𝑏′ =
+
+288
+
+−𝑏/(𝑎 + 1). The parameters a and b are computed from the slope 𝑎′ and log-intercept
+
+289
+
+𝑙𝑜𝑔10 (𝑏′) obtained from the linear regression of the C-PSD: 𝑎 = 𝑎′ − 1 and 𝑏 = −𝑏′. 𝑎′. The
+
+290
+
+MP number concentration within the size range 𝐿1 to 𝐿2 [µm] is given by:
+
+291
+
+𝑀𝑃𝐿#1− 𝐿2µ𝑚 = 𝑀𝑃#>𝐿1 − 𝑀𝑃#>𝐿2 = 𝑏′𝐿1 𝑎′ − 𝑏′𝐿2 𝑎′ = 𝑎+1 (𝐿2 𝑎+1 − 𝐿1 𝑎+1 ) Eq.(5)
+
+292
+
+which is the same equation as Eq.(2) once 𝑎′ and 𝑏′ are converted to 𝑎 and 𝑏. The only difference
+
+293
+
+is the way the parameters a and b are estimated, from the C-PSD method for Eq.(5) rather than
+
+294
+
+the BN-PSD method for Eq.(2).
+
+𝑏
+
+295
+
+In order to validate the C-PSD power law fitting method and compare its performance
+
+296
+
+with the biased BN-PSD method, we used the same 3 reference raw MP datasets presented in
+
+297
+
+section 3.1. Once again, we generated for all datasets binned PSD histograms with bin size
+
+298
+
+incrementing from 1 µm to 100 µm, and used standard linear regression to derive power law
+
+299
+
+slope a’ and intercept b’ of the C-PSD (x: log of lower bin bound, y = log of MP number
+
+300
+
+concentration of MP > x) for each bin size. Figures 3.b-d and Table 2 summarize the validation
+
+14
+
+301
+
+#
+results for slope, intercept and 𝑀𝑃1−5000µ𝑚
+concentrations. The C-PSD method gives a stable
+
+302
+
+estimation of the slope, independent of bin size, with RSD <1.8%. The C-PSD slope is close to
+
+303
+
+the MLE reference slope, deviating by only +0.12 (+7%), +0.26 (+14%) and +0.08 (+2%) for
+
+304
+
+Lu et al. (2022), Perera et al. (2022) and Ueda et al. (2025) respectively. Similar acceptable
+
+305
+
+#
+accuracy is visible for the log intercept and extrapolated 𝑀𝑃1−5000µ𝑚
+. It is interesting to note
+
+306
+
+that the Perera et al. (2022) data are no longer sensitive to bin size. In summary, we find that
+
+307
+
+the BN-PSD method alone is insufficient to correct bin-bias for all datasets, while the
+
+308
+
+cumulative C-PSD fitting method returns more accurate slopes, intercepts and extrapolated MP
+
+309
+
+concentrations. Next, we will outline how to convert MP number to mass concentration using
+
+310
+
+the fitting parameters obtained by the C-PSD method.
+
+15
+
+311
+312
+
+Figure 3. Examples of binning bias for three raw MP datasets: Lu et al. (2022) and Perera et
+
+313
+
+al. (2022) were discussed and provided by Leusch et al. (Leusch et al., 2023). For Ueda et al.
+
+314
+
+(2025), we selected the subsample ‘site D’ with the most MP fragments obtained by a water
+
+315
+
+pump. a) Visualisation of the maximum likelihood estimation (MLE) fit from Clauset et al.
+
+316
+
+(2009) on the 3 raw datasets. The BN-PSD (in red) and C-PSD (in green) fitting methods
+16
+
+317
+
+presented in section 3.2 and 3.3 were tested as a function of bin size from 1 to 100 µm, and
+
+318
+
+compared to the MLE (dotted lines) reference fitting method. The binning bias is illustrated in
+
+319
+
+#
+b) for the slope, in c) for the intercept and in d) for the extrapolated concentration 𝑀𝑃1−5000µ𝑚
+.
+
+320
+321
+
+4. MP number to mass conversion
+
+322
+
+MP mass concentrations, mass inventories and mass fluxes are needed for environmental plastic
+
+323
+
+and MP dispersal budgets (OECD, 2022; Sonke et al., 2025a), for plastic additive exposure
+
+324
+
+estimates (Trasande et al., 2024), or to understand plastic fragmentation and degradation
+
+325
+
+(Chamas et al., 2020). To convert a MP number concentration to mass, the particle density and
+
+326
+
+volume need to be known (or assumed) for the measured MP. While polymer density varies
+
+327
+
+relatively little (0.9 to 1.4 × 10-6 µg/µm3 (Kooi and Koelmans, 2019)), MP volume depends on
+
+328
+
+MP length (L), width (W) –both typically measured– and height (H), which is generally not
+
+329
+
+measured. The majority of studies unfortunately only report a PSD for L and omit W. Dedicated
+
+330
+
+MP morphological studies typically observe that the median fragment W/L ratio is 0.68 +/- 0.03,
+
+331
+
+indicating ellipsoid MP fragment shape (Barchiesi et al., 2023; Contreras et al., 2024;
+
+332
+
+Hagelskjær et al., 2025; Kooi et al., 2021; Primpke et al., 2020a; Simon et al., 2018), and it has
+
+333
+
+often been further assumed that H/W = W/L (Kooi et al., 2021; Primpke et al., 2020a; Simon et
+
+334
+
+al., 2018). Here we used a recent calibration of small fragment ellipsoid volume for the special
+
+335
+
+case when only L is known, and which found H/W = 0.40 +/- 0.08 (Hagelskjær et al., 2025).
+
+336
+
+We therefore convert number concentrations to mass concentrations using an average MP
+
+337
+
+density of δMP = 1 × 10-6 µg µm-3, and an ellipsoid volume, V, approximation for fragments:
+
+338
+
+𝑉𝑓𝑟𝑎𝑔 (𝐿) = 6 ⋅ 𝐿 ⋅ 𝑊 ⋅ 𝐻 = 6 ⋅ 𝐿 ⋅ 0.68 𝐿 ⋅ 0.4 ⋅ 0.67 𝐿 = 0.097 𝐿3
+
+339
+
+Where L is the reported length (µm), and W = 0.68×L and H = 0.40×W (Hagelskjær et al.,
+
+340
+
+2025).
+
+𝜋
+
+17
+
+𝜋
+
+Eq.(6)
+
+341
+
+For fibers, a cylinder volume approximation is computed using the reported diameter, D and a
+
+342
+
+40% void fraction (Simon18, Barchiesi23). If D is not reported, it is set to the typical value of
+
+343
+
+15 µm (Mintenig et al., 2020), except for rare fibers shorter than 45µm, where D = L/3, derived
+
+344
+
+from the aspect ratio definition of fibers, L/W>3, used in several studies (Koelmans et al., 2022;
+
+345
+
+Kooi et al., 2021; Ueda et al., 2025):
+
+346
+
+𝑉𝑓𝑖𝑏𝑒𝑟 (𝐿) = 𝜋 ⋅ (𝐷/2)2 ⋅ 𝐿 ⋅ 0.6
+
+347
+
+For films we assume a thickness (height, H) of 12.7 µm, corresponding to the typical grocery
+
+348
+
+bag thickness:
+
+349
+
+𝑉𝑓𝑖𝑙𝑚 (𝐿) = 𝐿 ⋅ 𝑊 ⋅ 𝐻
+
+350
+
+The mass concentration (µg m-3) of each shape category can then be estimated using the power
+
+351
+
+law parameters a and b obtained by the C-PSD method described in 3.3:
+
+352
+
+Fragments:
+
+353
+
+𝑀𝑃𝜏𝑚𝑎𝑠𝑠
+= ∫𝐿 2
+1 − 𝜏2 µ𝑚
+
+354
+
+Films:
+
+355
+
+𝑀𝑃𝐿𝑚𝑎𝑠𝑠
+= ∫𝐿 2
+1 − 𝐿2 µ𝑚
+
+356
+
+Fibers:
+
+357
+
+𝑀𝑃𝐿𝑚𝑎𝑠𝑠
+= ∫𝐿 2
+1 − 𝐿2 µ𝑚
+
+𝐿
+1
+
+𝐿
+1
+
+𝐿
+1
+
+Eq.(11)
+
+358
+359
+
+18
+
+Eq.(7)
+
+Eq.(8)
+
+𝑏
+
+𝛿𝑀𝑃 𝑉𝑓𝑟𝑎𝑔 (𝐿) 𝑁(𝐿) 𝑑𝐿 = 𝛿𝑀𝑃 0.097 𝑎+4 (𝐿2 𝑎+4 − 𝐿1 𝑎+4 )
+
+𝑏
+
+𝛿𝑀𝑃 𝑉𝑓𝑖𝑙𝑚 (𝐿) 𝑁(𝐿) 𝑑𝐿 = 𝛿𝑀𝑃 𝐻 𝑎+3 (𝐿2 𝑎+3 − 𝐿1 𝑎+3 )
+
+𝐷
+
+𝑏
+
+Eq.(9)
+
+Eq.(10)
+
+𝛿𝑀𝑃 𝑉𝑓𝑖𝑏𝑒𝑟 (𝐿) 𝑁(𝐿) 𝑑𝐿 = 𝛿𝑀𝑃 𝜋 0.6 ( 2 )2 𝑎+2 (𝐿2 𝑎+2 − 𝐿1 𝑎+2 )
+
+360
+
+Where 𝑀𝑃𝐿𝑚𝑎𝑠𝑠
+[µg m-3] is the MP mass concentration within size range 𝐿1 to 𝐿2 [µm]. 𝑎
+1 − 𝐿2 µ𝑚
+
+361
+
+and 𝑏 are the slope and the intercept derived from a’ and b’ of the C-PSD power law model,
+
+362
+
+respectively.
+
+363
+364
+
+5. PSDs of environmental MP
+
+365
+
+In this section we examine the PSD properties of published MP studies, with a focus on different
+
+366
+
+sampling and analysis methods, limits of detection and method bias and intercomparability. We
+
+367
+
+use environmental MP data from the MPsizeBase compilation (Sonke et al., 2025b) that
+
+368
+
+includes 62 binned MP PSDs for fragments and fibers from 40 studies in air (both indoor and
+
+369
+
+outdoor suspended MP), surface ocean and subsurface ocean waters. Unlike the fictional
+
+370
+
+example presented in section 1, environmental MP data rarely follow the power law perfectly
+
+371
+
+over their whole reported PSD range. Authors generally do not formally define their limit of
+
+372
+
+detection (LOD) and report all MP counts made in a single sample. This often generates lower
+
+373
+
+than expected MP counts for the smaller PSD bins, and zero or single MP counts for upper size
+
+374
+
+bins. Before fitting a MP PSD it is therefore important to consider what the analytical LOD on
+
+375
+
+the lower MP size end (lower LOD), and on the upper MP size end (upper LOD) is.
+
+376
+
+5.1. Lower size LOD
+
+377
+
+When lower than expected small MP counts were initially documented and discussed by Cozar
+
+378
+
+et al. (2014), it was interpreted as a true decrease in small MP abundance in ocean surface
+
+379
+
+waters. Since then ‘log-normal’ PSD behavior has been observed in many MP datasets, and has
+
+380
+
+been suggested to be related to sampling net mesh size (Lindeque et al., 2020; Tokai et al.,
+
+381
+
+2021; Yu et al., 2025), to fragmentation energy barriers (Aoki and Furue, 2021; George et al.,
+
+382
+
+2024) or to a low bias in MP counting, which is inherent in all measurement techniques, whether
+
+383
+
+visual, software assisted, or microscope assisted (Kooi and Koelmans, 2019; Leusch et al.,
+
+19
+
+384
+
+2023; Primpke et al., 2020b). In Figure 4 we illustrate the log-normal PSDs of different
+
+385
+
+environmental MP datasets obtained by microscopy (Cózar et al., 2014, 2015), by µFTIR (Eo
+
+386
+
+et al., 2021; Isobe et al., 2015; Song et al., 2018; Tokai et al., 2021; Zhao et al., 2022), and by
+
+387
+
+µRaman (Enders et al., 2015). The overlap of the observed MP size range between sampling
+
+388
+
+and detection techniques allows us to visualise that the power law inflection point is dependent
+
+389
+
+on the dataset and analytical technique used. This supports the assumption that the log-normal
+
+390
+
+PSD phenomena is likely a low bias in the recovery and counting of small MP that exists for
+
+391
+
+all sampling and detection techniques. Following Kooi and Koelmans (2019) and Kooi et al.
+
+392
+
+(2021), we filtered the MPsizeBase data before fitting power laws to each study, by removing
+
+393
+
+biased small MP counts. We first identify the bin of the BN-PSD with the maximum MP
+
+394
+
+number concentration (MP#max, maximum on a BN-PSD curve). To conservatively exclude
+
+395
+
+bins that underestimate MP count (which might be bins of size larger than the size of MP#max),
+
+396
+
+the lower size LOD is defined as twice the geometric mean size of the bin that defines MP#max
+
+397
+
+(Figure 4.b). This condition was not applied when no visible low bias was observed.
+
+398
+
+It is important to emphasize that our attribution of log-normal MP PSDs behaviour to
+
+399
+
+method bias is an important assumption of the power law C-PSD size alignment framework.
+
+400
+
+PSDs for natural particles such as coarse mineral dust, seasalt aerosols or marine suspended
+
+401
+
+particulate matter often display log-normal behavior below 10µm in size (Adebiyi et al., 2023;
+
+402
+
+Deike et al., 2022; Stemmann et al., 2008). Aerosol size distribution in the 1 nm – 10 µm range
+
+403
+
+is indeed understood as a superposition of multiple log-normal PSDs related to nucleation,
+
+404
+
+accumulation and coarse modes (Deike et al., 2022). However, rarely do such PSDs show 10-
+
+405
+
+fold drops in particle abundance as we illustrate for MP in Figure 4. As we will see later (Figure
+
+406
+
+5), only five MP PSDs reported in the MPSizeBase dataset have data <10 µm, and none of these
+
+407
+
+show pronounced log-normal behavior. We therefore consider our assumption that the power
+
+408
+
+applies over the full 1–5000 µm MP size range justified, but we remind readers that as higher
+
+20
+
+409
+
+quality data in the 1–20 µm range becomes available, we may need to revisit the possibility of
+
+410
+
+log-normal MP PSD behavior.
+
+411
+412
+
+Figure 4. a) Examples of BN-PSD inflection points for different sampling and analytical
+
+413
+
+techniques (all surface ocean water, BN-PSD visualisation). b) Overview of all MPsizeBase
+
+414
+
+PSDs, centered on the BN-PSD maximum MP# concentration (MP#max) to illustrate residual
+
+415
+
+non-linearity beyond MP#max, and the assignment of a ‘2*MP#max’ lower size LOD.
+
+416
+417
+
+5.2. Upper size LOD
+
+418
+
+MP measurements generally detect fewer large particles, and at some point the number of large
+
+419
+
+MP counts are no longer representative of the true large MP concentration. The question is at
+
+420
+
+what size the upper size LOD is situated. The upper LOD of the BN-PSD and C-PSD is related
+
+421
+
+to the sampling volume and the % of the sample (i.e. filter area) analyzed. In addition, for the
+
+422
+
+C-PSD the right hand tail of the C-PSD slumps downward (becoming log-normal) as a function
+
+423
+
+of the sum of all large particles that have not been counted. For fitting purposes, we assign the
+
+21
+
+424
+
+upper LOD to bins that define the downward slump breaking point in the log-linear nature of
+
+425
+
+the C-PSD, which is often for bins containing a small fraction of the total MP counts. To
+
+426
+
+illustrate the variability in reported MP size range, Supporting Information 1 shows for each of
+
+427
+
+the 62 PSDs reported in MPsizeBase, the minimum and maximum MP size reported, and the
+
+428
+
+lower and upper size LOD assigned. All 62 regressions are reported in Supporting Information
+
+429
+
+2 and visualize the lower and upper LOD assignment, alongside both BN-PSD and C-PSD
+
+430
+
+regression lines. About half of the studies show log-normal behavior, and have a lower size
+
+431
+
+LOD that is larger than the minimum MP size reported.
+
+432
+433
+
+5.3. Environmental PSD slope variability
+
+434
+
+Figure 5 visualises MPsizeBase C-PSDs for each environmental compartment (atmosphere,
+
+435
+
+surface and subsurface ocean) after lower and upper LOD assignment. To identify potential
+
+436
+
+differences in power law slopes between MP shape and compartments, a two way Anova was
+
+437
+
+performed (Figure 6). No statistical differences in power law slope (a) were identified between
+
+438
+
+compartments (within fragment or fiber groups), for both number and mass PSD. This means
+
+439
+
+that the current MPsizeBase dataset is not able to distinguish differences in PSD between
+
+440
+
+atmosphere, surface ocean and deep ocean, indicating no detectable MP size sorting during
+
+441
+
+sinking or emission and atmospheric deposition. We suspect that such differences in power law
+
+442
+
+slope between compartments should exist, but would need more reliable data for it to be
+
+443
+
+detected statistically. Conversely, we observe a strong statistical difference between MP fiber
+
+444
+
+and fragment shapes (p<0.0001, Figure 6). For fibers, slope a varies from -1.30 to -2.59 with a
+
+445
+
+mean value of -1.84 ± 0.38 (1 sd), and for fragments, slope a varies from -1.67 to -4.31 with a
+
+446
+
+mean value of -2.76 ± 0.62 (1 sd). Compared to the theoretical slopes of the fractal
+
+447
+
+fragmentation model for 1d, 2d and 3d plastic objects (section 1), this suggests that fragments
+
+448
+
+behave close to ideal 3d fragmentation. Fibers, with slope of -1.84, however fragment more like
+22
+
+449
+
+2d sheets than 1d fibers, which is surprising and may partly reflect the inclusion of fragment-
+
+450
+
+like fibers in reported fiber datasets, with aspect ratio only slightly larger than 3.
+
+451
+
+23
+
+452
+
+Figure 5 : Published cumulative MP number particle size distribution (C-PSD) in atmosphere
+
+453
+
+(a., b.), surface ocean (c., d.) and subsurface ocean (e., f.). The MP size (µm, lower bound of
+
+454
+
+each reported bin) is plotted against the cumulative MP number concentration (MP# m-3),
+
+455
+
+which is the sum of reported MP concentration whose size is greater than x. C-PSD were
+
+456
+
+separated into fragments (left panels, a., c., e.) and fibers (right panels, b., d., f.). Only data
+
+457
+
+points within the assigned lower and upper LOD are shown (see 5.1 and 5.2). All individual C-
+
+458
+
+PSDs are visualised in Additional file 2, including slope fitting and all points (including point
+
+459
+
+removed for fitting).
+
+460
+
+461
+462
+
+Figure 6 : Two-factor Anova comparison of MP number concentration PSD power law slope
+
+463
+
+between MP shape (fibers or fragments) and environmental compartments (atmosphere, ocean
+
+464
+
+surface water or subsurface water). In MPsizeBase, the same PSD is often used several times
+
+465
+
+with different concentrations (representing several sample locations or depths that have the
+
+466
+
+same reported PSD), leading to duplicates in slopes. To avoid bias in the analysis, only one
+
+467
+
+copy of each PSD was considered. In order to give each study equal weight, the median of the
+
+24
+
+468
+
+slope was taken for each study that reported more than one PSD for the same shape-
+
+469
+
+compartment category. Full lines are medians, dotted lines are means. We observe a significant
+
+470
+
+difference (p = 1.7 10-6) in slope between the two MP shapes: -1.84±0.38 (mean ± 1 sd) for
+
+471
+
+fibers and -2.76±0.62 (mean ± 1 sd) for fragments. No statistical difference was observed
+
+472
+
+between compartments, within each MP shape.
+
+473
+
+Previous studies have examined PSD slope variability in different datasets. Initially,
+
+474
+
+Kooi and Koelmans (2019) examined a mix of fiber and fragment PSDs, finding a mean slope
+
+475
+
+a of -1.6 for number PSD. Later, Kooi et al. (2021) compiled raw MP data from five studies of
+
+476
+
+marine surface water and sediment, freshwater and sediment, wastewater effluent and benthic
+
+477
+
+freshwater biota. The five studies deployed different sampling methods, but comparable
+
+478
+
+measurement techniques, including FTIR identification of MP using the same spectral reference
+
+479
+
+database, >500 MP counts per sample, and >60% of filter surface analyzed. After filtering PSDs
+
+480
+
+for lower LOD bias in small MP, the power law slopes, determined by the MLE method, for
+
+481
+
+the predominantly (93%) fragment raw data were found to be very similar across all samples
+
+482
+
+with a = -2.68 and -2.64 for length and width PSDs respectively. These fragment MLE slopes
+
+483
+
+are, within their approximate uncertainty of ±0.6, not significantly different from our C-PSD
+
+484
+
+derived fragment slopes of -2.76 ± 0.62 in atmospheric and ocean MP, indicating broad
+
+485
+
+environmental similarity in MP PSDs across Earth surface environments. Kooi et al. (2021)
+
+486
+
+observed minor statistically significant slope differences for MP length between surface water
+
+487
+
+(a > -3) and biota (a < -3) in both freshwater and marine environments (p<0.05). Similarly,
+
+488
+
+slopes were found to be >-3 for PE and PP, and <-3 for denser minority polymers in surface
+
+489
+
+waters, suggesting preferential removal by settling of the larger, denser polymers. Kaandorp et
+
+490
+
+al. (2021) highlighted potential differences in PSD shape for marine surface water MP at coastal
+
+491
+
+and offshore locations studied by Isobe et al. (2014) and Isobe et al. (2015).
+
+25
+
+492
+
+In summary, we observe different PSD for MP fragments and fibers that are to some
+
+493
+
+extent coherent with the variable dimensionality of plastic fragmentation. It appears that the
+
+494
+
+absence of statistically different PSD slopes between environmental compartments in the
+
+495
+
+MPsizeBase data compilation is likely due to the great variety of sampling, MP counting, and
+
+496
+
+MP reporting (i.e. binning) methods. The detection of minor, but significant slope differences
+
+497
+
+in raw data PSDs measured with near-identical methods (Isobe et al., 2014, 2015; Kooi et al.,
+
+498
+
+2021) suggests that standardization of measurement methods, and reporting raw data is key to
+
+499
+
+tap into the full information on MP fragmentation and fractionation that is contained within
+
+500
+
+PSDs.
+
+501
+
+Table 3. Surface sea water MP fragment PSD comparison for pump and net tow sampling
+
+502
+
+methods in coastal and offshore waters. Fiber PSDs are not shown.
+
+N N PSD Size range
+
+MP#/PSD
+
+µm
+reported
+median
+
+MP#
+reported
+median
+(IQR)
+
+Coastal
+Pump
+
+2
+
+10
+
+Net tow
+
+5
+
+7
+
+Offshore
+Pump
+3
+Net tow
+
+Volume sampled PSD slope
+m3
+reported
+median
+(IQR)
+
+mean±1sd
+
+PSD intercept
+
+median
+(IQR)
+
+#
+𝑀𝑃𝑟𝑒𝑝𝑜𝑟𝑡𝑒𝑑
+
+#
+𝑀𝑃1−5000µ𝑚
+
+𝑚𝑎𝑠𝑠
+𝑀𝑃1−5000µ𝑚
+
+MP# m-3
+reported
+median (IQR)
+
+MP# m-3
+estimated
+median
+(IQR)
+
+µg m-3
+estimated
+median (IQR)
+
+4.5 104
+(2.3 104 - 6.8 104)
+250 - 4500
+260
+(184 - 3466)
+
+0.15
+(0.13 - 0.18)
+543
+(138 - 694)
+
+-3.20±0.29
+
+2.2 108
+(1.1 108 - 3.3 108)
+-2.61±0.88
+3.8 105
+(48 - 1.1 106)
+
+716
+(410-1021)
+0.41
+(0.29-4.13)
+
+9.1 107
+(4.6 107 - 1.4 108)
+1.8 105
+(7.1 101 - 6.3 105)
+
+6092
+(3738-8446)
+778
+(163-3900)
+
+3
+
+15 - 310
+
+12
+
+321 - 10 250
+
+0.39
+(0.24 - 1.49)
+422
+(231 - 510)
+
+-2.89±1.08
+
+7
+
+239
+(234 - 391)
+1100
+(620 - 4070)
+
+1.1 105
+(5.5 104 - 5.3 105)
+-2.42±0.37
+2.7 103
+(5.6 102 - 4.8 103)
+
+54
+(31-147)
+0.02
+(0.01-0.05)
+
+5.3 104
+(2.7 104 - 1.9 105)
+1.9 103
+(4.0 102 - 3.2 103)
+
+35
+(18-2404)
+10
+(6-86)
+
+All data
+Pump
+
+5
+
+13
+
+20 - 320
+
+12
+
+19
+
+286 - 5813
+
+0.20
+(0.10 - 0.39)
+452
+(214 - 552)
+
+-3.01±0.80
+
+Net tow
+
+494
+(239 - 543)
+932
+(253 - 4070)
+
+9.4 105
+(1.1 105 - 1.7 106)
+-2.50±0.61
+3.2 103
+(4.2 101 - 1.0 105)
+
+105
+(54-239)
+0.17
+(0.02-0.78)
+
+3.3 105
+(5.3 104 - 8.5 105)
+2.5 103
+(5.8 101 - 5.0 104)
+
+1383
+(35-4772)
+86
+(6-966)
+
+35 - 1844
+
+503
+504
+
+5.4. Sampling & analysis methods and PSD properties
+
+505
+
+In this section we examine how sampling and analysis methods affect the measured MP size
+
+506
+
+range and MP concentration, and how C-PSD size-alignment can help reconcile perceived
+
+507
+
+differences in MP counts.
+26
+
+508
+
+5.4.1. Direct comparison of net tow vs pumped sampling
+
+509
+510
+
+Surface water MP sampling is often done by towing a plankton, manta or neuston net with mesh
+
+511
+
+size around 300 µm for 20–60 minutes. The large volume sampled, 200-600 m3, is ideal to
+
+512
+
+capture larger, less abundant MP in the 1–5 mm size range. These MP can be handpicked and
+
+513
+
+manually counted and identified by spectroscopy, usually FTIR. More recent exploration of MP
+
+514
+
+concentrations in the subsurface ocean relies mostly on discrete volume CTD casts (1–100 L),
+
+515
+
+use of in situ pumps (100–800 L), filtration at a smaller mesh size of 1–20 µm, and automated
+
+516
+
+FTIR or Raman particle finding or whole filter FTIR mapping techniques to identify small MP.
+
+517
+
+In addition, shipboard pumps are now regularly used to sample surface water, again with lower
+
+518
+
+volume (1–100 L) than plankton net tows. It has been recognized in the literature that net tows
+
+519
+
+often report lower MP concentrations than pumped samples (Tamminga et al., 2019; Ueda et
+
+520
+
+al., 2025) and we therefore ask the question whether that discrepancy disappears after MP size-
+
+521
+
+alignment.
+
+522
+
+To investigate this we return to the unique Ueda et al. (2025) surface seawater study
+
+523
+
+that directly intercompared neuston net tows (350 µm mesh) with discrete pumped (10 µm
+
+524
+
+mesh) samples at four locations in the coastal, urbanized Tokyo Bay. Net tow MP were
+
+525
+
+manually picked and analyzed by FTIR, while pumped MP were quantified by near-whole filter
+
+526
+
+FTIR imaging. The reported mean MP concentrations for all sites were 430 (pump) and 0.59
+
+527
+
+MP# m-3 (net tow) for fibers, and 5989 (pump) and 0.75 MP# m-3 (net tow) for fragments. These
+
+528
+
+reported MP# concentrations illustrate well the large apparent difference between pump and net
+
+529
+
+tow methods, by factors of 730 (fibers) and 8000 (fragments). The authors indeed concluded
+
+530
+
+that the pump system collected more small and fibrous MP, and that net tows were less effective
+
+531
+
+in capturing MP <1000 µm. Figure 7 illustrates the pooled (all sites, A, B, C, D) cumulative
+
+532
+
+MP concentrations (C-PSD, bin size 10 µm, filtered as described in section 5.1-2) for the ‘net
+27
+
+533
+
+tow’ and ‘pump’ groups, and for both fragments and fibers. For fragments (tow, n=3552; pump,
+
+534
+
+n=292), the pump C-PSD in Figure 7b shows closer behavior to a power law than the net tow
+
+535
+
+C-PSD which displays underestimation of small MP (thin black arrow). Nevertheless, it appears
+
+536
+
+that large MP fragments (>1000 µm) from the net tow align well with the pumped MP size
+
+537
+
+distribution, indicated by the dashed black lines (C-PSD slopes, Figure 7b) that are similar for
+
+538
+
+both pump and tow C-PSDs. For fibers, both pump and net tow C-PSDs show curvature and
+
+539
+
+underestimation of small MP (thin black arrows, Figure 7.a). The effect is stronger for tow than
+
+540
+
+pumped samples, and no single power law fit can plausibly align both fiber distributions. Our
+
+541
+
+visualizations confirm the authors’ conclusion that at first sight, net tows appear to
+
+542
+
+underestimate small MP concentrations.
+
+543
+
+Table 4 summarizes slope and intercepts for the merged Ueda et al. (2025) dataset,
+
+544
+
+detailed by shape (fragments or fibers) and sampling method (net tow or pump), obtained with
+
+545
+
+the MLE algorithm (Clauset et al., 2009) on raw data, and by the C-PSD method on binned (10
+
+546
+
+µm) data. Despite the reasonable visual alignment of tow and pump fragment C-PSDs, the MLE
+
+547
+
+method generates significantly different slopes (Table 4). C-PSD fitting returns more coherent
+
+548
+
+slopes and intercepts, which we use to extrapolate, using Eq. 2, MP number and mass
+
+549
+
+concentrations over two default size ranges, MP1-300µm and MP300-5000µm (Table 4), in order to
+
+550
+
+#
+examine if extensive extrapolation is reasonable. The extrapolated 𝑀𝑃300−5000µ𝑚
+fiber
+
+551
+
+concentrations are 79 MP# m-3 for pump and 18 MP# m-3 for net tow groups, indicating a 4-
+
+552
+
+#
+fold low bias for towed fiber sampling (grey arrow, Figure 7). Extrapolated 𝑀𝑃1−300µ𝑚
+fiber
+
+553
+
+concentrations are 4.3 104 MP# m-3 for pump and 3.7 104 MP# m-3 for net tow groups. While
+
+554
+
+this indicates good agreement, the underlying reason for this is that the slightly steeper net tow
+
+555
+
+slope compensates for a pronounced low bias in measured small MP fibers. For fragments
+
+556
+
+#
+(Table 4), the extrapolated 𝑀𝑃300−5000µ𝑚
+fiber concentrations are 30 MP# m-3 for pump and 13
+
+557
+
+MP# m-3 for net tow groups, indicating agreement by a factor of 2 for larger MP fragments. For
+28
+
+558
+
+#
+smaller MP fragments, extrapolated 𝑀𝑃1−300µ𝑚
+fiber concentrations are 2.7 106 MP# m-3 for
+
+559
+
+pump and 2.3 105 MP# m-3 for net tow groups, indicating agreement to within a factor of 10.
+
+560
+
+MP mass concentration extrapolation generally shows better agreement, because MP mass is
+
+561
+
+dominated by the large MP size range that undergoes less extrapolation. Overall, the apparent
+
+562
+
+730-fold (fibers) and 8000-fold (fragments) difference in reported MP# concentrations between
+
+563
+
+pump and net tow methods, is reduced to factors of 1-4 (fibers) and 2-10 (fragments) after size-
+
+564
+
+alignment. This indicates that the apparent differences in reported MP# concentrations are
+
+565
+
+mostly due to the different MP size ranges that were measured.
+
+566
+567
+
+Table 4. PSD fitting parameters for the Ueda et al. (2025) dataset. All 4 sites are merged
+
+568
+
+together. MLE: maximum likelihood estimation on raw data (individual particle main axis); C-
+
+569
+
+PSD: cumulative particle size distribution with bin size 10 µm and filtered as described in
+
+570
+
+section 5.1-2.
+Sampling
+method
+
+Fitting
+method
+
+Slope (a) Intercept (b)
+
+#
+𝑀𝑃𝑟𝑒𝑝𝑜𝑟𝑡𝑒𝑑
+
+𝑚𝑎𝑠𝑠
+𝑚𝑎𝑠𝑠
+#
+#
+𝑀𝑃1−300µ𝑚
+𝑀𝑃300−5000µ𝑚
+𝑀𝑃1−300µ𝑚
+𝑀𝑃300−5000µ𝑚
+
+MP# m-3
+
+MP# m-3
+
+MP# m-3
+
+µg m-3
+
+µg m-3
+
+Fibers
+Pump
+
+MLE
+
+-2.14
+
+6.0 104
+
+Net tow
+
+MLE
+
+-2.85
+
+3.1 106
+
+Pump
+
+C-PSD
+
+-2.10
+
+4.8 104
+
+431
+
+4.3 104
+
+79
+
+22
+
+7.0
+
+Net tow
+
+C-PSD
+
+-2.33
+
+5.1 104
+
+0.60
+
+3.7 104
+
+18
+
+14
+
+1.4
+
+Pump
+
+MLE
+
+-3.23
+
+2.1 107
+
+Net tow
+
+MLE
+
+-4.42
+
+3.6 1011
+
+Pump
+
+C-PSD
+
+-3.00
+
+5.4 106
+
+5989
+
+2.7 106
+
+30
+
+159
+
+2517
+
+Net tow
+
+C-PSD
+
+-2.71
+
+3.9 105
+
+0.75
+
+2.3 105
+
+13
+
+46
+
+1673
+
+Fragments
+
+571
+
+29
+
+572
+573
+
+Figure 7. PSD comparison between neuston net tow and pumped sampling methods in the Ueda
+
+574
+
+et al. (2025) dataset for four Tokyo Bay surface waters. MP counts for all four sites (A-D) have
+
+575
+
+been merged and converted to concentrations; the dashed lines are the C-PSD slope estimates
+
+576
+
+for a bin size of 10 µm. Data was filtered as described in section 5.1-2 (transparent points
+
+577
+
+below the lower LOD and above the upper LOD are excluded). a. For fibers both tow and pump
+
+578
+
+PSDs are affected by low bias in small MP (thin black arrows), and the net tow PSD as a whole
+
+579
+
+appears to have low bias in all MP fiber sizes (thick grey arrow) compared to the pump
+
+580
+
+sampling method. b. For fragments a low bias in small MP sampled with the net tow is apparent
+
+581
+
+from the non-linear shape of the pink PSD (thin black arrow).
+
+582
+
+5.4.2 Indirect comparison of ocean surface water net tow vs pump data
+
+583
+584
+
+We further examined PSD variability as a function of sampling techniques for surface ocean
+
+585
+
+MP fragment (but not fiber) datasets in MPsizeBase: high volume net tows and low volume
+
+586
+
+pumped samples (including surface CTD casts, in situ pumps, and shipboard pumps). Table 3
+30
+
+587
+
+summarizes key statistics for the ‘pump’ and ‘net tow’ sample groups, with notably statistically
+
+588
+
+different median sample volumes, 0.20 m3 vs 452 m3 respectively, and median reported MP
+
+589
+
+size range, 20–320 µm vs 286–5813 µm respectively. Because the observed MP fragment size
+
+590
+
+ranges are very different, the reported median MP number concentrations are also different, 105
+
+591
+
+vs 0.17 MP# m-3 for pump vs net tow groups. The key question is whether these reported MP
+
+592
+
+concentrations align once we fit power laws and extrapolate to a common range, such as 1–
+
+593
+
+5000 µm. After applying the lower and upper LOD data filters, the fitted C-PSD derived slopes,
+
+594
+
+a, for the tow and pump groups are -2.50 ± 0.61 (n=12, 1sd) and -3.01 ± 0.80 (n=5, 1sd), and
+
+595
+
+are not statistically different (t-test, p=0.16).
+
+596
+
+The reported tow and pump MP fragment concentrations of 0.17 and 105 MP m-3 are
+
+597
+
+however confounded by coastal and off-shore sampling locations. Separating these two
+
+598
+
+environments leads to reported median values of 0.41 (tow) and 716 MP# m-3 (pump) in coastal
+
+599
+
+waters, and lower 0.02 (tow) and 54 MP# m-3 (pump) fragment concentrations in offshore
+
+600
+
+#
+waters. After C-PSD size alignment the extrapolated 𝑀𝑃1−5000µ𝑚
+fragment concentrations are
+
+601
+
+9.1 107 and 1.8 105 MP# m-3 in coastal waters, and 5.3 104 and 1.9 103 MP# m-3 in offshore
+
+602
+
+waters for pump and net tow respectively. The very large apparent difference in reported marine
+
+603
+
+MP fragment concentrations by pumped and towed sampling method (by factors of 716/0.41 =
+
+604
+
+1750, and by 54/0.02 = 2700) is reduced to factors of 500 and 30 following size alignment.
+
+605
+
+𝑚𝑎𝑠𝑠
+Similar conclusions can be drawn for size-aligned median 𝑀𝑃1−5000µ𝑚
+fragment concentrations
+
+606
+
+that extrapolate to 778 (tow) and 6092 ug m-3 (pump) in coastal waters, and 10 and 35 ug m-3
+
+607
+
+in offshore waters. Note, however, that these size-aligned pump and tow MP fragment
+
+608
+
+concentrations are from different studies and geographical locations, and therefore do not
+
+609
+
+represent the same waters as in the Ueda et al. (2025) study illustrated in section 5.4.1.
+
+610
+
+It is instructive to use the generic surface ocean fragment PSD slope of -2.62+-0.72 (1
+
+611
+
+sd, Table. 5) to estimate the MP fragment number and mass fractions that net tow and pump
+31
+
+612
+
+methods cover. One can compute using Eq.(5) that typical plankton/neuston/manta nets (mesh
+
+613
+
+size ~300 µm) used to sample surface ocean MP recover less than 1% of the total number of
+
+614
+
+MP fragments in the size range 1–5000 µm. On the other hand, the same 300 µm mesh net
+
+615
+
+catches 85% to 100% of the total floating MP fragment mass in the size range 1–5000 µm. Due
+
+616
+
+to the exponential nature of the power law, about 98% of all surface ocean MP fragments are
+
+617
+
+smaller than 10 µm. In the MPsizeBase database, only two studies (11%) observed MP
+
+618
+
+fragments smaller than 10 µm at the ocean surface (Lorenz et al., 2019; Tekman et al., 2020).
+
+619
+
+5.4.3 Indoor airborne MP by FTIR and Raman
+
+620
+621
+
+The importance of size alignment when intercomparing different MP measurement techniques
+
+622
+
+can also be illustrated for FTIR and Raman quantification of indoor airborne MP fragments. In
+
+623
+
+MPsizeBase three FTIR and three Raman studies detected 361 and 1510 MP# m-3 across MP
+
+624
+
+size ranges of 18–400 µm and 3–75 µm respectively. The factor 9 concentration difference is
+
+625
+
+mostly related to the capacity of Raman microscopy to detect more abundant smaller MP
+
+626
+
+(Yakovenko et al., 2025). PSD slopes, a, and intercepts, b, were similar for FTIR and Raman:
+
+627
+
+-2.71±0.50 vs -2.74±0.50 and 2.7 104 vs 1.8 104 respectively. The apparent 9-fold difference in
+
+628
+
+reported MP fragment concentrations by FTIR and Raman becomes negligible after size
+
+629
+
+#
+alignment to the common 1–5000 µm range (𝑀𝑃1−5000µ𝑚
+): 16575 vs 16581 MP# m-3.
+
+630
+631
+
+6. Extrapolating and intercomparing environmental MP concentrations
+
+632
+
+6.1 Extrapolation of MPsizeBase datasets with C-PSD fitting
+
+633
+
+All 62 fitted MPsizeBase PSDs were extrapolated beyond the original PSD observations, and
+
+634
+
+MP1-5000µm number and mass concentrations estimated using Eq.(5) for number and Eq.(9-11)
+
+32
+
+635
+
+for mass. The extrapolated concentrations are summarized in Table 5. Figure 8 compares
+
+636
+
+#
+reported measured MP concentrations over restricted size ranges to extrapolated 𝑀𝑃1−5000µ𝑚
+
+637
+
+concentrations for the formal 1–5000 µm MP size range. It can be observed that extrapolated
+
+638
+
+#
+𝑀𝑃1−5000µ𝑚
+number concentrations are always higher than measured MP number
+
+639
+
+concentrations by a median factor of 600x (IQR: 30–8000). For fragments, the extrapolated
+
+640
+
+#
+𝑀𝑃1−5000µ𝑚
+concentration is higher by a median factor of around 70x (IQR: 20–1000) for
+
+641
+
+aerosols, 2000x (IQR: 1300–2300) for the subsurface ocean and 11000x (IQR: 700–150000)
+
+642
+
+for the surface ocean MP. For fibers, these factors are 50x (IQR: 20–120) for aerosols, 300x
+
+643
+
+(IQR: 60–700) for subsurface ocean and 80x (IQR: 40–6000) for surface ocean MP fibers. The
+
+644
+
+reason for this is that only a sub range of the full MP size spectrum (1 and 5000 µm) is observed,
+
+645
+
+which contains a small fraction of the total MP number. In particular, abundant small MP are
+
+646
+
+not observed by FTIR studies. Fibers have lower extrapolation factors as their slopes tend to be
+
+647
+
+less steep than fragments (Figure 6). For MP mass concentrations, the extrapolated MP mass1-
+
+648
+
+5000µm
+
+649
+
+concentrations. For many net tow datasets, mass extrapolation leads to only a limited increase
+
+650
+
+in MP mass concentration, because large MP size ranges from 300 to 5000 µm, which dominate
+
+651
+
+mass, are already covered by the original observed data.
+
+are higher by a median factor of 3x (IQR: 1.5–12) than the estimated measured
+
+6.2. Extrapolating MP concentration data without C-PSD fitting
+
+652
+653
+
+Depending on research questions and objectives there may be needs for extrapolation of MP#
+
+654
+
+concentration without going through the complexity of C-PSD fitting individual datasets. This
+
+655
+
+can be done by using generic, mean power law slopes, for different environmental
+
+656
+
+compartments. Koelmans and Kooi (2020) developed equations, similar to Eq.(2) above, for a
+
+657
+
+MP concentration correction factor, CF, that allows extrapolation of a reported MP#
+
+33
+
+658
+
+concentration to any size range, based on the minimum and maximum MP size observed, and
+
+659
+
+a literature-based estimate of the generic PSD slope a:
+
+660
+
+CF = (Dmax)1+a - (Dmin)1+a / (Lmax)1+a - (Lmin)1+a
+
+661
+
+, where Lmin and Lmax are the reported minimum and maximum MP length (µm), and Dmin and
+
+662
+
+Dmax refer to the default size range of choice (e.g. 1–5000 µm). Corrected, extrapolated
+
+663
+
+#
+𝑀𝑃𝐷𝑚𝑖𝑛−𝐷𝑚𝑎𝑥
+concentrations are:
+
+664
+
+#
+#
+𝑀𝑃𝐷𝑚𝑖𝑛
+−𝐷𝑚𝑎𝑥 = 𝑀𝑃𝐿𝑚𝑖𝑛 − 𝐿𝑚𝑎𝑥 ∗ 𝐶𝐹
+
+Eq.(12)
+
+Eq.(13)
+
+665
+
+In Table 5 we summarize our best estimates for generic PSD slopes, a, for fibers and fragments
+
+666
+
+in the atmosphere, surface ocean and subsurface ocean. We note, however, two elements of
+
+667
+
+uncertainty in this CF approach: i) About half of all reported PSDs show low bias for small MP
+
+668
+
+(Figure 4b); consequently the reported measured MP# concentrations are also biased low,
+
+669
+
+which is subsequently propagated to the extrapolated MP number concentration via Eq.(12). ii)
+
+670
+
+Measured Lmin and Lmax are rather uncertain size estimates of observed MP populations, because
+
+671
+
+they represent extreme values. An approximate Lmax introduces little additional uncertainty
+
+672
+
+during MP# extrapolation because extrapolated large MP counts are rare. On the lower Lmin end
+
+673
+
+this is not the case, and we recommend replacing Lmin by the bias-corrected LlowerLOD bound.
+
+674
+
+This, however, demands a corresponding correction of the biased reported MP# concentration
+
+675
+
+that can be calculated in MPsizeBase. Further use of generic PSD slopes to extrapolate MP
+
+676
+
+mass concentrations is best done by first calculating intercept b for each datapoint using Eq.(2),
+
+677
+
+and then apply both generic slope a and datapoint-specific b using Eq’s (9-11).
+
+678
+
+Database users that wish to extrapolate and size-align large amounts of MP number or
+
+679
+
+mass concentration observations have the choice of using i) study-specific PSD and slope
+
+680
+
+estimates, or ii) generic mean PSD slopes for different environments (Table 5). Further work
+
+34
+
+681
+
+would be needed to evaluate which approach is more appropriate. Study-specific PSD slope
+
+682
+
+variability represents all method-related uncertainty, which is transferred and amplified to
+
+683
+
+extrapolated MP concentrations. Use of a generic PSD slope, that represents the mean PSD
+
+684
+
+properties of all methods, may result in lower uncertainty of extrapolated MP concentrations.
+
+685
+
+Development and measurement of certified reference materials, and comparison of both
+
+686
+
+approaches against MP dispersion models can help clarify the choice of extrapolation method.
+
+687
+
+7. Conclusions
+
+688
+
+We have extended the existing power law PSD framework for microplastic to extrapolate and
+
+689
+
+size-align binned MP size and number concentration data in the literature. The advantage of the
+
+690
+
+framework is that it facilitates data inter-comparison of observations and of observation-model
+
+691
+
+output by comparing MP number or mass concentrations over the same MP size range. The
+
+692
+
+main disadvantage is that the assumption of MP PSDs to follow a power law precludes detailed
+
+693
+
+investigations of particle size fractionation processes, as current data quality does not result in
+
+694
+
+significant PSD slope variability in atmospheric, surface and subsurface ocean.
+
+695
+
+We recommend future environmental MP studies to always provide raw MP particle
+
+696
+
+size data (length, width, area, perimeter, circularity) in numerical format as part of the
+
+697
+
+supporting information or in an online data repository (cf. submission to MPsizeBase). Raw
+
+698
+
+data, unbinned, provides additional estimates of PSD slope and intercept. Binning MP size data
+
+699
+
+is mostly useful for visualization of PSDs histograms in papers.
+
+700
+
+More studies should intercompare sampling and analytical methods on the same
+
+701
+
+samples, so that we can better understand the strengths and limitations of methods. In the marine
+
+702
+
+environment we show that net tow and discrete, pumped sampling methods provide potentially
+
+703
+
+complementary concentration results for MP fragments. Both methods are important, because
+
+704
+
+large volume net tows recover less abundant large MP that carry most MP mass, while low
+
+35
+
+705
+
+volume pumped samples allow analysis of small MP that are relevant for biota uptake, health
+
+706
+
+impacts, sea spray emission to the atmosphere and carbon cycling perturbations. Nevertheless,
+
+707
+
+more efforts should be made to observe small MP in the 1–20 µm range by Raman microscopy
+
+708
+
+in all environments. Net tow sampling of MP fibers appears to substantially underestimate fiber
+
+709
+
+concentrations, even for the larger size range. Dedicated methodological developments should
+
+710
+
+address both sampling and detection of fibers in environmental media.
+
+711
+
+712
+713
+
+Figure 8. Comparison of measured MP concentrations to extrapolated MP1-5000µm
+
+714
+
+concentrations in a) number (MP# m-3) and b) mass (µg m-3). Error bars are estimated
+
+715
+
+extrapolation uncertainties (1 standard deviation). Because only a fraction of the MP size
+
+716
+
+spectrum between 1 and 5000 µm is measured, the extrapolated MP number and mass
+
+717
+
+concentrations are generally higher than the corresponding reported concentrations. Data
+
+718
+
+sampling dates cover the period 2011–2023.
+
+719
+
+36
+
+720
+
+Table 5. Summary of C-PSD size-aligned literature data by environmental compartment and
+
+721
+
+MP shape. Values are mean±1 SD for normally distributed data, and median (IQR) for log-
+
+722
+
+normally distributed data. N: number of MP data points; N*: number MP PSDs.
+N (N*)
+
+slope (a)
+
+intercept (b)
+
+𝑴𝑷#𝒓𝒆𝒑𝒐𝒓𝒕𝒆𝒅
+
+𝑴𝑷#𝟏−𝟓𝟎𝟎𝟎µ𝒎
+
+𝑴𝑷𝒎𝒂𝒔𝒔
+𝟏−𝟓𝟎𝟎𝟎µ𝒎
+
+MP# m-3
+
+MP# m-3
+
+µg m-3
+
+Ocean surface
+Fibers
+
+16 (7)
+
+-2.04±0.42
+
+3169
+(2047-5.64 105)
+
+51
+(40-53)
+
+5443
+(2618-3.92 105)
+
+28
+(5-133)
+
+Fragments
+
+32 (21)
+
+-2.62±0.72
+
+5862
+(48-1.06 106)
+
+0.4
+(0.1-27)
+
+3328
+(71-6.34 105)
+
+113
+(6-1528)
+
+Fibers
+
+14 (7)
+
+-1.92±0.41
+
+1.39 104
+(1.06 104-6.49 105)
+
+42
+(34-70)
+
+2.81 104
+(1.17 104-5.20 104)
+
+19
+(10-32)
+
+Fragments
+
+18 (8)
+
+-3.00±0.42
+
+4.86 105
+(1.82 105-1.39 106)
+
+116
+(74-202)
+
+2.76 105
+(1.01 105-7.43 105)
+
+542
+(277-1161)
+
+Fibers
+
+11 (9)
+
+-1.81±0.31
+
+22
+(4-184)
+
+0.8
+(0.6-5)
+
+28 (4-310)
+
+0.06
+(0.02-1.5)
+
+Fragments
+
+22 (14)
+
+-2.76±0.61
+
+7923
+(2189-4.09 104)
+
+37
+(7-253)
+
+4827
+(1585-2.23 104)
+
+22
+(8-376)
+
+Ocean subsurface
+
+Aerosol
+
+723
+724
+725
+
+Abbreviations
+
+726
+
+MP: microplastic; NP: nanoplastic; PSD: particles size distribution; BN-PSD: bin-normalized
+
+727
+
+particle size distribution; C-PSD: cumulative particle size distribution; MLE: minimum
+
+728
+
+likelihood estimation; LOD: limit of detection; FTIR: Fourier transform infra-red
+
+729
+
+Supplementary Information
+
+730
+
+The online version contains supplementary material available at [...]
+
+37
+
+731
+
+Additional file 1: .xlsx file summarizing all the MPsizeBase dataset used in this study.
+
+732
+
+Additional file 2: .zip file with visualization of all PSD fighting with both BN-PSD and C-PSD
+
+733
+
+method.
+
+734
+
+Acknowledgements
+
+735
+
+We thank the anonymous reviewers and editor for their constructive comments.
+
+736
+
+Authors’ contributions
+
+737
+
+JES and TS designed the study. JES, JLT and HA acquired funding. JES, TS, IH, DV, CR and
+
+738
+
+ND developed the C-PSD size alignment framework. All authors contributed to data
+
+739
+
+interpretation. JES, TS and IH wrote the draft manuscript, which was improved with the help
+
+740
+
+of all authors.
+
+741
+
+Funding
+
+742
+
+We acknowledge financial support from the CNRS, from the ANR-20-CE34-0014 ATMO-
+
+743
+
+PLASTIC and ANR-23-CE34-0012 BUBBLEPLAST grants, and from the French ministry of
+
+744
+
+higher education.
+
+745
+
+Availability of data and materials
+
+746
+
+The authors declare that the data supporting the findings of this study are available within the
+
+747
+
+paper
+
+748
+
+https://zenodo.org/records/17380284.
+
+749
+
+Declarations
+
+750
+
+Ethics approval and consent to participate
+
+751
+
+NA.
+
+752
+
+Consent for publication
+38
+
+and
+
+its
+
+supplementary
+
+information
+
+files,
+
+as
+
+well
+
+as
+
+at
+
+753
+
+The authors provide consent for publication.
+
+754
+
+Competing interests
+
+755
+
+The authors declare no competing financial or other interests.
+
+756
+
+Author details
+
+757
+
+1 Géosciences Environnement Toulouse, CNRS/IRD/Université de Toulouse, 31400 Toulouse,
+
+758
+
+France.
+
+759
+
+2 Institut des Géosciences de l’Environnement, Univ. Grenoble Alpes, CNRS, IRD, Grenoble
+
+760
+
+INP, Grenoble, France.
+
+761
+
+3 Laboratoire des sciences de l'Environnement Marin, CNRS, IRD, Ifremer, Université de
+
+762
+
+Brest, Plouzané, France
+
+39
+
+763
+
+References
+
+764
+
+Adebiyi, A., Kok, J. F., Murray, B. J., Ryder, C. L., Stuut, J.-B. W., Kahn, R. A., Knippertz, P.,
+
+765
+
+Formenti, P., Mahowald, N. M., Pérez García-Pando, C., Klose, M., Ansmann, A., Samset, B.
+
+766
+
+H., Ito, A., Balkanski, Y., Di Biagio, C., Romanias, M. N., Huang, Y., and Meng, J.: A review
+
+767
+
+of coarse mineral dust in the Earth system, Aeolian Research, 60, 100849,
+
+768
+
+https://doi.org/10.1016/j.aeolia.2022.100849, 2023.
+
+769
+
+Aoki, K. and Furue, R.: A model for the size distribution of marine microplastics: A statistical
+
+770
+
+mechanics approach, PLoS ONE, 16, e0259781, https://doi.org/10.1371/journal.pone.0259781,
+
+771
+
+2021.
+
+772
+
+Barchiesi, M., Kooi, M., and Koelmans, A. A.: Adding Depth to Microplastics, Environ. Sci.
+
+773
+
+Technol., 57, 14015–14023, https://doi.org/10.1021/acs.est.3c03620, 2023.
+
+774
+
+Chamas, A., Moon, H., Zheng, J., Qiu, Y., Tabassum, T., Jang, J. H., Abu-Omar, M., Scott, S.
+
+775
+
+L., and Suh, S.: Degradation Rates of Plastics in the Environment, ACS Sustainable Chem.
+
+776
+
+Eng., 8, 3494–3511, https://doi.org/10.1021/acssuschemeng.9b06635, 2020.
+
+777
+
+Clauset, A., Shalizi, C. R., and Newman, M. E. J.: Power-Law Distributions in Empirical Data,
+
+778
+
+SIAM Review, 51, 661–703, 2009.
+
+779
+
+Contreras, L., Edo, C., and Rosal, R.: Mass concentration of plastic particles from two-
+
+780
+
+dimensional
+
+781
+
+https://doi.org/10.1016/j.scitotenv.2024.173849, 2024.
+
+782
+
+Cózar, A., Echevarría, F., González-Gordillo, J. I., Irigoien, X., Úbeda, B., Hernández-León,
+
+783
+
+S., Palma, Á. T., Navarro, S., García-de-Lomas, J., Ruiz, A., Fernández-de-Puelles, M. L., and
+
+40
+
+images,
+
+Science
+
+of
+
+The
+
+Total
+
+Environment,
+
+946,
+
+173849,
+
+784
+
+Duarte, C. M.: Plastic debris in the open ocean, Proc. Natl. Acad. Sci. U.S.A., 111, 10239–
+
+785
+
+10244, https://doi.org/10.1073/pnas.1314705111, 2014.
+
+786
+
+Cózar, A., Sanz-Martín, M., Martí, E., González-Gordillo, J. I., Ubeda, B., Gálvez, J. Á.,
+
+787
+
+Irigoien, X., and Duarte, C. M.: Plastic Accumulation in the Mediterranean Sea, PLoS ONE,
+
+788
+
+10, e0121762, https://doi.org/10.1371/journal.pone.0121762, 2015.
+
+789
+
+Deike, L., Reichl, B. G., and Paulot, F.: A Mechanistic Sea Spray Generation Function Based
+
+790
+
+on the Sea State and the Physics of Bubble Bursting, AGU Advances, 3, e2022AV000750,
+
+791
+
+https://doi.org/10.1029/2022AV000750, 2022.
+
+792
+
+Enders, K., Lenz, R., Stedmon, C. A., and Nielsen, T. G.: Abundance, size and polymer
+
+793
+
+composition of marine microplastics ≥ 10 μm in the Atlantic Ocean and their modelled vertical
+
+794
+
+distribution,
+
+795
+
+https://doi.org/10.1016/j.marpolbul.2015.09.027, 2015.
+
+796
+
+Eo, S., Hong, S. H., Song, Y. K., Han, G. M., Seo, S., and Shim, W. J.: Prevalence of small
+
+797
+
+high-density microplastics in the continental shelf and deep sea waters of East Asia, Water
+
+798
+
+Research, 200, 117238, https://doi.org/10.1016/j.watres.2021.117238, 2021.
+
+799
+
+George, M., Nallet, F., and Fabre, P.: A threshold model of plastic waste fragmentation: New
+
+800
+
+insights into the distribution of microplastics in the ocean and its evolution over time, Marine
+
+801
+
+Pollution Bulletin, 199, 116012, https://doi.org/10.1016/j.marpolbul.2023.116012, 2024.
+
+802
+
+Hagelskjær, O., Margenat, H., Yakovenko, N., Sonke, J. E., and Le Roux, G.: Improving
+
+803
+
+Environmental Microplastic Extrapolation: From Field of View to Full Sample, and from
+
+804
+
+Microplastic 2D‐Morphology to Mass, https://doi.org/10.20944/preprints202507.1300.v1, 16
+
+805
+
+July 2025.
+
+41
+
+Marine
+
+Pollution
+
+Bulletin,
+
+100,
+
+70–81,
+
+806
+
+Hidalgo-Ruz, V., Gutow, L., Thompson, R. C., and Thiel, M.: Microplastics in the Marine
+
+807
+
+Environment: A Review of the Methods Used for Identification and Quantification, Environ.
+
+808
+
+Sci. Technol., 46, 3060–3075, https://doi.org/10.1021/es2031505, 2012.
+
+809
+
+Isobe, A., Kubo, K., Tamura, Y., Kako, S., Nakashima, E., and Fujii, N.: Selective transport of
+
+810
+
+microplastics and mesoplastics by drifting in coastal waters, Marine Pollution Bulletin, 89,
+
+811
+
+324–330, https://doi.org/10.1016/j.marpolbul.2014.09.041, 2014.
+
+812
+
+Isobe, A., Uchida, K., Tokai, T., and Iwasaki, S.: East Asian seas: A hot spot of pelagic
+
+813
+
+microplastics,
+
+814
+
+https://doi.org/10.1016/j.marpolbul.2015.10.042, 2015.
+
+815
+
+Kaandorp, M. L. A., Dijkstra, H. A., and Sebille, E. van: Modelling size distributions of marine
+
+816
+
+plastics under the influence of continuous cascading fragmentation, Environ. Res. Lett., 16,
+
+817
+
+054075, https://doi.org/10.1088/1748-9326/abe9ea, 2021.
+
+818
+
+Koelmans, A. A., Redondo-Hasselerharm, P. E., Nor, N. H. M., De Ruijter, V. N., Mintenig, S.
+
+819
+
+M., and Kooi, M.: Risk assessment of microplastic particles, Nat Rev Mater, 7, 138–152,
+
+820
+
+https://doi.org/10.1038/s41578-021-00411-y, 2022.
+
+821
+
+Kooi, M. and Koelmans, A. A.: Simplifying Microplastic via Continuous Probability
+
+822
+
+Distributions for Size, Shape, and Density, Environ. Sci. Technol. Lett., 6, 551–557,
+
+823
+
+https://doi.org/10.1021/acs.estlett.9b00379, 2019.
+
+824
+
+Kooi, M., Primpke, S., Mintenig, S. M., Lorenz, C., Gerdts, G., and Koelmans, A. A.:
+
+825
+
+Characterizing the multidimensionality of microplastics across environmental compartments,
+
+826
+
+Water Research, 202, 117429, https://doi.org/10.1016/j.watres.2021.117429, 2021.
+
+42
+
+Marine
+
+Pollution
+
+Bulletin,
+
+101,
+
+618–623,
+
+827
+
+Leusch, F. DL., Lu, H.-C., Perera, K., Neale, P. A., and Ziajahromi, S.: Analysis of the literature
+
+828
+
+shows a remarkably consistent relationship between size and abundance of microplastics across
+
+829
+
+different
+
+830
+
+https://doi.org/10.1016/j.envpol.2022.120984, 2023.
+
+831
+
+Lindeque, P. K., Cole, M., Coppock, R. L., Lewis, C. N., Miller, R. Z., Watts, A. J. R., Wilson-
+
+832
+
+McNeal, A., Wright, S. L., and Galloway, T. S.: Are we underestimating microplastic
+
+833
+
+abundance in the marine environment? A comparison of microplastic capture with nets of
+
+834
+
+different
+
+835
+
+https://doi.org/10.1016/j.envpol.2020.114721, 2020.
+
+836
+
+Lorenz, C., Roscher, L., Meyer, M. S., Hildebrandt, L., Prume, J., Löder, M. G. J., Primpke, S.,
+
+837
+
+and Gerdts, G.: Spatial distribution of microplastics in sediments and surface waters of the
+
+838
+
+southern
+
+839
+
+https://doi.org/10.1016/j.envpol.2019.06.093, 2019.
+
+840
+
+Lu, H.-C., Ziajahromi, S., Locke, A., Neale, P. A., and Leusch, F. D. L.: Microplastics profile
+
+841
+
+in constructed wetlands: Distribution, retention and implications, Environmental Pollution, 313,
+
+842
+
+120079, https://doi.org/10.1016/j.envpol.2022.120079, 2022.
+
+843
+
+Mintenig, S. M., Kooi, M., Erich, M. W., Primpke, S., Redondo- Hasselerharm, P. E., Dekker,
+
+844
+
+S. C., Koelmans, A. A., and van Wezel, A. P.: A systems approach to understand microplastic
+
+845
+
+occurrence and variability in Dutch riverine surface waters, Water Research, 176, 115723,
+
+846
+
+https://doi.org/10.1016/j.watres.2020.115723, 2020.
+
+847
+
+OECD: Global Plastics Outlook: Policy Scenarios to 2060, 2022.
+
+848
+
+Perera, K., Ziajahromi, S., Bengtson Nash, S., Manage, P. M., and Leusch, F. D. L.: Airborne
+
+849
+
+Microplastics in Indoor and Outdoor Environments of a Developing Country in South Asia:
+43
+
+environmental
+
+mesh-size,
+
+North
+
+Sea,
+
+matrices,
+
+Environmental
+
+Environmental
+
+Environmental
+
+Pollution,
+
+Pollution,
+
+Pollution,
+
+319,
+
+265,
+
+252,
+
+120984,
+
+114721,
+
+1719–1729,
+
+850
+
+Abundance, Distribution, Morphology, and Possible Sources, Environ. Sci. Technol., 56,
+
+851
+
+16676–16685, https://doi.org/10.1021/acs.est.2c05885, 2022.
+
+852
+
+Primpke, S., Fischer, M., Lorenz, C., Gerdts, G., and Scholz-Böttcher, B. M.: Comparison of
+
+853
+
+pyrolysis gas chromatography/mass spectrometry and hyperspectral FTIR imaging
+
+854
+
+spectroscopy for the analysis of microplastics, Anal Bioanal Chem, 412, 8283–8298,
+
+855
+
+https://doi.org/10.1007/s00216-020-02979-w, 2020a.
+
+856
+
+Primpke, S., Christiansen, S. H., Cowger, W., De Frond, H., Deshpande, A., Fischer, M.,
+
+857
+
+Holland, E. B., Meyns, M., O’Donnell, B. A., Ossmann, B. E., Pittroff, M., Sarau, G., Scholz-
+
+858
+
+Böttcher, B. M., and Wiggin, K. J.: Critical Assessment of Analytical Methods for the
+
+859
+
+Harmonized and Cost-Efficient Analysis of Microplastics, Appl Spectrosc, 74, 1012–1047,
+
+860
+
+https://doi.org/10.1177/0003702820921465, 2020b.
+
+861
+
+Simon, M., van Alst, N., and Vollertsen, J.: Quantification of microplastic mass and removal
+
+862
+
+rates at wastewater treatment plants applying Focal Plane Array (FPA)-based Fourier
+
+863
+
+Transform
+
+864
+
+https://doi.org/10.1016/j.watres.2018.05.019, 2018.
+
+865
+
+Song, Y. K., Hong, S. H., Eo, S., Jang, M., Han, G. M., Isobe, A., and Shim, W. J.: Horizontal
+
+866
+
+and Vertical Distribution of Microplastics in Korean Coastal Waters, Environ. Sci. Technol.,
+
+867
+
+52, 12188–12197, https://doi.org/10.1021/acs.est.8b04032, 2018.
+
+868
+
+Sonke, J. E., Koenig, A., Segur, T., and Yakovenko, N.: Global environmental plastic dispersal
+
+869
+
+under OECD policy scenarios toward 2060, Science Advances, 11, eadu2396,
+
+870
+
+https://doi.org/10.1126/sciadv.adu2396, 2025a.
+
+871
+
+Sonke, J. E., Segur, T., Hough, I., Nela, D., Voisin, D., Yakovenko, N., Hagelskjaer, O., Abbasi,
+
+872
+
+S., Bucci, S., Richon, C., Angot, H., Thomas, J. L., and Le Roux, G.: MPsizeBase: a database
+44
+
+Infrared
+
+(FT-IR)
+
+imaging,
+
+Water
+
+Research,
+
+142,
+
+1–9,
+
+873
+
+for
+
+874
+
+https://doi.org/10.5281/zenodo.17380284, 2025b.
+
+875
+
+Stemmann, L., Eloire, D., Sciandra, A., Jackson, G. A., Guidi, L., Picheral, M., and Gorsky,
+
+876
+
+G.: Volume distribution for particles between 3.5 to 2000 μm in the upper 200 m region of the
+
+877
+
+South Pacific Gyre, Biogeosciences, 5, 299–310, https://doi.org/10.5194/bg-5-299-2008, 2008.
+
+878
+
+Tamminga, M., Stoewer, S.-C., and Fischer, E. K.: On the representativeness of pump water
+
+879
+
+samples versus manta sampling in microplastic analysis, Environmental Pollution, 254,
+
+880
+
+112970, https://doi.org/10.1016/j.envpol.2019.112970, 2019.
+
+881
+
+Tekman, M. B., Wekerle, C., Lorenz, C., Primpke, S., Hasemann, C., Gerdts, G., and
+
+882
+
+Bergmann, M.: Tying up Loose Ends of Microplastic Pollution in the Arctic: Distribution from
+
+883
+
+the Sea Surface through the Water Column to Deep-Sea Sediments at the HAUSGARTEN
+
+884
+
+Observatory, Environ. Sci. Technol., 54, 4079–4090, https://doi.org/10.1021/acs.est.9b06981,
+
+885
+
+2020.
+
+886
+
+Tokai, T., Uchida, K., Kuroda, M., and Isobe, A.: Mesh selectivity of neuston nets for
+
+887
+
+microplastics,
+
+888
+
+https://doi.org/10.1016/j.marpolbul.2021.112111, 2021.
+
+889
+
+Trasande, L., Krithivasan, R., Park, K., Obsekov, V., and Belliveau, M.: Chemicals Used in
+
+890
+
+Plastic Materials: An Estimate of the Attributable Disease Burden and Costs in the United
+
+891
+
+States, Journal of the Endocrine Society, 8, bvad163, https://doi.org/10.1210/jendso/bvad163,
+
+892
+
+2024.
+
+893
+
+Turcotte, D. L.: Fractals and fragmentation, J. Geophys. Res., 91, 1921–1926,
+
+894
+
+https://doi.org/10.1029/JB091iB02p01921, 1986.
+
+45
+
+particle
+
+size
+
+distribution
+
+Marine
+
+in
+
+environmental
+
+Pollution
+
+Bulletin,
+
+microplastic
+
+165,
+
+data,
+
+112111,
+
+895
+
+Ueda, K., Kameda, Y., Fujita, E., Rachi, S., Iwasaki, Y., Tai, R., and Naito, W.: Concentrations
+
+896
+
+and characteristics of microplastic particles collected by neuston net or pump system in the
+
+897
+
+surface layer of Tokyo Bay, Regional Studies in Marine Science, 84, 104108,
+
+898
+
+https://doi.org/10.1016/j.rsma.2025.104108, 2025.
+
+899
+
+Virkar, Y. and Clauset, A.: Power-Law Distributions in Binned Empirical Data, The Annals of
+
+900
+
+Applied Statistics, 8, 89–119, 2014.
+
+901
+
+Yakovenko, N., Pérez-Serrano, L., Segur, T., Hagelskjaer, O., Margenat, H., Roux, G. L., and
+
+902
+
+Sonke, J. E.: Human exposure to PM10 microplastics in indoor air, PLOS ONE, 20, e0328011,
+
+903
+
+https://doi.org/10.1371/journal.pone.0328011, 2025.
+
+904
+
+Yu, M., Herrmann, B., Liang, H., Sistiaga, M., Zhu, Z., Brčić, J., Tang, L., Liu, C., and Tang,
+
+905
+
+Y.: Size selection in sampling nets leads to underestimation of microplastic pollution,
+
+906
+
+Environmental Pollution, 372, 126007, https://doi.org/10.1016/j.envpol.2025.126007, 2025.
+
+907
+
+Zhao, S., Zettler, E. R., Bos, R. P., Lin, P., Amaral-Zettler, L. A., and Mincer, T. J.: Large
+
+908
+
+quantities of small microplastics permeate the surface ocean to abyssal depths in the South
+
+909
+
+Atlantic Gyre, Global Change Biology, 28, 2991–3006, https://doi.org/10.1111/gcb.16089,
+
+910
+
+2022.
+
+46
+
+
