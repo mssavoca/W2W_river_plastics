@@ -1,13 +1,15 @@
 # Main Figure drafts ----
 
 
+source("Util.R")
+
 library(dplyr)
 library(lubridate)
 library(patchwork)
 
 
 
-
+# Figure 2 ----
 
 summary_table_smallMPs <- Part_dets_summ_river %>%
   group_by(river, date) %>%
@@ -32,7 +34,7 @@ summary_table_largeMPs <- river_MPs_summ %>%
 #View(summary_table_largeMPs)
 
 
-# Small MPs over river flow data----
+# Small MPs over river flow data
 # Part_dets_summ_river2 <- Part_dets_summ_river %>%
 #   mutate(
 #     particles_per_L = ifelse(
@@ -104,7 +106,7 @@ Part_dets_summ_river2_sum$river <- factor(
 )
 
 
-
+### Fig 2A ----
 p_small = ggplot() +
   geom_line(
     data = flow_scaled,
@@ -189,10 +191,10 @@ ggsave(
 
 
 
-# Large MPs over river flow data----
-# ------------------------------------
+# Large MPs over river flow data
+
 # Scale river flow to large MP concentrations
-# ------------------------------------
+
 
 flow_clean <- all_rivers_flow %>%
   group_by(river, date) %>%
@@ -235,9 +237,9 @@ flow_scaled <- flow_clean %>%
 
 
 
-# ------------------------------------
+
 # Plot: Large MPs on top of river flow
-# ------------------------------------
+
 
 # Re-set factor levels in desired order
 # river_order <- c("Carmel", "Pajaro", "Salinas", "San Lorenzo")
@@ -262,9 +264,9 @@ river_MPs_summ$sample_location <- factor(
 
 ref_scale <- median(scale_df$scale_factor, na.rm = TRUE)
 
-# -----------------------------
-# Large particle + flow plot
-# -----------------------------
+
+
+### Fig 2B----
 p_large_vert <- ggplot() +
   
   # River flow line
@@ -346,7 +348,10 @@ ggsave(
 
 
 
-# boxplot by river and material_simple----
+# Figure 3----
+
+#Boxplot by river and material_simple
+
 bp_river_material <- ggplot(
   Part_dets_summ_river2,
   aes(
@@ -420,15 +425,13 @@ ggsave(
 
 
 
+#Figure 4 ----
 
 
+# Stacked proportional plots; all rivers, and blanks
 
-# Stacked proportional plots; all rivers, and blanks----
-
-
-# -------------------------------
 # Proportional stacked bar plot by river: top 5 polymers + "other"
-# -------------------------------
+
 
 
 # Desired river display order (north -> south)
@@ -491,7 +494,7 @@ df_bar$polymer_plot <- factor(
   levels = c(top_materials, "other")
 )
 
-# Plot
+### Fig 4A----
 v = ggplot(df_bar, aes(x = river, y = total_particles, fill = polymer_plot)) +
   geom_col(position = "fill", width = 0.7, color = "black", linewidth = 0.2) +
   scale_fill_manual(
@@ -536,12 +539,9 @@ ggsave(
 
 
 
-
-
-# -------------------------------
 # Proportional stacked bar plot for BLANKS by sample_type
 # Top 5 polymers + "other"
-# -------------------------------
+
 
 # Define top 5 polymers (short names)
 top_materials <- c(
@@ -596,7 +596,7 @@ df_bar_blank$polymer_plot <- factor(
   levels = c(top_materials, "other")
 )
 
-# Plot
+### Fig 4B ----
 w = ggplot(df_bar_blank, aes(x = sample_type, y = total_particles, fill = polymer_plot)) +
   geom_col(
     position = "fill",
@@ -665,16 +665,6 @@ df_plastic <- Part_dets_summ_river %>%
   ungroup()
 
 
-# Reorder factor levels so "Other" appears last
-df_top_plastic <- df_top_plastic %>%
-  mutate(
-    material_short = factor(
-      material_short,
-      levels = c("polypropylene", "polyethylene", "polystyrene", "polyacrylamide", "polyester / PET", "Other")
-    )
-  )
-
-
 
 
 # Define top polymers and include "Other"
@@ -722,6 +712,7 @@ pal["other"] <- "grey80"          # lumped category
 
 
 
+### Fig 4C ----
 p_poly_bar <- ggplot(
   df_poly_summary,
   aes(
@@ -781,19 +772,15 @@ ggsave(
 
 
 
-
-
-
-
-
-#Microplastic flux from first flush----
+#Figure 5----
+#Microplastic flux from first flush
 
 
 flow_scaled <- all_rivers_flow %>%
   group_by(river) %>%
   mutate(
     scale_factor =
-      0.75 * max(                                   # 👈 increase multiplier (try 1.5–3)
+      0.75 * max(                              
         Part_dets_summ_river2$particles_per_L[
           Part_dets_summ_river2$river == first(river)
         ],
@@ -852,7 +839,7 @@ storm_windows <- tibble(
 
 
 
-
+### Fig 5A----
 p_MP_flow_yr1 <- ggplot() +
   
   # ---- Storm / peak-flow window shading (behind everything)
@@ -940,10 +927,7 @@ ggsave(
 
 
 
-
-
-
-
+### Fig 5B----
 # scale factor
 scale_factor <- max(all_FF_flow_hourly$MP_flux_cumulative_med, na.rm = TRUE) /
   max(all_FF_flow_hourly$Flow_m3s, na.rm = TRUE)

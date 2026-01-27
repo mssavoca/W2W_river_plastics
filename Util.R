@@ -322,7 +322,7 @@ flow_quantiles <- all_rivers_flow %>%
     .groups = "drop"
   )
 
-View(flow_quantiles)
+#View(flow_quantiles)
 
 #select first time in season when it crosses the 90% percentile of flow
 
