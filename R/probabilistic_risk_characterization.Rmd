@@ -30,7 +30,7 @@ The workflow mirrors approaches used in probabilistic microplastics ERA, includi
 # 2. Packages
 
 ```{r}
-pkgs <- c("tidyverse", "truncnorm", "fitdistrplus", "ggpubr")
+pkgs <- c("tidyverse", "truncnorm", "fitdistrplus", "ggpubr", "sensitivity")
 to_install <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
 if (length(to_install) > 0) install.packages(to_install)
 lapply(pkgs, library, character.only = TRUE)
@@ -537,11 +537,10 @@ plot_cpsd_multi <- function(fits, title = "", palette = custom_palette, attribut
         filter(L_low > 0, N_ge > 0) |>
         mutate(
           shape = shp,
-          in_lod = dplyr::if_else(
-            is.finite(lower_lod_plot) & is.finite(fo$upper_lod_um),
-            L_low >= lower_lod_plot & L_high <= fo$upper_lod_um,
-            FALSE
-          )
+          in_lod = is.finite(lower_lod_plot) &
+            is.finite(fo$upper_lod_um) &
+            L_low >= lower_lod_plot &
+            L_high <= fo$upper_lod_um
         )
       df
     }))
@@ -611,22 +610,22 @@ plot_cpsd_multi <- function(fits, title = "", palette = custom_palette, attribut
     ) +
 
     # Per-facet LOD line (use params df)
-    geom_vline(
-      data = params,
-      aes(xintercept = log10(lower_lod_used_um)),
-      linetype = "dashed",
-      color = "red",
-      inherit.aes = FALSE
-    ) +
+    # geom_vline(
+    #   data = params,
+    #   aes(xintercept = log10(lower_lod_used_um)),
+    #   linetype = "dashed",
+    #   color = "red",
+    #   inherit.aes = FALSE
+    # ) +
 
     # Per-facet upper LOD line (use params df)
-    geom_vline(
-      data = params,
-      aes(xintercept = log10(upper_lod_um)),
-      linetype = "dashed",
-      color = "red",
-      inherit.aes = FALSE
-    ) +
+    # geom_vline(
+    #   data = params,
+    #   aes(xintercept = log10(upper_lod_um)),
+    #   linetype = "dashed",
+    #   color = "red",
+    #   inherit.aes = FALSE
+    # ) +
       geom_text(
       data = params,
       aes(label = fit_label),
@@ -989,7 +988,6 @@ param_plots$alpha_combined_plot # distribution of alpha parameters
 ## 7.3 Run Monte-Carlo Simulation on Toxicity Data using Parameter Matrix
 
 ```{r}
-message("Starting MC_sim_align_parallel...")
 MC_sim_df <- MC_sim_align_parallel(
   tox_data = tox_data, # toxicity data (ToMEx 2.0 is default)
   param_matrix = param_matrix, # parameter matrix generated in prior cell
@@ -1038,7 +1036,6 @@ erm_registry <- list(
 ## 7.4 Fit pSSD++ distributions for each ERM/environment
 
 ```{r}
-message("Starting make_all_pSSDs...")
 # make all pSSDs
 pSSDs <- make_all_pSSDs(
   MC_sim_df = MC_sim_df, # ensure aligned data is included
@@ -1053,8 +1050,6 @@ pSSDs <- make_all_pSSDs(
   base_output_path = file.path(tempdir(), "pssd_figures"), # directory to store output figures
   overwrite_cache = TRUE # whether or not to overwrite cached pSSD objects
 )
-
-message("Finished make_all_pSSDs.")
 ```
 
 ## 7.4.1 Inspect pSSD++ results - PNEC distribution
@@ -1393,3 +1388,174 @@ mc2d_results |>
 
 # 10. Sensitivity analysis
 **Sensitivity analysis** to identify dominant uncertainty contributors (e.g., alpha, plastic proportion, analytical recovery).
+
+## 10.1 Morris elementary effects (beta test)
+
+The Morris method is a global **screening** approach. It is efficient for ranking inputs by importance using
+elementary effects:
+
+- **mu\*** (mean absolute effect): overall importance
+- **sigma**: nonlinearity or interactions
+
+Below is a **small budget** setup for beta testing. It uses `param_values` to define factor ranges and evaluates
+the MC2D model output metric `RQ_p50`. Increase `morris_r`, `morris_levels`, and the internal MC sizes for production.
+
+```{r}
+# Build parameter bounds from param_values (mean +/- k * sd)
+param_bounds <- function(param_values, k = 2) {
+  pv <- param_values[1, , drop = FALSE]
+  nm <- names(pv)
+  sd_names <- nm[grepl("\\.sd$", nm)]
+  base_names <- sub("\\.sd$", "", sd_names)
+  base_names <- base_names[base_names %in% nm]
+
+  tibble(
+    param = base_names,
+    mean = as.numeric(pv[1, base_names]),
+    sd = as.numeric(pv[1, paste0(base_names, ".sd")])
+  ) |>
+    filter(is.finite(mean), is.finite(sd), sd > 0) |>
+    mutate(min = mean - k * sd,
+           max = mean + k * sd)
+}
+
+# Choose a small subset for beta testing (adjust as needed)
+morris_params <- param_bounds(param_values, k = 2)
+morris_subset <- c("alpha.freshwater", "R.ave.water.freshwater", "a.sa.freshwater")
+if (all(morris_subset %in% morris_params$param)) {
+  morris_params <- dplyr::filter(morris_params, param %in% morris_subset)
+} else {
+  morris_params <- dplyr::slice(morris_params, 1:min(4, nrow(morris_params)))
+}
+
+morris_params
+```
+
+```{r}
+# Helper: build hazard distributions from a custom param_values dataframe (small budgets for beta test)
+build_haz_from_params <- function(pv = param_values,
+                                  n_matrix = 2,
+                                  n_sim = 2,
+                                  sim = 2,
+                                  num_cores = 1) {
+  param_matrix_i <- matrix_function(
+    n = n_matrix,
+    params = pv,
+    upper.tissue.truncation.limit = 500,
+    x1M_set = 1,
+    x2D_set = 5000
+  )
+
+  MC_sim_df_i <- MC_sim_align_parallel(
+    tox_data = tox_data,
+    param_matrix = param_matrix_i,
+    n_sim = n_matrix,
+    x1D_set = 1,
+    x2D_set = 5000
+  )
+
+  results_df_food_i <- dplyr::filter(
+    MC_sim_df_i,
+    ingestible != "not ingestible",
+    particles_L_food_dilution > 0,
+    Group != "Algae"
+  ) |>
+    dplyr::mutate(dose_new_particles_L = particles_L_food_dilution) |>
+    tidyr::drop_na(particles_L_food_dilution)
+  results_df_food_t3_t4_i <- dplyr::filter(
+    results_df_food_i,
+    risk.13 != 1,
+    bio_f %in% c("Organism", "Population")
+  )
+
+  results_df_tissue_i <- dplyr::filter(
+    MC_sim_df_i,
+    translocatable != "not translocatable",
+    particles_L_ox_stress > 0
+  ) |>
+    dplyr::mutate(dose_new_particles_L = particles_L_ox_stress) |>
+    tidyr::drop_na(particles_L_ox_stress)
+  results_df_tissue_t3_t4_i <- dplyr::filter(
+    results_df_tissue_i,
+    risk.13 != 1,
+    bio_f %in% c("Organism", "Population")
+  )
+
+  erm_registry_i <- list(
+    "Food Dilution" = list(base = results_df_food_i, t3_t4 = results_df_food_t3_t4_i),
+    "Tissue Translocation" = list(base = results_df_tissue_i, t3_t4 = results_df_tissue_t3_t4_i)
+  )
+
+  pSSDs_i <- make_all_pSSDs(
+    MC_sim_df = MC_sim_df_i,
+    environments = c("Freshwater"),
+    erm_registry = erm_registry_i,
+    sim = sim,
+    cv_uf = 0.5,
+    rmore_method = "lognormal",    
+    parallel = T,
+    workers = parallel::detectCores() - 1,
+    base_cache_dir = file.path(tempdir(), "morris_pssd_cache"),
+    base_output_path = file.path(tempdir(), "morris_pssd_figures"),
+    overwrite_cache = TRUE
+  )
+
+  haz_HC5_food_i <- pSSDs_i$`Tier3_Freshwater_Food Dilution`$summary_05$df |>
+    mutate(HCx = 5, ERM = "Food Dilution")
+  haz_HC10_food_i <- pSSDs_i$`Tier3_Freshwater_Food Dilution`$summary_10$df |>
+    mutate(HCx = 10, ERM = "Food Dilution")
+  haz_HC5_tissue_i <- pSSDs_i$`Tier3_Freshwater_Tissue Translocation`$summary_05$df |>
+    mutate(HCx = 5, ERM = "Tissue Translocation")
+  haz_HC10_tissue_i <- pSSDs_i$`Tier3_Freshwater_Tissue Translocation`$summary_10$df |>
+    mutate(HCx = 10, ERM = "Tissue Translocation")
+
+  bind_rows(haz_HC5_food_i, haz_HC10_food_i, haz_HC5_tissue_i, haz_HC10_tissue_i)
+}
+```
+
+```{r}
+# Morris model: returns a scalar RQ_p50 (median across ERM/HCx) for each input set
+morris_model <- function(X) {
+  apply(X, 1, function(x_row) {
+    pv <- param_values
+    for (j in seq_along(x_row)) {
+      pv[[colnames(X)[j]]] <- x_row[j]
+    }
+
+    haz_i <- build_haz_from_params(pv, n_matrix = 3, n_sim = 3, sim = 5, num_cores = 1)
+    mc2d_i <- mc2d_risk(
+      monitoring_df = monitoring,
+      combined_cf = combined_cf,
+      haz_df = haz_i,
+      n_uncertainty = 50,
+      n_variability = 200,
+      seed = 1
+    )
+
+    median(mc2d_i$RQ_p50, na.rm = TRUE)
+  })
+}
+
+# Small Morris budget for beta test
+morris_levels <- 4
+morris_r <- 4
+
+morris_design <- sensitivity::morris(
+  model = NULL,
+  factors = morris_params$param,
+  r = morris_r,
+  design = list(type = "oat", levels = morris_levels, grid.jump = 1),
+  binf = morris_params$min,
+  bsup = morris_params$max
+)
+
+morris_design$y <- morris_model(morris_design$X)
+```
+
+```{r}
+# Morris results + plots
+morris_res <- sensitivity::tell(morris_design)
+print(morris_res)
+
+plot(morris_res) # mu* vs sigma
+```
