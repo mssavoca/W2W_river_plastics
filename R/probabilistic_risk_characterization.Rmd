@@ -852,12 +852,12 @@ cpsd_fit_volume_fiber <- fit_cpsd(raw_particles |> filter(shape == "fiber") |> p
                            c(list(shape = "fiber"))
 
 cpsd_fit_volume <- fit_cpsd(raw_particles |> pull(V_um3),
-                           bin_um = 1e4,
-                           fit_range_um = c(fragment_volume_lod_lower, fragment_volume_lod_upper),
+                           bin_um = 1e2,
+                           fit_range_um = c(1e7,1e8),#c(fragment_volume_lod_lower, fragment_volume_lod_upper),
                            lower_lod_method = "mpmax",
                            lower_resid_method = "left_resid",
                            N_min_lowbias = 3,
-                           min_nonzero_tail_lowbias = 1
+                           min_nonzero_tail_lowbias = 1,
                             ) |> 
                            c(list(shape = "all"))
 
@@ -867,7 +867,7 @@ cat("Fragment Volume: alpha =", signif(cpsd_fit_volume_fragment$a_cpsd,2), "+-",
 
 cat("Fiber Volume: alpha =", signif(cpsd_fit_volume_fiber$a_cpsd,2), "+-", signif(cpsd_fit_volume_fiber$se_a_cpsd,2), ", lower LOD =", signif(cpsd_fit_volume_fiber$lower_lod_used_um,2), ", upper LOD =", signif(cpsd_fit_volume_fiber$upper_lod_um,2), "\n")
 
-cat("All Shape Volume: alpha =", signif(cpsd_fit_volume$a_cpsd,2), "+-", signif(cpsd_fit_volume$se_a_cpsd,2), ", lower LOD =", signif(cpsd_fit_volume$lower_lod_used_um,2), ", upper LOD =", signif(cpsd_fit_volume$upper_lod_um,2), "\n")
+cat(crayon::blue("All Shape Volume: alpha =", signif(cpsd_fit_volume$a_cpsd,2), "+-", signif(cpsd_fit_volume$se_a_cpsd,2), ", lower LOD =", signif(cpsd_fit_volume$lower_lod_used_um,2), ", upper LOD =", signif(cpsd_fit_volume$upper_lod_um,2), "\n"))
 ```
 
 #### Plot Volume C-PSD fitting
@@ -1819,6 +1819,8 @@ alpha_sed <- alpha_dist(
 
 alpha_sed_mu <- mean(alpha_sed)
 alpha_sed_se <- sd(alpha_sed)
+
+cat(crayon::blue("All Shape Sediment: alpha =", signif(cpsd_fit_sed_all$a_cpsd,2), "+-", signif(cpsd_fit_sed_all$se_a_cpsd,2), ", lower LOD =", signif(cpsd_fit_sed_all$lower_lod_used_um,2), ", upper LOD =", signif(cpsd_fit_sed_all$upper_lod_um,2), "\n"))
 ```
 
 #### Plots
@@ -1870,6 +1872,8 @@ cpsd_fit_area_sed <- fit_cpsd(raw_particles_sed |> pull(area_um2),
                            min_nonzero_tail_lowbias = 1
                             ) |> 
                            c(list(shape = "all"))
+
+cat(crayon::blue("All Shape Sediment Area: alpha =", signif(cpsd_fit_area_sed$a_cpsd,2), "+-", signif(cpsd_fit_area_sed$se_a_cpsd,2), ", lower LOD =", signif(cpsd_fit_area_sed$lower_lod_used_um,2), ", upper LOD =", signif(cpsd_fit_area_sed$upper_lod_um,2), "\n"))
 ```
 
 #### Plots
@@ -1926,7 +1930,7 @@ cat("Sediment Fragment Volume: alpha =", signif(-cpsd_fit_volume_sed_fragment$a_
 
 cat("Sediment Fiber Volume: alpha =", signif(-cpsd_fit_volume_sed_fiber$a_cpsd,2), "+-", signif(cpsd_fit_volume_sed_fiber$se_a_cpsd,2), ", lower LOD =", signif(cpsd_fit_volume_sed_fiber$lower_lod_used_um,2), ", upper LOD =", signif(cpsd_fit_volume_sed_fiber$upper_lod_um,2), "\n")
 
-cat("Sediment All Shape Volume: alpha =", signif(-cpsd_fit_volume_sed$a_cpsd,2), "+-", signif(cpsd_fit_volume_sed$se_a_cpsd,2), ", lower LOD =", signif(cpsd_fit_volume_sed$lower_lod_used_um,2), ", upper LOD =", signif(cpsd_fit_volume_sed$upper_lod_um,2), "\n")
+cat(crayon::blue("Sediment All Shape Volume: alpha =", signif(-cpsd_fit_volume_sed$a_cpsd,2), "+-", signif(cpsd_fit_volume_sed$se_a_cpsd,2), ", lower LOD =", signif(cpsd_fit_volume_sed$lower_lod_used_um,2), ", upper LOD =", signif(cpsd_fit_volume_sed$upper_lod_um,2), "\n"))
 ```
 
 #### Plots
@@ -2053,6 +2057,10 @@ param_values_sed[[paste0("a.v.sediment.freshwater")]] <- -cpsd_fit_volume_sed$a_
 param_values_sed[[paste0("a.v.sediment.freshwater.sd")]] <- cpsd_fit_volume_sed$se_a_cpsd
 param_values_sed[[paste0("a.sa.sediment.freshwater")]] <- -cpsd_fit_area_sed$a_cpsd
 param_values_sed[[paste0("a.sa.sediment.freshwater.sd")]] <- cpsd_fit_area_sed$se_a_cpsd
+
+# pair down to only used parameters
+param_values_sed <- param_values_sed |> dplyr::select(contains("sediment.freshwater"), contains("beta"), contains("body"))
+param_values_sed
 ```
 
 #### Build and Visualize Parameter distributions
@@ -2136,7 +2144,7 @@ pSSDs_sed <- make_all_pSSDs(
   MC_sim_df = MC_sim_df_sed,
   environments = c("Freshwater Sediment"),
   erm_registry = erm_registry_sed,
-  sim = 3,
+  sim = 30,
   cv_uf = 0.5,
   rmore_method = "lognormal",
   parallel = TRUE,
