@@ -118,7 +118,12 @@ raw_particles <- raw_particles |>
     # fiber cylinder sensitivity in um^3 (only meaningful for fibers)
                         shape == "fiber"    ~ pi * (width_um/2)^2 * length_um,
                         TRUE ~ NA_real_)
-                        )
+                        ) |> 
+    # estimate particle mass based on volume and assumed density
+    mutate(mass_ug = V_um3 * 1.1) # assume density of 1.1 g/cm^3 for plastics
+
+# export CSV of cleaned up raw particles
+write.csv(raw_particles, "data_output/Part_dets_cleaned.csv", row.names = FALSE)
 
 raw_particles |>
   group_by(shape) |>
@@ -127,6 +132,9 @@ raw_particles |>
     V_um3_median = median(V_um3, na.rm = TRUE),
     V_um3_mean = mean(V_um3, na.rm = TRUE),
     V_um3_sd = sd(V_um3, na.rm = TRUE),
+    mass_ug_median = median(mass_ug, na.rm = TRUE),
+    mass_ug_mean = mean(mass_ug, na.rm = TRUE),
+    mass_ug_sd = sd(mass_ug, na.rm = TRUE),
     .groups = "drop"
   )
 ```
