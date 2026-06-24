@@ -1,0 +1,2607 @@
+---
+title: "Probabilistic Microplastics Risk Characterization: Central California Rivers"
+author: "Scott Coffin, Ph.D. — California Office of Environmental Health Hazard Assessment (OEHHA)"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+format: html
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width  = 9,
+  fig.height = 6
+)
+
+set.seed(1)
+
+# knitr runs with the Rmd's own directory (R/) as working dir by default.
+# Set root.dir to the project root so subsequent chunks resolve data paths correctly.
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+getwd()
+
+# ── Global Monte Carlo settings (change here to scale up/down) ──
+n_boot <- 100   # bootstrap replicates (increase to ≥ 1000 for publication)
+n_mc   <- 20000 # alpha Monte Carlo draws
+
+# ── Utility functions (sourced from companion scripts in R/) ──
+# mp_risk_utils.R – C-PSD fitting, exposure/hazard/risk functions
+# cpsd_plotting.R – plot_cpsd_multi(), MP_PALETTE
+source("R/mp_risk_utils.R")    # same directory as the Rmd (R/)
+source("R/cpsd_plotting.R")
+
+# ── Additional packages used in plots ──
+if (!requireNamespace("ggrepel", quietly = TRUE)) install.packages("ggrepel")
+if (!requireNamespace("scales",  quietly = TRUE)) install.packages("scales")
+library(ggrepel)
+library(scales)
+
+```
+
+# 1. Overview
+
+This document presents an **end-to-end, fully probabilistic** environmental risk assessment (ERA) workflow for microplastics in freshwater surface water and sediment from four central California rivers (Carmel, Pajaro, Salinas, and San Lorenzo). The workflow proceeds through five steps:
+
+1. **Raw particle data → power-law slope (α) via C-PSD** — cumulative particle size distribution fitted using the two-step LOD detection algorithm of [Segur et al. (2026)](https://doi.org/10.1186/s43591-026-00205-5).
+2. **Monitoring concentrations → probabilistic rescaling** — power-law integration converts measurements from a sampled size range to a target range, propagating slope uncertainty via Monte Carlo ([Coffin et al. 2022](https://doi.org/10.1016/j.scitotenv.2022.155859)).
+3. **Environmental Exposure Distribution (EED)** — nonparametric bootstrap of corrected site-level concentrations.
+4. **Hazard threshold distribution** — probabilistic species sensitivity distributions (pSSD++) using the [PSSDplusplus R package](https://github.com/ScottCoffin/ToMEx2.0_EcoToxRisk/tree/main/package) and [ToMEx 2.0 toxicity database](https://github.com/ScottCoffin/ToMEx2.0_EcoToxRisk).
+5. **Risk characterization** — Monte Carlo pairing of exposure and hazard distributions, expressed as risk quotient (RQ = Exposure/Hazard) and exceedance probability P(RQ > 1).
+
+All custom R functions (`fit_cpsd_segur_r`, `correction_factor`, `bootstrap_eed`, `mc2d_risk`, etc.) live in `R/mp_risk_utils.R` and `R/cpsd_plotting.R` for reuse and eventual integration into **PSSDplusplus**. The Segur et al. (2026) LOD-detection algorithm is implemented directly in `R/mp_risk_utils.R` as pure R.
+
+# 2. Packages
+
+```{r}
+pkgs <- c("tidyverse", "truncnorm", "fitdistrplus", "ggpubr", "sensitivity")
+to_install <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
+if (length(to_install) > 0) install.packages(to_install)
+lapply(pkgs, library, character.only = TRUE)
+
+# pSSD++ package (GitHub)
+if (!requireNamespace("devtools", quietly = TRUE)) install.packages("devtools")
+# install from github unless library(PSSDplusplus) is not already installed
+if (!requireNamespace("PSSDplusplus", quietly = TRUE)) {
+  devtools::install_github("ScottCoffin/ToMEx2.0_EcoToxRisk", upgrade = "never", subdir = "package", build_vignettes = FALSE)
+}
+library(PSSDplusplus)
+```
+
+# 3. Load data
+
+## 3.1 Raw particle-length observations
+
+This data comes from microscopy/FTIR particle measurements (a table of individual particles).
+
+```{r}
+# import river particle data (includes plastics and non-plastics)
+raw_particles <- readRDS("data_input/Part_dets_comb.rds") |> 
+  # filter to only QC-passing particles
+  dplyr::filter(!material_class %in% c("mineral", "organic matter"), #filter non-plastic
+                acc_analy_conf == "confident", # only use confident spectra
+                bad_spectra) %>% #filter out bad spectra
+  # extract the first 8-digit block from the ID
+  mutate(date_raw = str_extract(Client_ID_MSSupdate, "\\d{8}"), date = ymd(date_raw), # convert YYYYMMDD → Date
+         shape = case_when(aspect_ratio >= 3 ~ "fiber", # common definition of fiber - check!
+                           aspect_ratio <= 3 ~ "fragment"),
+         length_um = max_length_um,
+         width_um = min_length_um
+  )
+
+# subset by matrix for downstream analysis
+raw_particles_river <- raw_particles |> 
+  filter(sample_type == "river water") #river water, ocean water, or beach sand are options
+
+raw_particles_ocean <- raw_particles |> 
+  filter(sample_type == "ocean water")
+
+raw_particles_river |> 
+  group_by(shape) |> 
+  summarize(count = n(),
+            mean_length = mean(length_um, na.rm = TRUE),
+            min_length = min(length_um, na.rm = TRUE),
+            max_length = max(length_um, na.rm = TRUE),
+            sd_length = sd(length_um, na.rm = TRUE),
+            mean_width = mean(width_um, na.rm = TRUE),
+            min_width = min(width_um, na.rm = TRUE),
+            max_width = max(width_um, na.rm = TRUE)
+            )
+```
+
+### 3.1.1 Estimate particle volume
+
+```{r}
+# ---- Thickness (height) factor from measured raw data ----
+# Kooi et al. (2022) H = r * W, where r is median(W/L). 
+ratio_tbl <- raw_particles_river |>
+  mutate(
+    WL = 1/aspect_ratio,
+    # area-derived effective width (rectangle proxy); protects against noisy min_length
+    width_eff_um = case_when(
+      shape == "fragment" & !is.na(area_um2) & !is.na(length_um) & length_um > 0 &
+        !is.na(circularity) & circularity < 0.7 ~ area_um2 / length_um,
+      TRUE ~ width_um
+    )) |> 
+  group_by(shape) |>
+  summarise(
+    n = n(),
+    r_med  = median(WL, na.rm = TRUE),            # central estimate
+    r_low  = quantile(WL, 0.25, na.rm = TRUE),    # conservative low
+    r_high = quantile(WL, 0.75, na.rm = TRUE),    # conservative high
+    .groups = "drop"
+  )
+
+# quick sanity check: ratio table + summary of volumes
+ratio_tbl
+
+# ---- Volumes ----
+# Ellipsoid (Kooi-compatible): V = (pi/6) * L * W * H  with H = r * W
+# => V = (pi/6) * r * L * W^2
+# Cylinder assumption for fibers: V = pi * (W/2)^2 * L
+
+raw_particles_river <- raw_particles_river |>
+  left_join(ratio_tbl |> dplyr::select(shape, r_med), by = "shape") |>  
+  mutate(# thickness in um (assume L/W = H/W)
+    height_um = r_med * width_um) |> 
+
+    mutate(# ellipsoid volume in um^3 (primary; Kooi-consistent)
+      V_um3  = case_when(shape == "fragment" ~ (pi/6) * length_um * width_um * height_um,
+    # fiber cylinder sensitivity in um^3 (only meaningful for fibers)
+                        shape == "fiber"    ~ pi * (width_um/2)^2 * length_um,
+                        TRUE ~ NA_real_)
+                        ) |> 
+    # estimate particle mass based on volume and assumed density
+    mutate(mass_ug = V_um3 * 1.1) # assume density of 1.1 g/cm^3 for plastics
+
+# export CSV of cleaned up raw particles
+write.csv(raw_particles_river, "data_output/Part_dets_cleaned.csv", row.names = FALSE)
+
+raw_particles_river |>
+  group_by(shape) |>
+  summarise(
+    n = n(),
+    V_um3_median = median(V_um3, na.rm = TRUE),
+    V_um3_mean = mean(V_um3, na.rm = TRUE),
+    V_um3_sd = sd(V_um3, na.rm = TRUE),
+    mass_ug_median = median(mass_ug, na.rm = TRUE),
+    mass_ug_mean = mean(mass_ug, na.rm = TRUE),
+    mass_ug_sd = sd(mass_ug, na.rm = TRUE),
+    .groups = "drop"
+  )
+```
+
+## 3.2 Monitoring concentration observations (site replicates)
+
+Here we load monitoring replicate concentrations (particles/L) that were *reported for limited size ranges* (e.g., 300–5000 µm typical of net tows).
+
+```{r}
+monitoring <- readRDS("data_input/Part_dets_summ.rds") |> 
+  filter(sample_type == "river water",
+         material_simple == "plastic",
+         sample_or_blank == "sample"
+  ) %>% 
+  mutate(# extract the first 8-digit block from the ID
+    date_raw = str_extract(Client_ID_MSSupdate, "\\d{8}"),  
+    # convert YYYYMMDD → Date
+    date = ymd(date_raw),    
+    # correct the specific sample date
+    date = case_when(
+      Client_ID_MSSupdate == "SRR20250303SS" ~ ymd("20250303"),
+      TRUE ~ date
+    ),
+    sample_dets = case_when(Client_ID_MSSupdate %in% c("CRR20231207SS", "CRR20231207SD") ~ "lagoon",
+                            Client_ID_MSSupdate %in% c("SRR20231207SS", "SRR20231207SD") ~ "lagoon"),
+    # recode depth to subsurface
+    sample_depth_general = recode(sample_depth_general,
+                                  "depth" = "subsurface"),
+    sample_depth_general = factor(
+      sample_depth_general,
+      levels = c("subsurface", "surface")
+    ) 
+  ) %>%
+  rename(river = sample_location,
+         C_measured_pL = extrap_conc_PPL) |> 
+          # should adjust based on power law LLOD determined below
+  mutate(Lmin_measured_um = 50, 
+         Lmax_measured_um = 500,
+         sample_id = Client_ID_MSSupdate)
+
+head(monitoring)
+```
+
+
+# 4. Step 1 — Derive power-law alpha via C-PSD (binned cumulative PSD)
+
+## 4.1 C-PSD fitting — Segur et al. (2026)
+
+The C-PSD (cumulative particle size distribution) method fits N(≥L) vs L on a log-log scale
+using **binned** count data, removing the bin-width bias inherent in the classic BN-PSD approach
+([Segur et al. 2026](https://doi.org/10.1186/s43591-026-00205-5)). The algorithm is implemented
+in pure R in `R/mp_risk_utils.R` as `fit_cpsd_segur_r()`.
+
+**Two-step LOD detection algorithm:**
+
+1. Bin particle measurements; compute BN-PSD and C-PSD.
+2. Global OLS on all bins → normalised residuals; retain bins with *positive* residuals at or
+   above the BN-PSD peak (Low_size ≥ L_max of the BN-PSD).
+3. Exhaustively test all contiguous sub-windows ≥ 3 bins; accept windows with R² ≥ 0.90.
+4. Select the **longest** accepted window (ties broken by R²) as the fitting range.
+5. OLS on log₁₀ N(≥L) ~ log₁₀ L_low; BN-PSD slope a = a_cpsd − 1.
+
+## 4.2 Fit C-PSD to the raw particle data
+
+### 4.2.1 Particle Length
+
+```{r cpsd-fits-by-shape}
+# Pooled C-PSD fits across all river locations, bin_um = 5 µm
+cpsd_fit_frag  <- c(fit_cpsd_segur_r(raw_particles_river |> dplyr::filter(shape == "fragment") |> dplyr::pull(length_um), bin_um = 5), list(shape = "fragment"))
+cpsd_fit_fiber <- c(fit_cpsd_segur_r(raw_particles_river |> dplyr::filter(shape == "fiber")    |> dplyr::pull(length_um), bin_um = 5), list(shape = "fiber"))
+cpsd_fit_all   <- c(fit_cpsd_segur_r(raw_particles_river |> dplyr::pull(length_um),              bin_um = 5), list(shape = "all"))
+```
+
+The Segur et al. (2026) algorithm fitted power-law slopes of α_CPSD = `r round(cpsd_fit_frag$a_cpsd, 2)` ± `r round(cpsd_fit_frag$se_a_cpsd, 2)` for fragments (LOD `r round(cpsd_fit_frag$lower_lod_used_um)` – `r round(cpsd_fit_frag$upper_lod_um)` µm), α_CPSD = `r round(cpsd_fit_fiber$a_cpsd, 2)` ± `r round(cpsd_fit_fiber$se_a_cpsd, 2)` for fibers (LOD `r round(cpsd_fit_fiber$lower_lod_used_um)` – `r round(cpsd_fit_fiber$upper_lod_um)` µm), and α_CPSD = `r round(cpsd_fit_all$a_cpsd, 2)` ± `r round(cpsd_fit_all$se_a_cpsd, 2)` for all particles pooled (LOD `r round(cpsd_fit_all$lower_lod_used_um)` – `r round(cpsd_fit_all$upper_lod_um)` µm, R² = `r round(cpsd_fit_all$r2, 3)`). The corresponding differential BN-PSD slopes (a = α_CPSD − 1) are `r round(cpsd_fit_frag$a_psd, 2)` (fragment), `r round(cpsd_fit_fiber$a_psd, 2)` (fiber), and `r round(cpsd_fit_all$a_psd, 2)` (all). For comparison, [Segur et al. (2026)](https://doi.org/10.1186/s43591-026-00205-5) report a mean BN-PSD slope of −2.66 ± 0.68 for fragments across ocean and atmosphere samples.
+
+```{r cpsd-fits-by-location}
+# Per-location fits (Carmel, Pajaro, Salinas, San Lorenzo) — all particles pooled by site
+locations <- sort(unique(raw_particles_river$sample_location))
+
+cpsd_fits_by_loc <- lapply(setNames(locations, locations), function(loc) {
+  dat <- raw_particles_river |> dplyr::filter(sample_location == loc) |> dplyr::pull(length_um)
+  c(fit_cpsd_segur_r(dat, bin_um = 5), list(shape = loc))
+})
+
+# Summary table: slope and LOD window by location
+loc_summary <- dplyr::bind_rows(lapply(names(cpsd_fits_by_loc), function(loc) {
+  fo <- cpsd_fits_by_loc[[loc]]
+  tibble::tibble(
+    location     = loc,
+    n_particles  = sum(raw_particles_river$sample_location == loc),
+    a_cpsd       = round(fo$a_cpsd,   3),
+    se_a_cpsd    = round(fo$se_a_cpsd, 3),
+    a_psd        = round(fo$a_psd,    3),
+    lod_low_um   = round(fo$lower_lod_used_um, 0),
+    lod_high_um  = round(fo$upper_lod_um,       0),
+    r2           = round(fo$r2,       3),
+    n_bins       = fo$n_bins,
+    fit_mode     = fo$fit_mode
+  )
+}))
+
+knitr::kable(loc_summary, caption = "C-PSD length fits by river location (Segur 2026 algorithm)")
+```
+
+```{r cpsd-location-slope-plot}
+loc_summary |>
+  ggplot2::ggplot(ggplot2::aes(x = location, y = a_psd)) +
+  ggplot2::geom_hline(yintercept = -2.66, linetype = "dashed", color = "gray50", linewidth = 0.7) +
+  ggplot2::geom_point(size = 4, color = "#56B4E9") +
+  ggplot2::geom_errorbar(
+    ggplot2::aes(ymin = a_psd - se_a_cpsd, ymax = a_psd + se_a_cpsd),
+    width = 0.2, color = "#56B4E9", linewidth = 0.8
+  ) +
+  ggplot2::annotate("text", x = Inf, y = -2.66,
+                    label = "Segur 2026 fragment mean (−2.66)",
+                    size = 3.2, hjust = 1.05, vjust = -0.5, color = "gray40") +
+  ggplot2::coord_cartesian(ylim = c(-4, -1)) +
+  ggplot2::scale_y_continuous(
+    breaks = seq(-4, -1, by = 0.5),
+    labels = function(x) formatC(x, digits = 1, format = "f")
+  ) +
+  ggplot2::labs(
+    x        = "River location",
+    y        = expression(italic(a)[psd] ~ "=" ~ italic(a)[cpsd] - 1),
+    title    = "Power-law slope by river location",
+    subtitle = expression("Error bars = ±1 SE  |  Dashed = Segur 2026 reference")
+  ) +
+  ggplot2::theme_minimal(base_size = 14) +
+  ggplot2::theme(panel.border = ggplot2::element_rect(color = "gray85", fill = NA, linewidth = 0.4))
+```
+
+#### 4.2.1.1 Plot C-PSD fits (model uncertainty)
+
+`plot_cpsd_multi()` and `MP_PALETTE` are sourced from `R/cpsd_plotting.R`.
+
+```{r cpsd-length-plot}
+fits_by_shape <- list(fragment = cpsd_fit_frag, fiber = cpsd_fit_fiber, all = cpsd_fit_all)
+fits_by_shape <- fits_by_shape[names(MP_PALETTE)[names(MP_PALETTE) %in% names(fits_by_shape)]]
+
+alpha_cpsh_plot <- plot_cpsd_multi(
+  fits_by_shape,
+  title     = "C-PSD length fits by shape",
+  attribute = "Length"
+)
+
+ggsave(alpha_cpsh_plot, filename = "figures/alpha_cpsh_plot.png", width = 8, height = 6, dpi = 300)
+alpha_cpsh_plot
+```
+
+#### 4.2.1.2 Literature comparison of power-law size distribution slopes
+
+The differential BN-PSD slope *a*~psd~ = *a*~cpsd~ − 1 (equivalent to the negative power-law exponent α in Kooi & Koelmans 2019) characterizes how steeply particle abundance declines with increasing size. Steeper (more negative) *a*~psd~ values indicate that small particles dominate the count distribution far more strongly than large ones. Comparing this slope across studies and analytical methods provides a critical cross-check on data quality and reveals how sampling methodology shapes the apparent size distribution.
+
+**Notation reconciliation.** Different publications use different sign conventions. Zhao et al. (2026) and Kooi & Koelmans (2019) report the *positive* exponent α from the probability density function *f*(*L*) ∝ *L*^−α^; their α corresponds directly to |*a*~psd~| in our Segur notation. Wang et al. (2026) follow the same positive-α convention. Segur et al. (2026) report the negative C-PSD slope *a*~cpsd~, from which *a*~psd~ = *a*~cpsd~ − 1.
+
+```{r alpha-literature-comparison-table, echo=FALSE}
+lit_alpha_df <- data.frame(
+  Source = c(
+    paste0("This study — fragments (µFTIR, Segur LOD, ", round(cpsd_fit_frag$lower_lod_used_um), "–", round(cpsd_fit_frag$upper_lod_um), " µm)"),
+    paste0("This study — fibers (µFTIR, Segur LOD, ", round(cpsd_fit_fiber$lower_lod_used_um), "–", round(cpsd_fit_fiber$upper_lod_um), " µm)"),
+    paste0("This study — all shapes (µFTIR, Segur LOD, ", round(cpsd_fit_all$lower_lod_used_um), "–", round(cpsd_fit_all$upper_lod_um), " µm)"),
+    "Wang et al. 2026 — Rhine/Meuse combined suspended solids (µFTIR)",
+    "Wang et al. 2026 — Rhine Lobith samples (µFTIR, mean)",
+    "Wang et al. 2026 — Meuse Eijsden samples (µFTIR, mean)",
+    "Segur et al. 2026 — ocean reference (C-PSD)",
+    "Segur et al. 2026 — atmosphere reference (C-PSD)",
+    "Zhao et al. 2026 — global surface water meta-analysis (45 studies)",
+    "Zhao et al. 2026 — mesh-adjusted global surface water",
+    "Kooi & Koelmans 2019 — global freshwater/marine"
+  ),
+  Convention = c(
+    rep("C-PSD a_cpsd (negative)", 3),
+    rep("BN-PSD +α (positive)", 3),
+    rep("C-PSD a_cpsd (negative)", 2),
+    rep("BN-PSD +α (positive)", 3)
+  ),
+  Reported_alpha = c(
+    round(cpsd_fit_frag$a_cpsd, 3),
+    round(cpsd_fit_fiber$a_cpsd, 3),
+    round(cpsd_fit_all$a_cpsd, 3),
+    3.65, 3.89, 3.19,
+    -1.66, -1.55,
+    1.50, 1.53, 1.60
+  ),
+  Equivalent_a_psd = c(
+    round(cpsd_fit_frag$a_cpsd - 1, 3),
+    round(cpsd_fit_fiber$a_cpsd - 1, 3),
+    round(cpsd_fit_all$a_cpsd - 1, 3),
+    -3.65, -3.89, -3.19,
+    -2.66, -2.55,
+    -1.50, -1.53, -1.60
+  ),
+  check.names = FALSE
+)
+colnames(lit_alpha_df) <- c("Source", "Convention", "Reported value", "Equivalent a_psd")
+knitr::kable(lit_alpha_df,
+  caption = "Power-law size distribution slopes: this study vs. recent literature. All values converted to the BN-PSD differential slope a_psd for comparability.",
+  digits = 3, align = "llrr"
+)
+```
+
+**Key finding — consistency with µFTIR studies, divergence from net-trawl surveys.** Our fragment *a*~psd~ (`r round(cpsd_fit_frag$a_cpsd - 1, 2)`) and all-shape *a*~psd~ (`r round(cpsd_fit_all$a_cpsd - 1, 2)`) are within the range reported by Wang et al. (2026) for Dutch river suspended solids measured by µFTIR (−3.19 to −3.89, mean combined −3.65, SD 0.21). This agreement is not surprising: both datasets use particle-by-particle µFTIR counting on filtered samples. In contrast, our values are substantially steeper than the global surface water meta-analysis compiled by Zhao et al. (2026; mean α = 1.50, equivalent *a*~psd~ = −1.50, SD 0.53) and the global averages reported by Kooi & Koelmans (2019; α ≈ 1.60). The Segur et al. (2026) reference slopes (ocean −1.66, atmosphere −1.55 in C-PSD notation, equivalent *a*~psd~ ≈ −2.66 and −2.55) are intermediate.
+
+The divergence from the Zhao/Kooi global averages likely reflects three interacting factors: (1) **analytical resolution** — µFTIR counting captures particles approaching ~20 µm, whereas most studies in the Zhao meta-analysis used net trawls or pump samples with mesh sizes ≥ 300 µm, systematically missing the numerically dominant small-particle fraction and producing an apparent shallower slope; (2) **size range of fit** — our Segur LOD algorithm fits the C-PSD over a restricted window (~100–330 µm for fragments) within which the distribution is inherently steeper than a global fit spanning three orders of magnitude; (3) **environmental context** — California coastal rivers may differ from open-ocean or mixed-environment global compilations.
+
+**Fiber vs. fragment.** Fibers exhibit a notably shallower slope (*a*~psd~ = `r round(cpsd_fit_fiber$a_cpsd - 1, 2)`) than fragments (*a*~psd~ = `r round(cpsd_fit_frag$a_cpsd - 1, 2)`). This is consistent with Zhao et al. (2026), who found that fibers have dramatically lower mesh capture efficiency (0.70% at 330 µm mesh; 37.6% at 20 µm mesh across a 10–5000 µm size range) compared to fragments (7.9% at 330 µm). While our µFTIR pump-and-filter approach avoids the coarsest mesh bias, filter capture of fine fibers (whose short axis — diameter ≤ 10 µm — can pass through a nominal 50 µm pore) may still be lower than for equidimensional fragments. A shallower measured fiber slope would result if fine fibers are under-retained, making observed fiber concentrations a minimum estimate. Users comparing fiber-specific concentrations across studies should be aware of this potential systematic bias.
+
+**Implications for data correction.** Three recently published correction methodologies were evaluated for applicability to this workflow:
+
+1. *Zhao et al. (2026) — Mesh selectivity correction*: This physically-based model corrects for particle loss during mesh-based net trawling or pump filtration. It is **not applied here** because (a) our particle data derive from µFTIR analysis of membrane-filtered samples where the Segur LOD algorithm explicitly identifies and corrects for the analytical lower detection limit; (b) the Zhao model is calibrated for net trawls (mesh aperture as the primary parameter) rather than membrane filtration; and (c) our `correction_factor()` function already accounts for size-range sampling bias through power-law integration, which accomplishes the same conceptual goal. Applying the Zhao correction on top of the existing CF would risk double-counting the lower-size adjustment.
+
+2. *Wang et al. (2026) — µFTIR objective and sieve effects*: Wang et al. demonstrated that the 4× µFTIR objective captures only 3 ± 3% of particles relative to the 25× objective (predominantly because the 4× misses sub-50 µm particles). The sieve mesh size (20 µm vs. 5 µm) had minimal effect on size distribution or polymer composition. The present dataset was collected with an approximately 4× objective at **25 µm pixel size**, giving a detection floor of ~50 µm. Critically, this floor is already reflected in `L_meas_min = 50 µm`, and the power-law CF extrapolates particle counts from this floor to 1 µm. The Wang et al. ×33 factor therefore does **not** apply here — it would double-count the sub-50 µm extrapolation already performed by the CF. A detailed analysis of this intersection and the residual uncertainty in the 50–100 µm marginal detection zone is presented in Section 10.2.
+
+3. *Chen et al. (2026) — Count-to-mass conversion*: Chen et al. developed a conditional fragmentation distribution (CFD, Weibull-based) model for converting particle counts to mass, outperforming the simple power-law (CPD) approach. This methodology is **not applicable** to the present count-based risk assessment workflow (exposure expressed as particles/L); it would be relevant only if mass-based exposure concentrations were required for comparison with mass-normalized ecotoxicological thresholds.
+
+**Summary.** The Segur et al. (2026) LOD detection and power-law correction workflow, as implemented here, represents a sound and methodologically consistent approach for central California riverine monitoring data. The measured slopes are coherent with other µFTIR-based riverine studies. No additional data correction is warranted at this time; the key outstanding methodological uncertainty is the µFTIR objective used, which affects absolute concentrations but not the relative risk ranking.
+
+#### 4.2.1.3 Comparative *a*~psd~ values: this study vs. literature
+
+```{r alpha-psd-comparison-plot, fig.width=9, fig.height=6, echo=FALSE, message=FALSE, warning=FALSE}
+# Individual per-site/location values (box + jitter)
+alpha_indiv_df <- dplyr::bind_rows(list(
+  dplyr::transmute(loc_summary,
+    Study     = "This study\n(CA rivers, µFTIR)",
+    alpha_abs = abs(a_psd),
+    Matrix    = "Freshwater river"
+  ),
+  data.frame(
+    Study     = "Wang 2026\n(NL rivers, µFTIR)",
+    alpha_abs = c(3.89, 3.19),   # Lobith and Eijsden site means
+    Matrix    = "Freshwater river"
+  ),
+  data.frame(
+    Study     = c("Segur 2026\n(ocean)", "Segur 2026\n(atmosphere)"),
+    alpha_abs = c(2.66, 2.55),
+    Matrix    = c("Ocean", "Atmosphere")
+  )
+))
+
+# Summary statistics only — plotted as diamond + errorbar
+alpha_summ_df <- data.frame(
+  Study    = c("Zhao 2026\n(global meta\nn = 45)", "Kooi 2019\n(global)"),
+  mean_abs = c(1.50, 1.60),
+  sd_abs   = c(0.53, NA_real_),
+  Matrix   = c("Surface water (global)", "Global mixed")
+)
+
+study_order <- c(
+  "This study\n(CA rivers, µFTIR)",
+  "Wang 2026\n(NL rivers, µFTIR)",
+  "Segur 2026\n(ocean)",
+  "Segur 2026\n(atmosphere)",
+  "Zhao 2026\n(global meta\nn = 45)",
+  "Kooi 2019\n(global)"
+)
+alpha_indiv_df$Study <- factor(alpha_indiv_df$Study, levels = study_order)
+alpha_summ_df$Study  <- factor(alpha_summ_df$Study,  levels = study_order)
+
+matrix_pal_comp <- c(
+  "Freshwater river"       = "#56B4E9",
+  "Ocean"                  = "#0072B2",
+  "Atmosphere"             = "#D55E00",
+  "Surface water (global)" = "#009E73",
+  "Global mixed"           = "#CC79A7"
+)
+
+ggplot2::ggplot() +
+  ggplot2::geom_boxplot(
+    data = alpha_indiv_df,
+    ggplot2::aes(x = Study, y = alpha_abs, color = Matrix, fill = Matrix),
+    alpha = 0.25, width = 0.45, outlier.shape = NA
+  ) +
+  ggplot2::geom_jitter(
+    data = alpha_indiv_df,
+    ggplot2::aes(x = Study, y = alpha_abs, color = Matrix),
+    width = 0.10, size = 2.8, alpha = 0.9
+  ) +
+  ggplot2::geom_point(
+    data = alpha_summ_df,
+    ggplot2::aes(x = Study, y = mean_abs, color = Matrix),
+    size = 5, shape = 18
+  ) +
+  ggplot2::geom_errorbar(
+    data = alpha_summ_df |> dplyr::filter(!is.na(sd_abs)),
+    ggplot2::aes(x = Study, ymin = mean_abs - sd_abs, ymax = mean_abs + sd_abs, color = Matrix),
+    width = 0.25, linewidth = 0.9
+  ) +
+  ggplot2::scale_color_manual(values = matrix_pal_comp, name = "Sample matrix") +
+  ggplot2::scale_fill_manual(values  = matrix_pal_comp, name = "Sample matrix") +
+  ggplot2::coord_cartesian(ylim = c(0.5, 5.2)) +
+  ggplot2::labs(
+    x        = NULL,
+    y        = expression(alpha == "|"*italic(a)[psd]*"|"),
+    title    = "Power-law size distribution slope: this study vs. literature",
+    subtitle = "Boxes = IQR (per-site values). Diamond = mean; error bar = ±1 SD.",
+    caption  = paste0(
+      "This study: per-river all-shapes slopes (n = 4). ",
+      "Wang 2026: Lobith and Eijsden site means. ",
+      "Segur 2026: separate ocean and atmosphere reference slopes. ",
+      "Zhao 2026 (diamond ± bar): global meta-analysis mean ± 1 SD (n = 45 studies). ",
+      "Kooi & Koelmans 2019: global mean. All values: |a_psd| = |a_cpsd − 1|."
+    )
+  ) +
+  ggplot2::theme_minimal(base_size = 13) +
+  ggplot2::theme(
+    axis.text.x     = ggplot2::element_text(angle = 20, hjust = 1, size = 11),
+    legend.position = "right",
+    panel.border    = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.4),
+    plot.caption    = ggplot2::element_text(size = 8, color = "gray50", hjust = 0)
+  )
+```
+
+### 4.2.2 Fit C-PSD model to Particle Surface Area
+
+```{r cpsd-fits-surface-area}
+cpsd_fit_area_fragment <- c(fit_cpsd_segur_r(raw_particles_river |> dplyr::filter(shape == "fragment") |> dplyr::pull(area_um2), bin_um = 500, fit_range_um = c(2000, 50000)),  list(shape = "fragment"))
+cpsd_fit_area_fiber    <- c(fit_cpsd_segur_r(raw_particles_river |> dplyr::filter(shape == "fiber")    |> dplyr::pull(area_um2), bin_um = 500, fit_range_um = c(2000, 500000)), list(shape = "fiber"))
+cpsd_fit_area          <- c(fit_cpsd_segur_r(raw_particles_river |> dplyr::pull(area_um2),              bin_um = 500, fit_range_um = c(2000, 500000)),                          list(shape = "all"))
+
+cat("Fragment Surface Area: alpha =", signif(cpsd_fit_area_fragment$a_cpsd, 2), "+-", signif(cpsd_fit_area_fragment$se_a_cpsd, 2),
+    ", LOD =", signif(cpsd_fit_area_fragment$lower_lod_used_um, 2), "–", signif(cpsd_fit_area_fragment$upper_lod_um, 2), "µm²\n")
+cat("Fiber Surface Area:    alpha =", signif(cpsd_fit_area_fiber$a_cpsd,    2), "+-", signif(cpsd_fit_area_fiber$se_a_cpsd,    2),
+    ", LOD =", signif(cpsd_fit_area_fiber$lower_lod_used_um,    2), "–", signif(cpsd_fit_area_fiber$upper_lod_um,    2), "µm²\n")
+cat("All Shape Surface Area: alpha =", signif(cpsd_fit_area$a_cpsd,         2), "+-", signif(cpsd_fit_area$se_a_cpsd,         2),
+    ", LOD =", signif(cpsd_fit_area$lower_lod_used_um,          2), "–", signif(cpsd_fit_area$upper_lod_um,          2), "µm²\n")
+```
+
+For reference, Kooi et al. (2021) found the following:
+* Freshwater surface area: alpha = 2.00 +- 0.065; lower LOD = 482,000 um^2
+* Marine surface water: alpha = 1.50 +- 0.009; lower LOD = 2,380 um^2
+
+```{r}
+surface_area_fits_by_shape <- list(
+  fragment = cpsd_fit_area_fragment,
+  fiber    = cpsd_fit_area_fiber,
+  all      = cpsd_fit_area
+  # film  = cpsd_fit_film,
+  # foam  = cpsd_fit_foam,
+  # etc.
+)
+
+surfacearea_cpsd_plot <- plot_cpsd_multi(surface_area_fits_by_shape, title = "C-PSD fits by shape", attribute = "Area")
+
+ggsave(surfacearea_cpsd_plot,
+       filename = "figures/surfacearea_cpsd_plot.png",
+       width = 8, height = 6, dpi = 300)
+
+surfacearea_cpsd_plot
+```
+
+### Volume C-PSD Fitting
+
+`volume_particle()` (sourced from `R/mp_risk_utils.R`) converts length LODs to volume LODs
+using the same shape-dependent geometry as the particle volume calculation in section 3.1.1.
+
+```{r volume-lod-bounds}
+# Translate length LODs to volume LODs using shape geometry
+fragment_volume_lod_lower <- volume_particle("fragment", cpsd_fit_frag$lower_lod_um, cpsd_fit_frag$lower_lod_um, cpsd_fit_frag$lower_lod_um)
+fragment_volume_lod_upper <- volume_particle("fragment", cpsd_fit_frag$upper_lod_um, cpsd_fit_frag$upper_lod_um, cpsd_fit_frag$upper_lod_um)
+fiber_volume_lod_lower    <- volume_particle("fiber",    cpsd_fit_fiber$lower_lod_um, cpsd_fit_fiber$lower_lod_um, cpsd_fit_fiber$lower_lod_um)
+fiber_volume_lod_upper    <- volume_particle("fiber",    cpsd_fit_fiber$upper_lod_um, cpsd_fit_fiber$upper_lod_um, cpsd_fit_fiber$upper_lod_um)
+cat("Fragment volume LOD: [", signif(fragment_volume_lod_lower, 2), ",", signif(fragment_volume_lod_upper, 2), "] µm³\n")
+cat("Fiber    volume LOD: [", signif(fiber_volume_lod_lower,    2), ",", signif(fiber_volume_lod_upper,    2), "] µm³\n")
+```
+
+
+```{r cpsd-fits-volume}
+cpsd_fit_volume_fragment <- c(fit_cpsd_segur_r(raw_particles_river |> dplyr::filter(shape == "fragment") |> dplyr::pull(V_um3), bin_um = 1e3, fit_range_um = c(fragment_volume_lod_lower, fragment_volume_lod_upper)), list(shape = "fragment"))
+cpsd_fit_volume_fiber    <- c(fit_cpsd_segur_r(raw_particles_river |> dplyr::filter(shape == "fiber")    |> dplyr::pull(V_um3), bin_um = 1e4, fit_range_um = c(fiber_volume_lod_lower,    fiber_volume_lod_upper)),    list(shape = "fiber"))
+cpsd_fit_volume          <- c(fit_cpsd_segur_r(raw_particles_river |> dplyr::pull(V_um3),                                       bin_um = 1e2, fit_range_um = c(1e7, 1e8)),                                             list(shape = "all"))
+
+cat("Fragment Volume: alpha =", signif(cpsd_fit_volume_fragment$a_cpsd, 2), "+-", signif(cpsd_fit_volume_fragment$se_a_cpsd, 2),
+    ", LOD =", signif(cpsd_fit_volume_fragment$lower_lod_used_um, 2), "–", signif(cpsd_fit_volume_fragment$upper_lod_um, 2), "µm³\n")
+cat("Fiber Volume:    alpha =", signif(cpsd_fit_volume_fiber$a_cpsd,    2), "+-", signif(cpsd_fit_volume_fiber$se_a_cpsd,    2),
+    ", LOD =", signif(cpsd_fit_volume_fiber$lower_lod_used_um,    2), "–", signif(cpsd_fit_volume_fiber$upper_lod_um,    2), "µm³\n")
+cat("All Shape Volume: alpha =", signif(cpsd_fit_volume$a_cpsd,         2), "+-", signif(cpsd_fit_volume$se_a_cpsd,         2),
+    ", LOD =", signif(cpsd_fit_volume$lower_lod_used_um,          2), "–", signif(cpsd_fit_volume$upper_lod_um,          2), "µm³\n")
+```
+
+#### Plot Volume C-PSD fitting
+```{r}
+volume_fits_by_shape <- list(
+  fragment = cpsd_fit_volume_fragment,
+  fiber    = cpsd_fit_volume_fiber,
+  all      = cpsd_fit_volume
+  # film  = cpsd_fit_film,
+  # foam  = cpsd_fit_foam,
+  # etc.
+)
+
+volume_cpsd_plot <- plot_cpsd_multi(volume_fits_by_shape, title = "C-PSD fits by shape", attribute = "Volume")
+
+ggsave(volume_cpsd_plot,
+       filename = "figures/volume_cpsd_plot.png",
+       width = 8, height = 6, dpi = 300)
+
+volume_cpsd_plot
+```
+
+### 4.2.4 Per-river C-PSD fits (length, surface area, and volume — faceted)
+
+```{r cpsd-per-river-fits, message=FALSE, warning=FALSE, cache=FALSE}
+# Fit C-PSD per river × shape for all three metrics.
+# Uses tryCatch to handle sparse data combinations gracefully.
+safe_cpsd <- function(data, ...) {
+  if (length(data) < 10) return(list(valid = FALSE))
+  tryCatch(
+    c(fit_cpsd_segur_r(data, ...), list(valid = TRUE)),
+    error = function(e) list(valid = FALSE)
+  )
+}
+
+cpsd_loc_shape_length <- lapply(setNames(locations, locations), function(loc) {
+  sub <- raw_particles_river |> dplyr::filter(sample_location == loc)
+  list(
+    fragment = safe_cpsd(sub |> dplyr::filter(shape == "fragment") |> dplyr::pull(length_um), bin_um = 5),
+    fiber    = safe_cpsd(sub |> dplyr::filter(shape == "fiber")    |> dplyr::pull(length_um), bin_um = 5),
+    all      = safe_cpsd(sub |> dplyr::pull(length_um), bin_um = 5)
+  )
+})
+
+cpsd_loc_shape_area <- lapply(setNames(locations, locations), function(loc) {
+  sub <- raw_particles_river |> dplyr::filter(sample_location == loc)
+  list(
+    fragment = safe_cpsd(sub |> dplyr::filter(shape == "fragment") |> dplyr::pull(area_um2),
+                         bin_um = 500, fit_range_um = c(2000, 50000)),
+    fiber    = safe_cpsd(sub |> dplyr::filter(shape == "fiber")    |> dplyr::pull(area_um2),
+                         bin_um = 500, fit_range_um = c(2000, 500000)),
+    all      = safe_cpsd(sub |> dplyr::pull(area_um2),
+                         bin_um = 500, fit_range_um = c(2000, 500000))
+  )
+})
+
+cpsd_loc_shape_vol <- lapply(setNames(locations, locations), function(loc) {
+  sub <- raw_particles_river |> dplyr::filter(sample_location == loc)
+  list(
+    fragment = safe_cpsd(sub |> dplyr::filter(shape == "fragment") |> dplyr::pull(V_um3),
+                         bin_um = 1e3, fit_range_um = c(fragment_volume_lod_lower, fragment_volume_lod_upper)),
+    fiber    = safe_cpsd(sub |> dplyr::filter(shape == "fiber")    |> dplyr::pull(V_um3),
+                         bin_um = 1e4, fit_range_um = c(fiber_volume_lod_lower, fiber_volume_lod_upper)),
+    all      = safe_cpsd(sub |> dplyr::pull(V_um3),
+                         bin_um = 1e2, fit_range_um = c(1e7, 1e8))
+  )
+})
+
+# Helper: extract LOD bounds from a fit object
+.lod_bounds <- function(fo) {
+  lod_lo <- if (!is.null(fo$lower_lod_used_um) && is.finite(fo$lower_lod_used_um))
+               fo$lower_lod_used_um else fo$lower_lod_um
+  list(lo = lod_lo, hi = fo$upper_lod_um)
+}
+
+# Extract predicted lines + 95% CI ribbon within each fit's valid LOD window
+extract_fit_lines <- function(fits_by_loc, metric_name) {
+  dplyr::bind_rows(lapply(names(fits_by_loc), function(loc) {
+    dplyr::bind_rows(lapply(names(fits_by_loc[[loc]]), function(shp) {
+      fo <- fits_by_loc[[loc]][[shp]]
+      if (!isTRUE(fo$valid) || is.null(fo$fit)) return(NULL)
+      b <- .lod_bounds(fo)
+      if (!is.finite(b$lo) || !is.finite(b$hi) || b$lo >= b$hi) return(NULL)
+      grid <- tibble::tibble(L_low = seq(b$lo, b$hi, length.out = 80))
+      pred <- tryCatch(predict(fo$fit, newdata = grid, se.fit = TRUE), error = function(e) NULL)
+      if (is.null(pred)) return(NULL)
+      tibble::tibble(metric = metric_name, shape = shp, location = loc,
+                     L_low    = grid$L_low,
+                     logN_fit = pred$fit,
+                     logN_lo  = pred$fit - 1.96 * pred$se.fit,
+                     logN_hi  = pred$fit + 1.96 * pred$se.fit)
+    }))
+  }))
+}
+
+# Extract raw binned data points with an in_lod flag for opacity mapping
+extract_fit_points <- function(fits_by_loc, metric_name) {
+  dplyr::bind_rows(lapply(names(fits_by_loc), function(loc) {
+    dplyr::bind_rows(lapply(names(fits_by_loc[[loc]]), function(shp) {
+      fo <- fits_by_loc[[loc]][[shp]]
+      if (!isTRUE(fo$valid) || is.null(fo$bins)) return(NULL)
+      b <- .lod_bounds(fo)
+      fo$bins |>
+        dplyr::arrange(L_low) |>
+        dplyr::mutate(
+          N_ge   = rev(cumsum(rev(n))),
+          in_lod = is.finite(b$lo) & is.finite(b$hi) & L_low >= b$lo & L_high <= b$hi
+        ) |>
+        dplyr::filter(L_low > 0, N_ge > 0) |>
+        dplyr::transmute(metric = metric_name, shape = shp, location = loc,
+                         L_low, logN = log10(N_ge), in_lod)
+    }))
+  }))
+}
+
+# River location colour palette (defined once, reused in both chunks)
+loc_palette <- c(
+  "Carmel"      = "#E69F00",
+  "Pajaro"      = "#56B4E9",
+  "Salinas"     = "#009E73",
+  "San Lorenzo" = "#CC79A7"
+)
+
+factor_levels <- list(
+  metric = c("Length (µm)", "Surface Area (µm²)", "Volume (µm³)"),
+  shape  = c("fragment", "fiber", "all"),
+  slabel = c("Fragment",  "Fiber",  "All shapes")
+)
+
+cpsd_loc_lines <- dplyr::bind_rows(
+  extract_fit_lines(cpsd_loc_shape_length, "Length (µm)"),
+  extract_fit_lines(cpsd_loc_shape_area,   "Surface Area (µm²)"),
+  extract_fit_lines(cpsd_loc_shape_vol,    "Volume (µm³)")
+) |>
+  dplyr::mutate(
+    metric   = factor(metric, levels = factor_levels$metric),
+    shape    = factor(shape,  levels = factor_levels$shape, labels = factor_levels$slabel),
+    location = factor(location, levels = locations)
+  ) |>
+  dplyr::filter(!is.na(logN_fit))
+
+cpsd_loc_points <- dplyr::bind_rows(
+  extract_fit_points(cpsd_loc_shape_length, "Length (µm)"),
+  extract_fit_points(cpsd_loc_shape_area,   "Surface Area (µm²)"),
+  extract_fit_points(cpsd_loc_shape_vol,    "Volume (µm³)")
+) |>
+  dplyr::mutate(
+    metric   = factor(metric, levels = factor_levels$metric),
+    shape    = factor(shape,  levels = factor_levels$shape, labels = factor_levels$slabel),
+    location = factor(location, levels = locations)
+  ) |>
+  dplyr::filter(!is.na(logN))
+```
+
+```{r cpsd-by-river-faceted, fig.width=12, fig.height=8, echo=FALSE}
+# Subset palette to locations that are present in data
+loc_palette_used <- loc_palette[names(loc_palette) %in% as.character(unique(cpsd_loc_lines$location))]
+
+# Points subset: ensure levels match lines
+cpsd_loc_points2 <- cpsd_loc_points |>
+  dplyr::filter(location %in% names(loc_palette_used)) |>
+  dplyr::mutate(
+    metric   = factor(metric,   levels = factor_levels$metric),
+    shape    = factor(shape,    levels = factor_levels$slabel),
+    location = factor(location, levels = locations)
+  )
+
+cpsd_river_facet_plot <- ggplot2::ggplot() +
+  # --- Raw data points: outside LOD at low alpha ---
+  ggplot2::geom_point(
+    data = dplyr::filter(cpsd_loc_points2, !in_lod),
+    ggplot2::aes(x = log10(L_low), y = logN, color = location),
+    size = 0.7, alpha = 0.05, shape = 16
+  ) +
+  # --- Raw data points: inside LOD at full alpha ---
+  ggplot2::geom_point(
+    data = dplyr::filter(cpsd_loc_points2, in_lod),
+    ggplot2::aes(x = log10(L_low), y = logN, color = location),
+    size = 1.3, alpha = 0.75, shape = 16
+  ) +
+  # --- 95% CI ribbon (within LOD window) ---
+  ggplot2::geom_ribbon(
+    data = cpsd_loc_lines,
+    ggplot2::aes(x = log10(L_low), ymin = logN_lo, ymax = logN_hi, fill = location),
+    alpha = 0.12, color = NA
+  ) +
+  # --- Fitted regression line (within LOD window) ---
+  ggplot2::geom_line(
+    data = cpsd_loc_lines,
+    ggplot2::aes(x = log10(L_low), y = logN_fit, color = location),
+    linewidth = 0.9, alpha = 0.9
+  ) +
+  ggplot2::facet_grid(
+    shape ~ metric,
+    scales   = "free",
+    labeller = ggplot2::label_value
+  ) +
+  ggplot2::scale_color_manual(values = loc_palette_used, name = "River location") +
+  ggplot2::scale_fill_manual( values = loc_palette_used, name = "River location") +
+  ggplot2::guides(
+    color = ggplot2::guide_legend(override.aes = list(alpha = 1, size = 3)),
+    fill  = "none"
+  ) +
+  ggplot2::labs(
+    x        = expression(log[10] * "(size)"),
+    y        = expression(log[10] * (N("">=L))),
+    title    = "C-PSD power-law fits by river, shape, and size metric",
+    subtitle = "Solid lines + ribbon = fit ± 95% CI within Segur LOD window. Faded points = outside LOD.",
+    caption  = "Rows: shape. Columns: size metric. Fits per river via Segur (2026) LOD algorithm."
+  ) +
+  ggplot2::theme_minimal(base_size = 12) +
+  ggplot2::theme(
+    legend.position = "bottom",
+    panel.border    = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.4),
+    strip.text      = ggplot2::element_text(face = "bold", size = 10),
+    plot.caption    = ggplot2::element_text(size = 8, color = "gray50", hjust = 0)
+  )
+
+ggsave(cpsd_river_facet_plot, filename = "figures/cpsd_river_facet_plot.png",
+       width = 12, height = 8, dpi = 300)
+cpsd_river_facet_plot
+```
+
+### 4.2.5 Per-river power-law slopes across size metrics
+
+The per-location C-PSD fits from Section 4.2.4 yield a BN-PSD slope *a*~psd~ for each combination of river location and size metric (length, surface area, volume). Comparing these slopes across metrics shows how the shape of the size distribution changes with the geometric measure used, and whether location-to-location variation is consistent across metrics.
+
+```{r cpsd-slopes-all-metrics, fig.width=10, fig.height=4.5}
+# Extract per-location a_psd for surface area and volume from the per-river fits
+extract_loc_slopes <- function(fits_by_loc, metric_name) {
+  dplyr::bind_rows(lapply(names(fits_by_loc), function(loc) {
+    fo <- fits_by_loc[[loc]][["all"]]
+    if (!isTRUE(fo$valid) || is.null(fo$fit)) return(NULL)
+    tibble::tibble(location = loc, a_psd = fo$a_psd, se_a_cpsd = fo$se_a_cpsd, metric = metric_name)
+  }))
+}
+
+loc_slopes_all <- dplyr::bind_rows(
+  dplyr::transmute(loc_summary, location, a_psd, se_a_cpsd, metric = "Length (µm)"),
+  extract_loc_slopes(cpsd_loc_shape_area, "Surface Area (µm²)"),
+  extract_loc_slopes(cpsd_loc_shape_vol,  "Volume (µm³)")
+) |>
+  dplyr::mutate(
+    metric   = factor(metric, levels = c("Length (µm)", "Surface Area (µm²)", "Volume (µm³)")),
+    location = factor(location, levels = locations)
+  )
+
+# Reference slopes (Segur 2026 ocean mean, length metric)
+ref_slopes <- data.frame(
+  metric    = factor("Length (µm)", levels = levels(loc_slopes_all$metric)),
+  ref_slope = -2.66,
+  ref_label = "Segur 2026\nfragment mean"
+)
+
+ggplot2::ggplot(loc_slopes_all,
+    ggplot2::aes(x = location, y = a_psd, color = location)) +
+  ggplot2::geom_hline(
+    data = ref_slopes,
+    ggplot2::aes(yintercept = ref_slope),
+    linetype = "dashed", color = "gray50", linewidth = 0.7, inherit.aes = FALSE
+  ) +
+  ggplot2::geom_point(size = 4) +
+  ggplot2::geom_errorbar(
+    ggplot2::aes(ymin = a_psd - se_a_cpsd, ymax = a_psd + se_a_cpsd),
+    width = 0.2, linewidth = 0.8
+  ) +
+  ggplot2::facet_wrap(~ metric, nrow = 1, scales = "free_y") +
+  ggplot2::scale_color_manual(values = loc_palette, guide = "none") +
+  ggplot2::labs(
+    x        = "River location",
+    y        = expression(italic(a)[psd] ~ "=" ~ italic(a)[cpsd] - 1),
+    title    = "BN-PSD slope by river location and size metric",
+    subtitle = "Error bars = ±1 SE  |  Dashed = Segur 2026 fragment reference (length only)"
+  ) +
+  ggplot2::theme_minimal(base_size = 13) +
+  ggplot2::theme(
+    panel.border = ggplot2::element_rect(color = "gray85", fill = NA, linewidth = 0.4),
+    strip.text   = ggplot2::element_text(face = "bold")
+  )
+```
+
+Following the probabilistic rescaling approach (e.g., Coffin et al. 2022), treat alpha as uncertain and represent it by a distribution (commonly normal, truncated to plausible bounds).
+
+The fitted C-PSD slope is treated as uncertain (normal distribution truncated to [−6, −1.1])
+to propagate slope uncertainty through subsequent rescaling and risk characterization.
+`alpha_dist()` is sourced from `R/mp_risk_utils.R`.
+
+```{r alpha-distribution}
+alpha    <- alpha_dist(mu = cpsd_fit_all$a_cpsd, sd = cpsd_fit_all$se_a_cpsd, n = n_mc)
+alpha_mu <- mean(alpha)
+alpha_se <- sd(alpha)
+summary(alpha)
+```
+
+The resulting alpha distribution has mean `r round(alpha_mu, 3)` and SD `r round(alpha_se, 3)`.
+
+## 4.4 Length-to-width ratio distribution
+
+Particle width-to-length ratios (W/L = 1/aspect_ratio) are bootstrapped to propagate shape
+uncertainty into the PSSDplusplus particle alignment model.
+`bootstrap_aspect_ratio()` is sourced from `R/mp_risk_utils.R`.
+
+```{r aspect-ratio-distribution}
+raw_particles_river |>
+  ggplot2::ggplot(ggplot2::aes(x = 1 / aspect_ratio, fill = shape)) +
+  ggplot2::geom_histogram(bins = 40) +
+  ggplot2::labs(x = "Width : Length ratio (W/L)", y = "Count",
+                title = "Distribution of particle width-to-length ratios by shape") +
+  ggplot2::theme_minimal(base_size = 15)
+
+R.ave_result <- bootstrap_aspect_ratio(raw_particles_river$aspect_ratio, n_boot = n_boot)
+R.ave_vals   <- R.ave_result$vals
+R.ave_mean   <- R.ave_result$boot_mean
+R.ave_sd     <- R.ave_result$boot_sd
+print(R.ave_result$summary)
+```
+
+# 5. Step 2 — Rescale measured concentrations to a common size range
+
+## 5.1 Power-law integration for rescaling factors
+
+If the differential PSD follows dN/dL = k·L^a, the concentration in [L₁, L₂] is
+proportional to k/(a+1)·(L₂^(a+1) − L₁^(a+1)) (a ≠ −1). The rescaling correction factor is:
+
+CF = N(L_target_min, L_target_max) / N(L_meas_min, L_meas_max)
+
+`correction_factor()` is sourced from `R/mp_risk_utils.R` ([Coffin et al. 2022](https://doi.org/10.1016/j.scitotenv.2022.155859)).
+The measured size range is bias-corrected using the C-PSD LOD window from `cpsd_fit_all`.
+
+```{r rescaling-cf}
+# Align monitoring LOD window to the C-PSD detection limits
+monitoring <- monitoring |>
+  dplyr::mutate(
+    Lmin_biascorr_um = pmax(Lmin_measured_um, cpsd_fit_all$lower_lod_um, na.rm = TRUE),
+    Lmax_biascorr_um = pmin(Lmax_measured_um, cpsd_fit_all$upper_lod_um,  na.rm = TRUE)
+  )
+
+L_meas_min_use <- median(monitoring$Lmin_biascorr_um, na.rm = TRUE)
+L_meas_max_use <- median(monitoring$Lmax_biascorr_um, na.rm = TRUE)
+
+# Convert measured range to target range [1, 5000] µm, propagating alpha uncertainty
+cf_rescale <- correction_factor(
+  a          = alpha,
+  L_meas_min = L_meas_min_use,
+  L_meas_max = L_meas_max_use,
+  L_tar_min  = 1,
+  L_tar_max  = 5000
+)
+
+quantile(cf_rescale, c(0.05, 0.5, 0.95))
+```
+
+The median rescaling factor is `r round(median(cf_rescale), 2)` (90% CI: `r round(quantile(cf_rescale, 0.05), 2)` – `r round(quantile(cf_rescale, 0.95), 2)`), applied to convert concentrations measured over `r round(L_meas_min_use)` – `r round(L_meas_max_use)` µm to the target range of 1 – 5000 µm.
+
+## 5.2 Optional additional bias terms as probability distributions
+
+Coffin et al. (2022) describe two additional multiplicative correction terms that can be composed with the power-law rescaling CF:
+
+- **Fiber correction factor ($\text{CF}_\text{fiber}$):** Accounts for systematic fiber under-retention during *mesh-based* sampling (net trawls, pump filtration with woven sieves). In those contexts, the slender geometry of fibers allows them to pass through mesh apertures lengthwise, producing under-counts that are proportional to mesh size (Zhao et al. 2026). A log-normal distribution is appropriate because the factor is right-skewed and strictly positive.
+- **Plastic proportion factor ($p_\text{plastic}$):** The fraction of detected particles confirmed as plastic by spectroscopy. A Beta($\alpha$, $\beta$) distribution is appropriate because the factor is bounded to [0, 1].
+
+**Assessment for this dataset.** A fiber correction factor is **not applied here** for two reasons:
+
+1. *Sampling method:* The present monitoring data are from µFTIR analysis of membrane-filtered whole-water grab samples (pump collection), not mesh net trawls. Zhao et al. (2026) demonstrate that the dramatic fiber under-capture they quantify (0.7% efficiency at 330 µm mesh) arises specifically from the geometric interaction of elongated particles with woven mesh apertures. Membrane pore filtration retains particles primarily by size, so this mechanism does not apply.
+2. *Power-law extrapolation already corrects for sub-LOD fibers:* The `correction_factor()` function in Step 2 uses the fitted power-law slope to integrate particle counts from the measured size range (50–500 µm) to the target range (1–5000 µm). This extrapolation already accounts for undetected small fibers in a self-consistent way. Applying an additional fiber CF on top would double-count this adjustment.
+
+The fiber slope ($a_\text{psd}$ = `r round(cpsd_fit_fiber$a_cpsd - 1, 2)`) is shallower than the fragment slope (`r round(cpsd_fit_frag$a_cpsd - 1, 2)`), which may reflect residual under-retention of the finest fibers through nominal 50 µm filter pores, but this cannot be corrected without fiber-specific filter efficiency data. See Section 4.2.1.2 for the literature comparison.
+
+```{r combined-cf}
+# Optional multiplicative factors — not applied for this µFTIR membrane-filter dataset.
+# Retain code for reference and potential future use with mesh-sampled datasets.
+fiber_cf   <- rlnorm(n_mc, meanlog = log(2.0), sdlog = 0.5)    # illustrative; not applied
+plastic_pf <- pmin(rbeta(n_mc, shape1 = 20, shape2 = 3), 1.0)  # illustrative; not applied
+
+combined_cf <- cf_rescale  # fiber_cf and plastic_pf not multiplied in: see rationale above
+quantile(combined_cf, c(0.05, 0.5, 0.95))
+```
+
+## 5.3 Apply probabilistic correction to monitoring data
+
+We treat each monitoring sample's corrected concentration as:
+
+`C_corrected = C_measured * combined_cf_draw`, with `combined_cf_draw` sampled in Monte Carlo.
+
+This yields a **distribution per monitoring sample**, and a pooled exposure distribution across samples.
+
+```{r}
+# For simplicity, assume the same CF distribution applies to each sample.
+# If CF depends on site/method/shape, build CF distributions per strata and apply accordingly.
+
+C_corrected_draws <- monitoring |>
+  mutate(idx = row_number()) |>
+  tidyr::crossing(draw = 1:3000) |>
+  mutate(
+    cf = sample(combined_cf, size = n(), replace = TRUE),
+    C_corrected_pL = C_measured_pL * cf
+  )
+
+C_corrected_draws |>
+  summarise(p05 = quantile(C_corrected_pL, 0.05),
+            p50 = quantile(C_corrected_pL, 0.50),
+            p95 = quantile(C_corrected_pL, 0.95))
+```
+
+# 6. Step 3 — Environmental Exposure Distribution (EED) via empirical bootstrap
+
+Because environmental monitoring data are typically sparse and highly skewed, a **nonparametric bootstrap** is often a strong default:
+
+-   Resample (with replacement) the corrected sample-level concentrations.
+-   Compute the empirical CDF and desired percentiles per bootstrap replicate.
+-   This avoids heavy reliance on a parametric distribution family selection for EEDs.
+
+```{r eed-bootstrap}
+# Collapse each sample to its median corrected concentration, then bootstrap across samples.
+# This isolates site-level variability from correction-factor uncertainty (handled in MC2D below).
+# bootstrap_eed() is sourced from R/mp_risk_utils.R.
+C_sample_median <- C_corrected_draws |>
+  dplyr::group_by(sample_id) |>
+  dplyr::summarise(C_corr_med = median(C_corrected_pL), .groups = "drop")
+
+eed_boot <- bootstrap_eed(C_sample_median$C_corr_med, n_boot = n_boot, probs = c(0.5, 0.95))
+summary(eed_boot)
+```
+
+The median EED 50th percentile across `r n_boot` bootstrap replicates is `r round(median(eed_boot$q50), 2)` particles/L (90th percentile bootstrap: `r round(median(eed_boot$q95), 2)` particles/L).
+
+```{r eed-bootstrap-plot}
+eed_boot_long <- eed_boot |>
+  tidyr::pivot_longer(cols = everything(), names_to = "stat", values_to = "value") |>
+  dplyr::mutate(
+    stat_label = dplyr::case_when(
+      stat == "q50" ~ "EED 50th percentile",
+      stat == "q95" ~ "EED 95th percentile",
+      TRUE          ~ stat
+    )
+  )
+
+eed_boot_long |>
+  ggplot2::ggplot(ggplot2::aes(x = value, fill = stat_label, color = stat_label)) +
+  ggplot2::geom_histogram(bins = 40, alpha = 0.75, linewidth = 0.2) +
+  ggplot2::facet_wrap(~stat_label, scales = "free", ncol = 2) +
+  ggplot2::scale_fill_manual(values  = c("EED 50th percentile" = "#56B4E9",
+                                         "EED 95th percentile" = "#E69F00")) +
+  ggplot2::scale_color_manual(values = c("EED 50th percentile" = "#2A7FAD",
+                                         "EED 95th percentile" = "#BF7A00")) +
+  ggplot2::labs(
+    x        = "Corrected concentration (particles/L)",
+    y        = "Bootstrap replicates",
+    title    = "Bootstrap uncertainty in Environmental Exposure Distribution (EED) percentiles",
+    subtitle = paste0(
+      "n = ", n_boot, " bootstrap replicates of site-level median corrected concentrations"
+    ),
+    caption  = "Correction factor (CF) propagated via Monte Carlo; each replicate resamples sites with replacement."
+  ) +
+  ggplot2::theme_minimal(base_size = 14) +
+  ggplot2::theme(
+    legend.position  = "none",
+    strip.text       = ggplot2::element_text(face = "bold"),
+    panel.border     = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.4),
+    plot.caption     = ggplot2::element_text(size = 9, color = "gray50", hjust = 0)
+  )
+```
+
+# 7. Step 4 — Bespoke hazard thresholds using pSSD++ (ToMEx2.0_EcoToxRisk)
+
+## 7.1 Toxicity dataset
+
+Start with aligned toxicity records for freshwater species (i.e., quality-screened ToMEx 2.0 records aligned to both food dilution and tissue-translocation ERMs using bioaccessibility models and particle traits).
+
+```{r}
+# filter species by environment
+tox_data <- tomex2 |> 
+   dplyr::filter(
+    env_f == "Freshwater",
+    Group != "Bacterium", # Drop studies with Bacterium group
+    Group != "Plant", # Drop studies with Plant group
+    effect.metric != "HONEC", # Drop studies with HONEC effect metric
+    tier_zero_tech_f == "Red Criteria Passed", #minimum QC for technical criteria
+    tier_zero_risk_f == "Red Criteria Passed", #minimum QC for risk criteria
+    risk.13 != 0 #Drop studies that received a score of 0 for endpoints criteria (this also drops studies that have not yet been)
+  )
+
+# summarize by group, species, and polymer type to understand tox data included in model
+tox_data |> 
+  group_by(Group, Species, poly_f, shape_f) |> 
+  summarise(n = n(), .groups = "drop")
+```
+
+```{r}
+# replace the default parameter matrix distribution with values derived using the C-PSD method here
+param_values <- PSSDplusplus::param_default_values |> 
+  # update parameters from C-PSD method
+  mutate(alpha.freshwater = -alpha_mu, # use cPSD - 1 since dN/dL = k * L^a
+         alpha.freshwater.sd = alpha_se,
+         # additional values need updating:
+         ### Length to width ratio
+         R.ave.water.freshwater = R.ave_mean,
+         R.ave.water.freshwater.sd = R.ave_sd,
+
+         ### polymer density
+         #p.ave.freshwater = ,
+         #p.ave.freshwater.sd = ,
+
+         ### volume
+         a.v.freshwater = -cpsd_fit_volume$a_cpsd, 
+         a.v.freshwater.sd = cpsd_fit_volume$se_a_cpsd,
+
+         ### mass
+         #a.m.freshwater = ,
+         #a.m.freshwater.sd = ,
+
+         ### surface area
+         a.sa.freshwater = -cpsd_fit_area$a_cpsd,# derived value for all shapes
+         a.sa.freshwater.sd = cpsd_fit_area$se_a_cpsd
+         )
+
+# generate parameter matrix using bespoke environmental parameter values
+param_matrix <- matrix_function(
+  n = n_boot, #size of matrix (10,000 is recommended)
+  params = param_values, #parameter distribution values 
+  #params = PSSDplusplus::param_default_values, #beta-test with defaults
+  upper.tissue.truncation.limit = 500, # maximum particle size (microns) to truncate tissue tranlocation size limit distribution to based on biological plausibility
+  x1M_set = 1, #minimum particle size to generate distributions to in microns
+  x2D_set = 5000 #maximum particle size to generate distributions to in microns
+) |> 
+  # replace R.ave.water.freshwater with bootstrapped values
+   mutate(R.ave.water.freshwater = sample(R.ave_vals, size = n(), replace = TRUE),
+          H_W_ratio.freshwater = sample(R.ave_vals, size = n(), replace = TRUE)) #H_W ratio is assumed same as length-width ratio
+
+# visualize parameter distributions
+param_plots <- parameter_histograms_function(param_matrix) # generate parameter distribution plots
+#visualize plots
+param_plots$alpha_combined_plot # distribution of alpha parameters 
+```
+
+## 7.3 Run Monte-Carlo Simulation on Toxicity Data using Parameter Matrix
+
+`MC_sim_align_parallel()` is the core PSSDplusplus function that aligns each toxicological endpoint to the **particle trait distributions** defined in `param_matrix`. For each Monte Carlo replicate ($i = 1, \ldots, n_\text{sim}$) it:
+
+1. **Draws a particle trait vector** from `param_matrix`: particle size ($L$, log-normal), aspect ratio ($AR$), density ($\rho$), and C-PSD slope ($\alpha_\text{cpsd}$).
+2. **Applies the bioaccessibility model** for each ERM:
+   - *Food Dilution* — computes the volumetric food dilution dose (particles/L) using the particle volume and the organism's gut volume, converting the reported NOEC/EC dose to an environmentally comparable particle concentration.
+   - *Tissue Translocation* — computes the particle flux to tissue using the size-dependent translocation model; only particles below the translocation size threshold (500 µm) are included.
+3. **Aligns each species' EC dose** to a common concentration unit (particles/L equivalent), enabling a multi-species SSD to be constructed from studies that used different MP sizes, shapes, and concentrations.
+
+The output `MC_sim_df` is a long data frame with one row per toxicological endpoint per Monte Carlo replicate, with columns for the aligned dose (`particles_L_food_dilution`, `particles_L_ox_stress`), bioaccessibility group (`ingestible`, `translocatable`), and quality tier (`risk.13`, `bio_f`). It is then split by ERM and filtered to the relevant endpoints before SSD fitting in Section 7.4.
+
+```{r}
+MC_sim_df <- MC_sim_align_parallel(
+  tox_data = tox_data, # toxicity data (ToMEx 2.0 is default)
+  param_matrix = param_matrix, # parameter matrix generated in prior cell
+  n_sim = n_boot, # size of parameter matrix (ensure this is the same as the size of the matrix generated)
+  x1D_set = 1, # minimum particle size to generate distributions to (in microns)
+  x2D_set = 5000, # maximum particle size to generate distributions to (in microns)
+  num_cores = parallel::detectCores() - 2 # number of cores to use for parallel processing (auto-detect - 2)
+)
+```
+
+Split aligned data into ERM- and environment-specific subsets
+```{r}
+results_df_food <- dplyr::filter(
+  MC_sim_df,
+  ingestible != "not ingestible",
+  particles_L_food_dilution > 0,
+  Group != "Algae"
+) |>
+  dplyr::mutate(dose_new_particles_L = particles_L_food_dilution) |>
+  tidyr::drop_na(particles_L_food_dilution)
+results_df_food_t3_t4 <- dplyr::filter(
+  results_df_food,
+  risk.13 != 1,
+  bio_f %in% c("Organism", "Population")
+)
+
+results_df_tissue <- dplyr::filter(
+  MC_sim_df,
+  translocatable != "not translocatable",
+  particles_L_ox_stress > 0
+) |>
+  dplyr::mutate(dose_new_particles_L = particles_L_ox_stress) |>
+  tidyr::drop_na(particles_L_ox_stress)
+results_df_tissue_t3_t4 <- dplyr::filter(
+  results_df_tissue,
+  risk.13 != 1,
+  bio_f %in% c("Organism", "Population")
+)
+
+erm_registry <- list(
+  "Food Dilution" = list(base = results_df_food, t3_t4 = results_df_food_t3_t4),
+  "Tissue Translocation" = list(base = results_df_tissue, t3_t4 = results_df_tissue_t3_t4)
+)
+```
+
+## 7.4 Fit pSSD++ distributions for each ERM/environment
+
+```{r}
+# make all pSSDs
+pSSDs <- make_all_pSSDs(
+  MC_sim_df = MC_sim_df, # ensure aligned data is included
+  environments = c("Freshwater"), #specify which environments to include
+  erm_registry = erm_registry,
+  sim = 30, # specify the number of simulations to run (300 used in publication)
+  cv_uf = 0.5, # specify the coefficient of variation for uncertainty factors (acute -> chronic and LOEC/EC50 -> NOEC)
+  rmore_method = "lognormal", # method to handle pSSD distribution building (options = 'step' i.e., original trapezoidal method in Wigger et al., 2020, or 'lognormal' - shortcut developed in Coffin et al. (2025))
+  parallel = TRUE, #whether or not to use parallel processing
+  workers = parallel::detectCores() - 2, # number of worker processes to use for parallel processing
+  base_cache_dir = file.path(tempdir(), "pssd_cache"), # directory to store cached pSSD objects (important when running high number of simulations to resume if needed)
+  base_output_path = file.path(tempdir(), "pssd_figures"), # directory to store output figures
+  overwrite_cache = TRUE # whether or not to overwrite cached pSSD objects
+)
+```
+
+## 7.4.1 Inspect pSSD++ results - PNEC distribution
+
+```{r}
+PNEC_summary <- summarize_PNECs(pSSDs)
+head(PNEC_summary)
+```
+
+```{r}
+pSSDs$`Tier3_Freshwater_Food Dilution`$PNEC_plot_05
+```
+
+## 7.4.2 Inspect pSSD++ results - pSSD++ plots
+
+```{r}
+pSSDs$`Tier3_Freshwater_Food Dilution`$pSSD_plot
+```
+
+```{r}
+pSSDs$`Tier3_Freshwater_Food Dilution`$arranged_plot
+```
+
+
+```{r}
+# extract raw HC5 distribution
+haz_HC5_food <- pSSDs$`Tier3_Freshwater_Food Dilution`$summary_05$df |> 
+  mutate(HCx = 5,
+         ERM = "Food Dilution")
+
+haz_HC10_food <- pSSDs$`Tier3_Freshwater_Food Dilution`$summary_10$df |> 
+  mutate(HCx = 10,
+         ERM = "Food Dilution")
+         
+# extract raw HC5 distribution
+haz_HC5_tissue <- pSSDs$`Tier3_Freshwater_Tissue Translocation`$summary_05$df |> 
+  mutate(HCx = 5,
+         ERM = "Tissue Translocation")
+
+haz_HC10_tissue <- pSSDs$`Tier3_Freshwater_Tissue Translocation`$summary_10$df |> 
+  mutate(HCx = 10,
+         ERM = "Tissue Translocation")
+
+# make a combined df of HC5 and HC10 values
+haz <- bind_rows(haz_HC5_food, haz_HC10_food, haz_HC5_tissue, haz_HC10_tissue)
+```
+
+```{r}
+ggplot(haz, aes(x = PNEC, fill = as.factor(ERM))) +
+  geom_histogram(bins = 15) +
+  facet_wrap(~HCx + ERM, ncol = 2, scales = "free_y",
+             labeller = labeller(HCx = function(x) paste0("HC", x))) +
+  scale_x_log10() +
+  labs(x = "HC5 (particles/L)", y = "count", title = "Hazard threshold distribution") +
+  theme_minimal(base_size = 15) +
+  theme(legend.position = "none")
+```
+
+# 8. Step 5 — Risk characterization using joint distributions (Monte Carlo)
+
+We now combine: - **Exposure**: bootstrap distribution (e.g., EED 50th percentile) or full empirical sample distribution. - **Hazard**: pSSD++-derived HC5/HC10 distributions for each ERM.
+
+A common probabilistic risk metric is: - **Risk Quotient (RQ)**: `RQ = Exposure / Hazard`. - **Probability of exceedance**: `P(RQ > 1)`.
+
+Below we compute four RQ distributions: [Food dilution, Tissue translocation] x [HC5, HC10].
+
+```{r risk-quotient-1d}
+# draw_rq_mc1d() and summarize_rq() are sourced from R/mp_risk_utils.R.
+n_risk     <- 1000
+risk_draws <- draw_rq_mc1d(haz, eed_boot$q50, n_risk = n_risk)
+risk_summary <- summarize_rq(risk_draws)
+risk_summary
+```
+
+```{r rq-plot}
+ggplot2::ggplot(risk_draws, ggplot2::aes(x = RQ, fill = as.factor(ERM))) +
+  ggplot2::geom_histogram(bins = 60) +
+  ggplot2::scale_x_log10() +
+  ggplot2::geom_vline(xintercept = 1, linetype = "dashed", color = "red") +
+  ggplot2::facet_grid(HCx ~ ERM, scales = "free_y",
+                      labeller = ggplot2::labeller(HCx = function(x) paste0("HC", x))) +
+  ggplot2::labs(x = "Risk Quotient (Exposure / Hazard) [log10 scale]", y = "count",
+                title = "Monte Carlo risk quotient distributions by ERM and HCx") +
+  ggplot2::theme_minimal(base_size = 15) +
+  ggplot2::theme(legend.position = "none")
+```
+
+```{r risk-inline, include=FALSE}
+# Extract key risk metrics for inline reporting
+rs_food_hc5    <- dplyr::filter(risk_summary, ERM == "Food Dilution",       HCx == 5)
+rs_tissue_hc5  <- dplyr::filter(risk_summary, ERM == "Tissue Translocation", HCx == 5)
+```
+
+The 1D Monte Carlo risk characterization indicates a median RQ of `r round(rs_food_hc5$RQ_p50, 3)` for the Food Dilution ERM (HC5; P(RQ>1) = `r round(rs_food_hc5$P_exceed * 100, 1)`%) and `r round(rs_tissue_hc5$RQ_p50, 3)` for the Tissue Translocation ERM (HC5; P(RQ>1) = `r round(rs_tissue_hc5$P_exceed * 100, 1)`%). RQ values below 1 indicate exposure concentrations below the hazard threshold for the majority of aquatic species.
+
+# 8.1 Cumulative Distribution Functions of EEDs and HCx values
+
+Plot the EED CDF (green) alongside HCx CDFs (colored by ERM; linetype by HCx), with uncertainty ribbons.
+
+```{r ecdf-overlap}
+# ecdf_bands() is sourced from R/mp_risk_utils.R.
+eed_vals <- C_sample_median$C_corr_med
+
+# Common x-grid across EED and HCx values
+all_x <- c(eed_vals, haz$PNEC)
+grid_x <- 10^seq(log10(min(all_x, na.rm = TRUE)),
+                 log10(max(all_x, na.rm = TRUE)),
+                 length.out = 200)
+
+# EED bands (green)
+eed_band <- ecdf_bands(eed_vals, grid_x, n_boot = n_boot) |>
+  mutate(source = "EED")
+
+# HCx bands by ERM and HCx
+haz_band <- haz |>
+  group_by(ERM, HCx) |>
+  group_modify(~{
+    ecdf_bands(.x$PNEC, grid_x, n_boot = n_boot) |>
+      mutate(source = .y$ERM)
+  }) |>
+  ungroup()
+
+erm_levels <- sort(unique(haz$ERM))
+erm_colors <- setNames(c("#1F78B4", "#FF7F00")[seq_along(erm_levels)], erm_levels)
+source_colors <- c("EED" = "forestgreen", erm_colors)
+
+ggplot2::ggplot() +
+  # EED ribbon + line
+  ggplot2::geom_ribbon(
+    data = eed_band,
+    ggplot2::aes(x = x, ymin = cdf_lo, ymax = cdf_hi, fill = source),
+    alpha = 0.15
+  ) +
+  ggplot2::geom_line(
+    data = eed_band,
+    ggplot2::aes(x = x, y = cdf_med, color = source, linetype = "EED"),
+    linewidth = 1.1
+  ) +
+  # HCx ribbons + lines (color by ERM, linetype by HCx)
+  ggplot2::geom_ribbon(
+    data = haz_band,
+    ggplot2::aes(x = x, ymin = cdf_lo, ymax = cdf_hi, fill = source),
+    alpha = 0.12
+  ) +
+  ggplot2::geom_line(
+    data = haz_band,
+    ggplot2::aes(x = x, y = cdf_med, color = source,
+                 linetype = paste0("HC", HCx)),
+    linewidth = 1
+  ) +
+  ggplot2::scale_x_log10(
+    labels = scales::label_log(),
+    name   = "Concentration (particles/L, log₁₀ scale)"
+  ) +
+  ggplot2::scale_color_manual(
+    values = source_colors,
+    breaks = names(source_colors),
+    name   = "Distribution"
+  ) +
+  ggplot2::scale_fill_manual(
+    values = source_colors,
+    breaks = names(source_colors),
+    guide  = "none"
+  ) +
+  ggplot2::scale_linetype_manual(
+    values = c("EED" = "solid", "HC5" = "dashed", "HC10" = "dotted"),
+    name   = "Threshold / percentile"
+  ) +
+  ggplot2::labs(
+    y       = "Cumulative probability",
+    title   = "Overlap of Exposure and Hazard distributions",
+    subtitle = "EED = Environmental Exposure Distribution; HC5/HC10 = Hazard Concentration (5th/10th percentile of SSD)",
+    caption  = paste0("Shaded bands = bootstrap 95% CI (n = ", n_boot, " replicates). Log₁₀ x-axis.")
+  ) +
+  ggplot2::theme_minimal(base_size = 14) +
+  ggplot2::theme(
+    legend.position  = "right",
+    legend.box       = "vertical",
+    panel.border     = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.4),
+    plot.caption     = ggplot2::element_text(size = 9, color = "gray50", hjust = 0)
+  )
+```
+
+
+# 9. Two-dimensional Monte Carlo (MC2D)
+**Two-dimensional Monte Carlo (MC2D)** to separately handle:
+    -   *uncertainty* (e.g., correction factors, hazard model uncertainty),
+    -   *variability* (true spatial/temporal variability in exposure).
+
+Below, the **outer loop** samples uncertain parameters (a correction factor draw and one hazard draw per ERM/HCx),
+while the **inner loop** samples exposure variability from the observed monitoring concentrations.
+
+**How to read the MC2D outputs**
+
+- Each *outer* iteration represents one plausible “world” of uncertainty (sampling one CF draw and one hazard draw per ERM/HCx).
+- Within that world, the *inner* loop samples exposure variability across sites/dates (using the observed measured concentrations).
+- For each outer iteration, we summarize the resulting RQ distribution as `P_exceed`, `RQ_p50`, `RQ_p95`, and `RQ_p99`.
+- The distribution of these summaries across iterations quantifies **uncertainty in risk metrics**, while the inner loop represents **variability in exposure**.
+
+```{r mc2d}
+# mc2d_risk() is sourced from R/mp_risk_utils.R.
+# Outer loop: n_uncertainty = 300 CF + hazard draws (uncertainty).
+# Inner loop: n_variability = 1000 exposure draws per outer iteration (variability).
+mc2d_results <- mc2d_risk(
+  monitoring_df = monitoring,
+  combined_cf   = combined_cf,
+  haz_df        = haz,
+  n_uncertainty = 300,
+  n_variability = 1000,
+  seed          = 1
+)
+
+mc2d_summary <- mc2d_results |>
+  dplyr::group_by(ERM, HCx) |>
+  summarise(
+    P_exceed_med = median(P_exceed),
+    P_exceed_p95 = quantile(P_exceed, 0.95),
+    P_exceed_p05 = quantile(P_exceed, 0.05),
+    RQ_p50_med = median(RQ_p50),
+    RQ_p95_med = median(RQ_p95),
+    .groups = "drop"
+  )
+
+mc2d_summary
+```
+
+```{r}
+# Visualize uncertainty in exceedance probability (outer loop)
+mc2d_results |>
+  ggplot(aes(x = P_exceed, fill = ERM)) +
+  geom_histogram(bins = 30, alpha = 0.6, position = "identity") +
+  facet_grid(HCx ~ ERM, scales = "free_y",
+             labeller = labeller(HCx = function(x) paste0("HC", x))) +
+  labs(x = "P(RQ > 1) across uncertainty", y = "count",
+       title = "MC2D uncertainty distribution for exceedance probability") +
+  theme_minimal(base_size = 15) +
+  theme(legend.position = "none")
+```
+
+```{r}
+# Diagnostic: compare uncertainty spread of P_exceed across ERM/HCx
+mc2d_results |>
+  ggplot(aes(x = as.factor(HCx), y = P_exceed, fill = ERM)) +
+  geom_boxplot(alpha = 0.7, outlier.alpha = 0.4) +
+  scale_x_discrete(labels = function(x) paste0("HC", x)) +
+  labs(x = "HCx", y = "P(RQ > 1)",
+       title = "MC2D uncertainty spread in exceedance probability") +
+  theme_minimal(base_size = 15)
+```
+
+```{r}
+# Diagnostic: CF influence on exceedance probability
+mc2d_results |>
+  ggplot(aes(x = cf, y = P_exceed, color = ERM)) +
+  geom_point(alpha = 0.4, size = 1.2) +
+  geom_smooth(method = "loess", se = FALSE) +
+  facet_wrap(~HCx, scales = "free_y",
+             labeller = labeller(HCx = function(x) paste0("HC", x))) +
+  labs(x = "Correction factor draw", y = "P(RQ > 1)",
+       title = "Relationship between correction factor and exceedance") +
+  theme_minimal(base_size = 15) +
+  theme(legend.position = "none")
+```
+
+```{r}
+# Diagnostic: distribution of high-end risk (RQ_p95)
+mc2d_results |>
+  tidyr::pivot_longer(cols = c(RQ_p50, RQ_p95, RQ_p99),
+                      names_to = "stat", values_to = "value") |>
+  ggplot(aes(x = value, fill = ERM)) +
+  geom_density(alpha = 0.5) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "red") +
+  facet_grid(stat ~ HCx, scales = "free",
+             labeller = labeller(HCx = function(x) paste0("HC", x))) +
+  scale_x_log10() +
+  labs(x = "Risk Quotient", y = "density",
+       title = "MC2D uncertainty distribution for RQ summaries (log10 scale)") +
+  theme_minimal(base_size = 15) +
+  theme(legend.position = "top")
+```
+
+# 10. Sensitivity analysis
+**Sensitivity analysis** to identify dominant uncertainty contributors (e.g., alpha, plastic proportion, analytical recovery).
+
+## 10.1 Morris elementary effects (beta test)
+
+The Morris method is a global **screening** approach. It is efficient for ranking inputs by importance using
+elementary effects:
+
+- **mu\*** (mean absolute effect): overall importance
+- **sigma**: nonlinearity or interactions
+
+Below is a **small budget** setup for beta testing. It uses `param_values` to define factor ranges and evaluates
+the MC2D model output metric `RQ_p50`. Increase `morris_r`, `morris_levels`, and the internal MC sizes for production.
+
+```{r morris-setup}
+# param_bounds() is sourced from R/mp_risk_utils.R.
+morris_params  <- param_bounds(param_values, k = 2)
+morris_subset  <- c("alpha.freshwater", "R.ave.water.freshwater", "a.sa.freshwater")
+morris_params  <- if (all(morris_subset %in% morris_params$param)) {
+  dplyr::filter(morris_params, param %in% morris_subset)
+} else {
+  dplyr::slice(morris_params, 1:min(4, nrow(morris_params)))
+}
+morris_params
+```
+
+```{r}
+# Helper: build hazard distributions from a custom param_values dataframe (small budgets for beta test)
+build_haz_from_params <- function(pv = param_values,
+                                  n_matrix = 2,
+                                  n_sim = 2,
+                                  sim = 2,
+                                  num_cores = 1) {
+  param_matrix_i <- matrix_function(
+    n = n_matrix,
+    params = pv,
+    upper.tissue.truncation.limit = 500,
+    x1M_set = 1,
+    x2D_set = 5000
+  )
+
+  MC_sim_df_i <- MC_sim_align_parallel(
+    tox_data = tox_data,
+    param_matrix = param_matrix_i,
+    n_sim = n_matrix,
+    x1D_set = 1,
+    x2D_set = 5000
+  )
+
+  results_df_food_i <- dplyr::filter(
+    MC_sim_df_i,
+    ingestible != "not ingestible",
+    particles_L_food_dilution > 0,
+    Group != "Algae"
+  ) |>
+    dplyr::mutate(dose_new_particles_L = particles_L_food_dilution) |>
+    tidyr::drop_na(particles_L_food_dilution)
+  results_df_food_t3_t4_i <- dplyr::filter(
+    results_df_food_i,
+    risk.13 != 1,
+    bio_f %in% c("Organism", "Population")
+  )
+
+  results_df_tissue_i <- dplyr::filter(
+    MC_sim_df_i,
+    translocatable != "not translocatable",
+    particles_L_ox_stress > 0
+  ) |>
+    dplyr::mutate(dose_new_particles_L = particles_L_ox_stress) |>
+    tidyr::drop_na(particles_L_ox_stress)
+  results_df_tissue_t3_t4_i <- dplyr::filter(
+    results_df_tissue_i,
+    risk.13 != 1,
+    bio_f %in% c("Organism", "Population")
+  )
+
+  erm_registry_i <- list(
+    "Food Dilution" = list(base = results_df_food_i, t3_t4 = results_df_food_t3_t4_i),
+    "Tissue Translocation" = list(base = results_df_tissue_i, t3_t4 = results_df_tissue_t3_t4_i)
+  )
+
+  pSSDs_i <- make_all_pSSDs(
+    MC_sim_df = MC_sim_df_i,
+    environments = c("Freshwater"),
+    erm_registry = erm_registry_i,
+    sim = sim,
+    cv_uf = 0.5,
+    rmore_method = "lognormal",    
+    parallel = T,
+    workers = parallel::detectCores() - 1,
+    base_cache_dir = file.path(tempdir(), "morris_pssd_cache"),
+    base_output_path = file.path(tempdir(), "morris_pssd_figures"),
+    overwrite_cache = TRUE
+  )
+
+  haz_HC5_food_i <- pSSDs_i$`Tier3_Freshwater_Food Dilution`$summary_05$df |>
+    mutate(HCx = 5, ERM = "Food Dilution")
+  haz_HC10_food_i <- pSSDs_i$`Tier3_Freshwater_Food Dilution`$summary_10$df |>
+    mutate(HCx = 10, ERM = "Food Dilution")
+  haz_HC5_tissue_i <- pSSDs_i$`Tier3_Freshwater_Tissue Translocation`$summary_05$df |>
+    mutate(HCx = 5, ERM = "Tissue Translocation")
+  haz_HC10_tissue_i <- pSSDs_i$`Tier3_Freshwater_Tissue Translocation`$summary_10$df |>
+    mutate(HCx = 10, ERM = "Tissue Translocation")
+
+  bind_rows(haz_HC5_food_i, haz_HC10_food_i, haz_HC5_tissue_i, haz_HC10_tissue_i)
+}
+```
+
+```{r}
+# Morris model: returns a scalar RQ_p50 (median across ERM/HCx) for each input set.
+# tryCatch handles PSSDplusplus failures at small budget sizes.
+morris_model <- function(X) {
+  apply(X, 1, function(x_row) {
+    pv <- param_values
+    for (j in seq_along(x_row)) {
+      pv[[colnames(X)[j]]] <- x_row[j]
+    }
+    tryCatch({
+      haz_i  <- build_haz_from_params(pv, n_matrix = 3, n_sim = 3, sim = 15, num_cores = 5)
+      mc2d_i <- mc2d_risk(
+        monitoring_df = monitoring,
+        combined_cf   = combined_cf,
+        haz_df        = haz_i,
+        n_uncertainty = 50,
+        n_variability = 200,
+        seed          = 1
+      )
+      result <- median(mc2d_i$RQ_p50, na.rm = TRUE)
+      if (is.nan(result) || is.na(result)) NA_real_ else result
+    }, error = function(e) NA_real_)
+  })
+}
+
+# Small Morris budget for beta test
+morris_levels <- 3
+morris_r      <- 3
+
+morris_design <- sensitivity::morris(
+  model  = NULL,
+  factors = morris_params$param,
+  r      = morris_r,
+  design = list(type = "oat", levels = morris_levels, grid.jump = 1),
+  binf   = morris_params$min,
+  bsup   = morris_params$max
+)
+
+morris_design$y <- morris_model(morris_design$X)
+```
+
+```{r morris-results}
+# Convert NaN → NA so tell() handles them as missing rather than producing NaN EEs
+morris_design$y[is.nan(morris_design$y)] <- NA_real_
+message("Morris y values: ", paste(round(morris_design$y, 4), collapse = ", "))
+morris_res <- sensitivity::tell(morris_design)
+print(morris_res)
+```
+
+```{r morris-ggplot}
+# Defensive extraction: handles NULL, wrong-length, or all-NaN returns from tell()
+.pull_morris <- function(x, n) {
+  if (is.null(x)) return(rep(NA_real_, n))
+  v <- as.numeric(x)
+  if (length(v) != n) {
+    v <- c(x)
+    if (length(v) != n) return(rep(NA_real_, n))
+  }
+  # Coerce NaN → NA for consistent downstream handling
+  v[is.nan(v)] <- NA_real_
+  v
+}
+
+n_factors <- nrow(morris_params)
+
+morris_df <- data.frame(
+  parameter = morris_params$param,
+  mu_star   = .pull_morris(morris_res$mu.star, n_factors),
+  sigma     = .pull_morris(morris_res$sigma,   n_factors),
+  mu        = .pull_morris(morris_res$mu,       n_factors)
+) |>
+  dplyr::arrange(dplyr::desc(dplyr::coalesce(mu_star, -Inf))) |>
+  dplyr::mutate(
+    rank  = seq_len(dplyr::n()),
+    label = gsub("\\.(freshwater|marine)$", "", parameter, ignore.case = TRUE)
+  )
+
+morris_df$has_interaction <- morris_df$sigma / pmax(morris_df$mu_star, 1e-9) > 0.5
+
+# Rows with valid (finite) data for plotting
+morris_df_valid <- morris_df |> dplyr::filter(is.finite(mu_star) & is.finite(sigma))
+morris_has_data <- nrow(morris_df_valid) > 0
+
+# Axis limits: use valid data range or fallback
+xlim_m <- if (morris_has_data) c(0, max(morris_df_valid$mu_star, 0.1) * 1.15) else c(0, 1)
+ylim_m <- if (morris_has_data) c(0, max(morris_df_valid$sigma,   0.1) * 1.15) else c(0, 1)
+
+morris_gg <- ggplot2::ggplot(
+    morris_df_valid,
+    ggplot2::aes(x = mu_star, y = sigma, color = has_interaction)
+  ) +
+  ggplot2::geom_abline(slope = 1,   intercept = 0, linetype = "dashed", color = "gray60", linewidth = 0.6) +
+  ggplot2::geom_abline(slope = 0.5, intercept = 0, linetype = "dotted", color = "gray60", linewidth = 0.5) +
+  (if (morris_has_data) {
+    list(
+      ggplot2::geom_point(size = 4),
+      ggrepel::geom_text_repel(
+        ggplot2::aes(label = label),
+        size               = 3.5,
+        box.padding        = 0.5,
+        point.padding      = 0.4,
+        max.overlaps       = 20,
+        segment.color      = "gray60",
+        segment.size       = 0.35,
+        min.segment.length = 0.2
+      )
+    )
+  } else {
+    ggplot2::annotate(
+      "text", x = 0.5, y = 0.5,
+      label = paste0(
+        "No valid model outputs (budget too small).\n",
+        "Increase morris_r (≥ 10) and morris_levels (≥ 4) for production results."
+      ),
+      size = 4, color = "gray40", hjust = 0.5, vjust = 0.5
+    )
+  }) +
+  ggplot2::scale_color_manual(
+    values = c(`TRUE` = "#D55E00", `FALSE` = "#0072B2"),
+    labels = c(`TRUE` = "σ/µ* > 0.5 (interactions/non-linearity)",
+               `FALSE` = "σ/µ* ≤ 0.5 (approximately linear)"),
+    name   = NULL,
+    na.value = "gray70"
+  ) +
+  ggplot2::coord_cartesian(xlim = xlim_m, ylim = ylim_m) +
+  ggplot2::labs(
+    x        = expression(mu^"*" ~ "(mean absolute elementary effect — overall importance)"),
+    y        = expression(sigma ~ "(SD of elementary effects — non-linearity / interactions)"),
+    title    = "Morris sensitivity analysis: parameter importance",
+    subtitle = "Dashed: σ = µ*; dotted: σ = 0.5 µ*. Points above dashed line indicate interactions.",
+    caption  = paste0(
+      "n = ", morris_r, " trajectories, ", morris_levels, " levels. ",
+      "Output metric: median RQ_p50 across MC2D iterations."
+    )
+  ) +
+  ggplot2::theme_minimal(base_size = 13) +
+  ggplot2::theme(
+    legend.position = "bottom",
+    panel.border    = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.4),
+    plot.caption    = ggplot2::element_text(size = 9, color = "gray50", hjust = 0)
+  )
+
+morris_gg
+```
+
+```{r morris-interpretation, include=FALSE}
+# Safely extract Morris results; all values may be NA for small-budget runs
+morris_valid  <- !all(is.na(morris_df$mu_star))
+morris_top    <- if (morris_valid) morris_df$label[1]               else NA_character_
+morris_top_mu <- if (morris_valid) round(morris_df$mu_star[1], 3)   else NA_real_
+morris_2nd    <- if (morris_valid && nrow(morris_df) > 1) morris_df$label[2]             else NA_character_
+morris_2nd_mu <- if (morris_valid && nrow(morris_df) > 1) round(morris_df$mu_star[2], 3) else NA_real_
+n_interacting <- sum(morris_df$has_interaction, na.rm = TRUE)
+```
+
+`r if (!morris_valid) {"The Morris elementary effects could not be computed for this run (all model outputs returned NA — likely due to numerical instability at the small budget used here: increase morris_r and morris_levels for production). The parameter ranking plot above shows NA placeholders; rerun with a larger budget before interpreting."} else { paste0( "The Morris screening identifies **", morris_top, "** as the dominant driver of RQ uncertainty (µ\\* = ", morris_top_mu, ")", if (!is.na(morris_2nd)) paste0(", followed by **", morris_2nd, "** (µ\\* = ", morris_2nd_mu, ")") else "", ". ", if (n_interacting == 0) "No parameters show evidence of notable non-linearity or interactions (σ/µ\\* ≤ 0.5 for all)." else paste0(n_interacting, " parameter(s) exceed the σ/µ\\* > 0.5 threshold, indicating potential non-linearity or parameter interactions."), " These results should be interpreted as a screening-level ranking (small budget: morris_r = ", morris_r, " trajectories × ", morris_levels, " levels); increasing morris_r to ≥ 10 and morris_levels to ≥ 4 is recommended before publication." ) }`
+
+
+## 10.2 µFTIR objective: critical assessment of the detection floor and its intersection with the LOD/CF workflow
+
+### Instrument configuration
+
+The µFTIR analysis used an objective equivalent to ~4× magnification with **25 µm pixel size**. At this pixel resolution, the practical minimum detectable particle size (requiring ≥ 2 pixels across the shortest dimension) is approximately **50 µm** — consistent with the `L_meas_min = 50 µm` parameter used throughout this workflow. This value is **already embedded in the correction factor (CF) calculation** and is not an additional bias to correct.
+
+### Why the Wang et al. (2026) ×33 scaling factor does not apply here
+
+Wang et al. (2026) found that a 4× µFTIR objective (20 µm pixel) detects only 3 ± 3% of particles relative to a 25× reference (2 µm pixel). At face value this suggests a ×33 upward scaling should be applied to our concentrations. **This is incorrect for the following reasons:**
+
+**1. The 97% "missed" particles lie almost entirely below our measurement floor.**
+
+The 25× objective in Wang et al. detects particles as small as ~4 µm. The 4× objective detects only those ≥ ~40–50 µm. The difference (97% of total particle count) is dominated by particles in the 4–50 µm size class. Our workflow already treats `L_meas_min = 50 µm` as the lower detection floor and uses the power-law CF to extrapolate particle counts from this floor down to 1 µm. The Wang et al. sub-50 µm particles are not "missing" from our analysis — they are the precise population that the `correction_factor()` function reconstructs via power-law integration.
+
+**2. Within the measured range (50–500 µm), the 4×/25 µm system is effective.**
+
+At 25 µm pixel size:
+
+| Particle size | Pixels across | Detection status |
+|---|---|---|
+| 50 µm | 2 px | Marginal (meets minimum) |
+| 100 µm | 4 px | Reliable |
+| 200 µm | 8 px | Well-resolved |
+| 500 µm | 20 px | Fully resolved |
+
+For particles at or above 100 µm — which covers the entire Segur LOD fitting window (fragments: `r round(cpsd_fit_frag$lower_lod_used_um)`–`r round(cpsd_fit_frag$upper_lod_um)` µm; all shapes: `r round(cpsd_fit_all$lower_lod_used_um)`–`r round(cpsd_fit_all$upper_lod_um)` µm) — detection is reliable with this pixel size. The ×33 correction factor was derived from total particle counts including the sub-50 µm population; it does not represent within-range inefficiency.
+
+**3. The Segur LOD algorithm implicitly handles the marginal 50–100 µm zone.**
+
+The Segur LOD search specifically identifies the size window where the C-PSD is most linear ($R^2 \geq 0.90$). The 50–100 µm region, where detection by the 4×/25 µm system may be incomplete, would manifest as a deviation from power-law behavior at the lower end of the binned distribution — and would therefore be *excluded* from the fitting window. Indeed, the fitted lower LODs (`r round(cpsd_fit_frag$lower_lod_used_um)` µm for fragments, `r round(cpsd_fit_all$lower_lod_used_um)` µm pooled) are well above 50 µm, confirming that the algorithm already pushed the lower bound into the reliable detection zone.
+
+**4. Applying ×33 on top of the existing CF would double-count.**
+
+The current CF has a median of `r round(median(combined_cf), 1)`× (90% CI: `r round(quantile(combined_cf, 0.05), 1)`–`r round(quantile(combined_cf, 0.95), 1)`×). This already accounts for the unmeasured sub-50 µm population via power-law extrapolation. Multiplying `C_corrected` by an additional 33× would apply a second, conflicting correction to the same particle pool, producing a total inflation factor of ~`r round(median(combined_cf) * 33, 0)`× — far in excess of any defensible estimate.
+
+### Residual uncertainty: the 50–100 µm marginal zone
+
+The one genuine uncertainty from the 4×/25 µm configuration is **incomplete counting in the 50–100 µm particle size class**. Particles in this range occupy 2–4 pixels and may be undercounted by approximately 10–30% relative to what a 15× system would detect. The sensitivity analysis below quantifies the effect of adjusting `L_meas_min` from 50 µm to 100 µm, which effectively removes the marginal zone from the measured concentration estimate and lets the CF extrapolate it instead.
+
+```{r lmeas-sensitivity, message=FALSE, warning=FALSE}
+# Compare CF and risk outcomes under two L_meas_min assumptions:
+# 50 µm (current, includes marginal zone) vs 100 µm (excludes marginal zone — conservative floor)
+lmeas_scenarios <- list(
+  "L_meas_min = 50 µm (current)" = list(L_lo = 50,  L_hi = 500),
+  "L_meas_min = 100 µm (conservative)" = list(L_lo = 100, L_hi = 500)
+)
+
+lmeas_cf_summary <- dplyr::bind_rows(lapply(names(lmeas_scenarios), function(scen) {
+  s   <- lmeas_scenarios[[scen]]
+  cf_s <- correction_factor(
+    a           = alpha,                  # same alpha draws (n_mc)
+    L_meas_min  = s$L_lo,
+    L_meas_max  = s$L_hi,
+    L_tar_min   = 1,
+    L_tar_max   = 5000
+  )
+  data.frame(
+    scenario = scen,
+    CF_p05   = round(quantile(cf_s, 0.05),  1),
+    CF_med   = round(median(cf_s),           1),
+    CF_p95   = round(quantile(cf_s, 0.95),  1)
+  )
+}))
+
+knitr::kable(lmeas_cf_summary,
+  caption = paste0(
+    "Correction factor (50–500 µm → 1–5000 µm) under alternative lower detection limits. ",
+    "Using α_cpsd = ", round(cpsd_fit_all$a_cpsd, 3), " (all shapes, Segur LOD). ",
+    "n_mc = ", n_mc, " Monte Carlo draws."
+  ),
+  col.names = c("Scenario", "CF 5th pct", "CF median", "CF 95th pct")
+)
+```
+
+```{r lmeas-inline, include=FALSE}
+cf_50  <- lmeas_cf_summary$CF_med[lmeas_cf_summary$scenario == "L_meas_min = 50 µm (current)"]
+cf_100 <- lmeas_cf_summary$CF_med[lmeas_cf_summary$scenario == "L_meas_min = 100 µm (conservative)"]
+```
+
+Raising `L_meas_min` from 50 to 100 µm increases the median CF from `r cf_50`× to `r cf_100`× — a modest change that reflects the additional particles in the 50–100 µm range being moved from "measured" to "extrapolated." This is the appropriate sensitivity analysis for this instrument configuration: it brackets the range of outcomes depending on whether the marginal detection zone is treated as reliably measured or excluded and reconstructed via power-law. The current workflow (`L_meas_min = 50 µm`) is the less conservative (lower CF) choice; if the 50–100 µm counts are systematically low due to detection limits, the true concentration may be closer to the `L_meas_min = 100 µm` estimate.
+
+**Summary.** No additional objective-based correction factor is applied to `C_measured_pL`. The existing workflow already accounts for instrument detection limits through (1) the `L_meas_min = 50 µm` floor that reflects the 4×/25 µm pixel detection limit, and (2) the power-law CF that extrapolates particle counts from this floor to the 1 µm target. The Segur LOD fitting window (≥ `r round(cpsd_fit_all$lower_lod_used_um)` µm) lies entirely within the reliable detection zone of the instrument. The Wang et al. (2026) ×33 factor would be appropriate only if converting a 4× total particle count to an equivalent 25× total count *without* any power-law extrapolation — not in combination with the CF approach used here.
+
+# 11. Sediment — Beach Sand
+
+## 11.1 Derive power-law values from raw sediment particle data
+
+```{r}
+# import sediment particle data (beach sand as sediment proxy)
+raw_particles_sed <- raw_particles |> 
+  dplyr::filter(sample_type == "beach sand")
+
+# ---- Thickness (height) factor from sediment data ----
+ratio_tbl_sed <- raw_particles_sed |>
+  mutate(
+    WL = 1 / aspect_ratio,
+    width_eff_um = case_when(
+      shape == "fragment" & !is.na(area_um2) & !is.na(length_um) & length_um > 0 &
+        !is.na(circularity) & circularity < 0.7 ~ area_um2 / length_um,
+      TRUE ~ width_um
+    )
+  ) |> 
+  group_by(shape) |>
+  summarise(
+    n = n(),
+    r_med  = median(WL, na.rm = TRUE),
+    r_low  = quantile(WL, 0.25, na.rm = TRUE),
+    r_high = quantile(WL, 0.75, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# ---- Volumes ----
+raw_particles_sed <- raw_particles_sed |>
+  left_join(ratio_tbl_sed |> dplyr::select(shape, r_med), by = "shape") |>  
+  mutate(
+    height_um = r_med * width_um,
+    V_um3 = case_when(
+      shape == "fragment" ~ (pi / 6) * length_um * width_um * height_um,
+      shape == "fiber"    ~ pi * (width_um / 2)^2 * length_um,
+      TRUE ~ NA_real_
+    )
+  )
+```
+
+### Particle length
+```{r cpsd-fits-sed-length}
+cpsd_fit_sed_frag  <- c(fit_cpsd_segur_r(raw_particles_sed |> dplyr::filter(shape == "fragment") |> dplyr::pull(length_um), bin_um = 5), list(shape = "fragment"))
+cpsd_fit_sed_fiber <- c(fit_cpsd_segur_r(raw_particles_sed |> dplyr::filter(shape == "fiber")    |> dplyr::pull(length_um), bin_um = 5), list(shape = "fiber"))
+cpsd_fit_sed_all   <- c(fit_cpsd_segur_r(raw_particles_sed |> dplyr::pull(length_um),              bin_um = 5), list(shape = "all"))
+
+alpha_sed <- alpha_dist(
+  mu = cpsd_fit_sed_all$a_cpsd,
+  sd = cpsd_fit_sed_all$se_a_cpsd,
+  n = 20000
+)
+
+alpha_sed_mu <- mean(alpha_sed)
+alpha_sed_se <- sd(alpha_sed)
+
+cat("Sediment All: alpha =", signif(cpsd_fit_sed_all$a_cpsd, 2), "+-", signif(cpsd_fit_sed_all$se_a_cpsd, 2),
+    ", LOD =", signif(cpsd_fit_sed_all$lower_lod_used_um, 2), "–", signif(cpsd_fit_sed_all$upper_lod_um, 2), "µm\n")
+```
+
+#### Plots
+```{r}
+sed_length_fits_by_shape <- list(
+  fragment = cpsd_fit_sed_frag,
+  fiber    = cpsd_fit_sed_fiber,
+  all      = cpsd_fit_sed_all
+)
+sed_length_fits_by_shape <- sed_length_fits_by_shape[names(MP_PALETTE)[names(MP_PALETTE) %in% names(sed_length_fits_by_shape)]]
+
+sed_length_cpsd_plot <- plot_cpsd_multi(sed_length_fits_by_shape, title = "Sediment C-PSD fits by shape", attribute = "Length")
+
+ggsave(sed_length_cpsd_plot,
+       filename = "figures/sediment_length_cpsd_plot.png",
+       width = 8, height = 6, dpi = 300)
+
+sed_length_cpsd_plot
+```
+
+### Particle surface area
+```{r cpsd-fits-sed-area}
+cpsd_fit_area_sed_fragment <- c(fit_cpsd_segur_r(raw_particles_sed |> dplyr::filter(shape == "fragment") |> dplyr::pull(area_um2), bin_um = 500, fit_range_um = c(2000, 50000)),  list(shape = "fragment"))
+cpsd_fit_area_sed_fiber    <- c(fit_cpsd_segur_r(raw_particles_sed |> dplyr::filter(shape == "fiber")    |> dplyr::pull(area_um2), bin_um = 500, fit_range_um = c(2000, 500000)), list(shape = "fiber"))
+cpsd_fit_area_sed          <- c(fit_cpsd_segur_r(raw_particles_sed |> dplyr::pull(area_um2),              bin_um = 500, fit_range_um = c(2000, 500000)),                          list(shape = "all"))
+
+cat("All Shape Sediment Area: alpha =", signif(cpsd_fit_area_sed$a_cpsd, 2), "+-", signif(cpsd_fit_area_sed$se_a_cpsd, 2),
+    ", LOD =", signif(cpsd_fit_area_sed$lower_lod_used_um, 2), "–", signif(cpsd_fit_area_sed$upper_lod_um, 2), "µm²\n")
+```
+
+#### Plots
+```{r}
+sed_area_fits_by_shape <- list(
+  fragment = cpsd_fit_area_sed_fragment,
+  fiber    = cpsd_fit_area_sed_fiber,
+  all      = cpsd_fit_area_sed
+)
+
+sed_area_cpsd_plot <- plot_cpsd_multi(sed_area_fits_by_shape, title = "Sediment C-PSD fits by shape", attribute = "Area")
+
+ggsave(sed_area_cpsd_plot,
+       filename = "figures/sediment_surfacearea_cpsd_plot.png",
+       width = 8, height = 6, dpi = 300)
+
+sed_area_cpsd_plot
+```
+
+### Particle volume
+```{r cpsd-fits-sed-volume}
+cpsd_fit_volume_sed_fragment <- c(fit_cpsd_segur_r(raw_particles_sed |> dplyr::filter(shape == "fragment") |> dplyr::pull(V_um3), bin_um = 1e4), list(shape = "fragment"))
+cpsd_fit_volume_sed_fiber    <- c(fit_cpsd_segur_r(raw_particles_sed |> dplyr::filter(shape == "fiber")    |> dplyr::pull(V_um3), bin_um = 1e4), list(shape = "fiber"))
+cpsd_fit_volume_sed          <- c(fit_cpsd_segur_r(raw_particles_sed |> dplyr::pull(V_um3),                 bin_um = 1e4), list(shape = "all"))
+
+cat("Sediment Fragment Volume: alpha =", signif(-cpsd_fit_volume_sed_fragment$a_cpsd, 2), "+-", signif(cpsd_fit_volume_sed_fragment$se_a_cpsd, 2),
+    ", LOD =", signif(cpsd_fit_volume_sed_fragment$lower_lod_used_um, 2), "–", signif(cpsd_fit_volume_sed_fragment$upper_lod_um, 2), "µm³\n")
+cat("Sediment Fiber Volume:    alpha =", signif(-cpsd_fit_volume_sed_fiber$a_cpsd,    2), "+-", signif(cpsd_fit_volume_sed_fiber$se_a_cpsd,    2),
+    ", LOD =", signif(cpsd_fit_volume_sed_fiber$lower_lod_used_um,    2), "–", signif(cpsd_fit_volume_sed_fiber$upper_lod_um,    2), "µm³\n")
+cat("Sediment All Shape Volume: alpha =", signif(-cpsd_fit_volume_sed$a_cpsd,         2), "+-", signif(cpsd_fit_volume_sed$se_a_cpsd,         2),
+    ", LOD =", signif(cpsd_fit_volume_sed$lower_lod_used_um,          2), "–", signif(cpsd_fit_volume_sed$upper_lod_um,          2), "µm³\n")
+```
+
+#### Plots
+```{r}
+sed_volume_fits_by_shape <- list(
+  fragment = cpsd_fit_volume_sed_fragment,
+  fiber    = cpsd_fit_volume_sed_fiber,
+  all      = cpsd_fit_volume_sed
+)
+
+sed_volume_cpsd_plot <- plot_cpsd_multi(sed_volume_fits_by_shape, title = "Sediment C-PSD fits by shape", attribute = "Volume")
+
+ggsave(sed_volume_cpsd_plot,
+       filename = "figures/sediment_volume_cpsd_plot.png",
+       width = 8, height = 6, dpi = 300)
+
+sed_volume_cpsd_plot
+```
+
+## 11.3 Sediment monitoring concentrations and EED
+
+```{r}
+monitoring_sed <- readRDS("data_input/Part_dets_summ.rds") |> 
+  filter(
+    sample_type == "beach sand",
+    material_simple == "plastic",
+    sample_or_blank == "sample"
+  ) |>
+  mutate(
+    date_raw = str_extract(Client_ID_MSSupdate, "\\d{8}"),
+    date = ymd(date_raw),
+    sample_id = Client_ID_MSSupdate,
+    # placeholder: update if a sediment-specific concentration column is available
+    C_measured_pkg = extrap_conc_PPL,
+    Lmin_measured_um = 50,
+    Lmax_measured_um = 500
+  )
+
+monitoring_sed <- monitoring_sed |>
+  mutate(
+    Lmin_biascorr_um = pmax(Lmin_measured_um, cpsd_fit_sed_all$lower_lod_um, na.rm = TRUE),
+    Lmax_biascorr_um = pmin(Lmax_measured_um, cpsd_fit_sed_all$upper_lod_um, na.rm = TRUE)
+  )
+
+L_meas_min_use_sed <- median(monitoring_sed$Lmin_biascorr_um, na.rm = TRUE)
+L_meas_max_use_sed <- median(monitoring_sed$Lmax_biascorr_um, na.rm = TRUE)
+
+cf_rescale_sed <- correction_factor(
+  a = alpha_sed,
+  L_meas_min = L_meas_min_use_sed, 
+  L_meas_max = L_meas_max_use_sed,
+  L_tar_min  = 1,   
+  L_tar_max  = 5000
+)
+
+combined_cf_sed <- cf_rescale_sed
+
+C_corrected_draws_sed <- monitoring_sed |>
+  mutate(idx = row_number()) |>
+  tidyr::crossing(draw = 1:3000) |>
+  mutate(
+    cf = sample(combined_cf_sed, size = n(), replace = TRUE),
+    C_corrected_pkg = C_measured_pkg * cf
+  )
+
+C_sample_median_sed <- C_corrected_draws_sed |>
+  group_by(sample_id) |>
+  summarise(C_corr_med = median(C_corrected_pkg), .groups = "drop")
+
+eed_boot_sed <- bootstrap_eed(C_sample_median_sed$C_corr_med, n_boot = n_boot, probs = c(0.5, 0.95))
+summary(eed_boot_sed)
+```
+
+## 11.2 Sediment toxicity data
+
+```{r sed-tox-data}
+tox_data_sed <- tomex2 |> 
+   dplyr::filter(
+    env_f %in% c("Marine", "Freshwater"),
+    exposure.route == "sediment",
+    Group != "Bacterium",
+    effect.metric != "HONEC",
+    tier_zero_tech_f == "Red Criteria Passed",
+    tier_zero_risk_f == "Red Criteria Passed",
+    risk.13 != 0
+  ) |> 
+    # since limited data available, and working with estuarine system - combine marine and freshwater species by overwriting environment to be freshwater for all
+    mutate(env_f = "Freshwater")
+```
+
+### Align Toxicity Data
+#### Parameter distributions
+
+```{r sed-aspect-ratio}
+R.ave_sed_result <- bootstrap_aspect_ratio(raw_particles_sed$aspect_ratio, n_boot = n_boot)
+R.ave_sed_vals   <- R.ave_sed_result$vals
+R.ave_sed_mean   <- R.ave_sed_result$boot_mean
+R.ave_sed_sd     <- R.ave_sed_result$boot_sd
+
+param_values_sed <- PSSDplusplus::param_default_values
+
+param_values_sed[[paste0("alpha.sediment.freshwater")]] <- -alpha_sed_mu
+param_values_sed[[paste0("alpha.sediment.freshwater.sd")]] <- alpha_sed_se
+param_values_sed[[paste0("R.ave.sediment.freshwater")]] <- R.ave_sed_mean
+param_values_sed[[paste0("R.ave.sediment.freshwater.sd")]] <- R.ave_sed_sd
+param_values_sed[[paste0("a.v.sediment.freshwater")]] <- -cpsd_fit_volume_sed$a_cpsd
+param_values_sed[[paste0("a.v.sediment.freshwater.sd")]] <- cpsd_fit_volume_sed$se_a_cpsd
+param_values_sed[[paste0("a.sa.sediment.freshwater")]] <- -cpsd_fit_area_sed$a_cpsd
+param_values_sed[[paste0("a.sa.sediment.freshwater.sd")]] <- cpsd_fit_area_sed$se_a_cpsd
+
+# pair down to only used parameters
+param_values_sed <- param_values_sed |> dplyr::select(contains("sediment.freshwater"), contains("beta"), contains("body"))
+param_values_sed
+```
+
+#### Build and Visualize Parameter distributions
+```{r}
+param_matrix_sed <- matrix_function(
+  n = n_boot,
+  params = param_values_sed,
+  upper.tissue.truncation.limit = 500,
+  x1M_set = 1,
+  x2D_set = 5000,
+  include_marine_surface_water = F,
+  include_freshwater_surface_water = F,
+  include_marine_sediment = F,
+  include_freshwater_sediment = TRUE
+)
+
+sed_R_col <- rlang::sym(paste0("R.ave.sediment.freshwater"))
+sed_HW_col <- rlang::sym(paste0("H_W_ratio.sediment.freshwater"))
+
+param_matrix_sed <- param_matrix_sed |>
+  mutate(
+    !!sed_R_col := sample(R.ave_sed_vals, size = n(), replace = TRUE),
+    !!sed_HW_col := sample(R.ave_sed_vals, size = n(), replace = TRUE)
+  )
+
+# display distributions
+sediment_param_plots <- parameter_histograms_function(
+  param_matrix_sed,
+  compartments = c("Freshwater Sediment")
+)
+sediment_param_plots$alpha_combined_plot
+```
+
+#### Align Toxicity Data
+```{r}
+MC_sim_df_sed <- MC_sim_align_parallel(
+  tox_data = tox_data_sed,
+  param_matrix = param_matrix_sed,
+  n_sim = n_boot,
+  x1D_set = 1,
+  x2D_set = 5000,
+  num_cores = parallel::detectCores() - 2
+)
+
+results_df_food_sed <- dplyr::filter(
+  MC_sim_df_sed,
+  ingestible != "not ingestible",
+  particles_kg_food_dilution > 0,
+  Group != "Algae"
+) |>
+  dplyr::mutate(dose_new_particles_kg = particles_kg_food_dilution) |>
+  tidyr::drop_na(particles_kg_food_dilution)
+results_df_food_sed_t3_t4 <- dplyr::filter(
+  results_df_food_sed,
+  risk.13 != 1,
+  bio_f %in% c("Organism", "Population")
+)
+
+results_df_tissue_sed <- dplyr::filter(
+  MC_sim_df_sed,
+  translocatable != "not translocatable",
+  particles_kg_ox_stress > 0
+) |>
+  dplyr::mutate(dose_new_particles_kg = particles_kg_ox_stress) |>
+  tidyr::drop_na(particles_kg_ox_stress)
+results_df_tissue_sed_t3_t4 <- dplyr::filter(
+  results_df_tissue_sed,
+  risk.13 != 1,
+  bio_f %in% c("Organism", "Population")
+)
+
+erm_registry_sed <- list(
+  "Food Dilution" = list(base = results_df_food_sed, t3_t4 = results_df_food_sed_t3_t4),
+  "Tissue Translocation" = list(base = results_df_tissue_sed, t3_t4 = results_df_tissue_sed_t3_t4)
+)
+```
+
+### pSSD Fitting
+```{r}
+pSSDs_sed <- make_all_pSSDs(
+  MC_sim_df = MC_sim_df_sed,
+  environments = c("Freshwater Sediment"),
+  erm_registry = erm_registry_sed,
+  sim = 30,
+  cv_uf = 0.5,
+  rmore_method = "lognormal",
+  parallel = TRUE,
+  workers = parallel::detectCores() - 2,
+  base_cache_dir = file.path(tempdir(), "pssd_cache_sediment"),
+  base_output_path = file.path(tempdir(), "pssd_figures_sediment"),
+  overwrite_cache = TRUE
+)
+```
+
+#### Display pSSD Plots
+
+```{r}
+pSSDs_sed$`Tier3_Freshwater Sediment_Food Dilution`$pSSD_plot
+```
+
+## 11.4 Sediment probabilistic risk characterization
+
+```{r}
+pssd_key_food_sed <- paste0("Tier3_Freshwater Sediment_Food Dilution")
+pssd_key_tissue_sed <- paste0("Tier3_Freshwater Sediment_Tissue Translocation")
+
+haz_sed_HC5_food <- pSSDs_sed[[pssd_key_food_sed]]$summary_05$df |> 
+  mutate(HCx = 5, ERM = "Food Dilution")
+haz_sed_HC10_food <- pSSDs_sed[[pssd_key_food_sed]]$summary_10$df |> 
+  mutate(HCx = 10, ERM = "Food Dilution")
+
+haz_sed_HC5_tissue <- pSSDs_sed[[pssd_key_tissue_sed]]$summary_05$df |> 
+  mutate(HCx = 5, ERM = "Tissue Translocation")
+haz_sed_HC10_tissue <- pSSDs_sed[[pssd_key_tissue_sed]]$summary_10$df |> 
+  mutate(HCx = 10, ERM = "Tissue Translocation")
+
+haz_sed <- bind_rows(haz_sed_HC5_food, haz_sed_HC10_food, haz_sed_HC5_tissue, haz_sed_HC10_tissue)
+
+n_risk_sed <- 1000
+risk_draws_sed <- draw_rq_mc1d(haz_sed, eed_boot_sed$q50, n_risk = n_risk_sed)
+risk_summary_sed <- summarize_rq(risk_draws_sed)
+risk_summary_sed
+```
+
+#### Visualize Sediment Risk Characterization Results
+
+```{r sed-rq-plot}
+ggplot2::ggplot(risk_draws_sed, ggplot2::aes(x = RQ, fill = as.factor(ERM))) +
+  ggplot2::geom_histogram(bins = 60) +
+  ggplot2::scale_x_log10() +
+  ggplot2::geom_vline(xintercept = 1, linetype = "dashed", color = "red") +
+  ggplot2::facet_grid(HCx ~ ERM, scales = "free_y",
+                      labeller = ggplot2::labeller(HCx = function(x) paste0("HC", x))) +
+  ggplot2::labs(x = "Risk Quotient (Exposure / Hazard) [log10 scale]", y = "count",
+                title = "Sediment MC risk quotient distributions by ERM and HCx") +
+  ggplot2::theme_minimal(base_size = 15) +
+  ggplot2::theme(legend.position = "none")
+```
+
+```{r sed-risk-inline, include=FALSE}
+rs_sed_food_hc5   <- dplyr::filter(risk_summary_sed, ERM == "Food Dilution",        HCx == 5)
+rs_sed_tissue_hc5 <- dplyr::filter(risk_summary_sed, ERM == "Tissue Translocation", HCx == 5)
+```
+
+Sediment risk: median RQ = `r round(rs_sed_food_hc5$RQ_p50, 3)` (Food Dilution HC5; P(RQ>1) = `r round(rs_sed_food_hc5$P_exceed * 100, 1)`%) and `r round(rs_sed_tissue_hc5$RQ_p50, 3)` (Tissue Translocation HC5; P(RQ>1) = `r round(rs_sed_tissue_hc5$P_exceed * 100, 1)`%).
+
+---
+
+# 12. Ocean Water
+
+Ocean water samples were collected from the coastal/marine environment and analyzed using the same µFTIR workflow as river water. Marine species are evaluated using the PSSDplusplus marine toxicity endpoints and alignment parameters, which characterize exposure and hazard in particles/L rather than particles/kg (sediment).
+
+## 12.1 Particle data and C-PSD fitting
+
+### Particle volume computation
+
+```{r ocean-volume}
+# Compute W/L thickness ratio from ocean particles (same instrument as river)
+ratio_tbl_ocean <- raw_particles_ocean |>
+  dplyr::mutate(WL = 1 / aspect_ratio) |>
+  dplyr::group_by(shape) |>
+  dplyr::summarise(
+    n      = dplyr::n(),
+    r_med  = median(WL, na.rm = TRUE),
+    r_low  = quantile(WL, 0.25, na.rm = TRUE),
+    r_high = quantile(WL, 0.75, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+raw_particles_ocean <- raw_particles_ocean |>
+  dplyr::left_join(ratio_tbl_ocean |> dplyr::select(shape, r_med), by = "shape") |>
+  dplyr::mutate(
+    height_um = r_med * width_um,
+    V_um3 = dplyr::case_when(
+      shape == "fragment" ~ (pi / 6) * length_um * width_um * height_um,
+      shape == "fiber"    ~ pi * (width_um / 2)^2 * length_um,
+      TRUE ~ NA_real_
+    )
+  )
+
+cat("Ocean particles: n =", nrow(raw_particles_ocean),
+    "| shapes:", paste(sort(unique(raw_particles_ocean$shape)), collapse = ", "), "\n")
+```
+
+### Particle length
+
+```{r cpsd-fits-ocean-length}
+cpsd_fit_ocean_frag  <- c(fit_cpsd_segur_r(raw_particles_ocean |> dplyr::filter(shape == "fragment") |> dplyr::pull(length_um), bin_um = 5), list(shape = "fragment"))
+cpsd_fit_ocean_fiber <- c(fit_cpsd_segur_r(raw_particles_ocean |> dplyr::filter(shape == "fiber")    |> dplyr::pull(length_um), bin_um = 5), list(shape = "fiber"))
+cpsd_fit_ocean_all   <- c(fit_cpsd_segur_r(raw_particles_ocean |>                                         dplyr::pull(length_um), bin_um = 5), list(shape = "all"))
+
+alpha_ocean    <- alpha_dist(mu = cpsd_fit_ocean_all$a_cpsd, sd = cpsd_fit_ocean_all$se_a_cpsd, n = n_mc)
+alpha_ocean_mu <- mean(alpha_ocean)
+alpha_ocean_se <- sd(alpha_ocean)
+
+cat("Ocean All: alpha =", signif(cpsd_fit_ocean_all$a_cpsd, 2), "±",
+    signif(cpsd_fit_ocean_all$se_a_cpsd, 2),
+    "| LOD =", signif(cpsd_fit_ocean_all$lower_lod_used_um, 2), "–",
+    signif(cpsd_fit_ocean_all$upper_lod_um, 2), "µm\n")
+```
+
+#### Plots
+
+```{r}
+ocean_length_fits <- list(fragment = cpsd_fit_ocean_frag, fiber = cpsd_fit_ocean_fiber, all = cpsd_fit_ocean_all)
+ocean_length_fits <- ocean_length_fits[names(MP_PALETTE)[names(MP_PALETTE) %in% names(ocean_length_fits)]]
+
+ocean_length_cpsd_plot <- plot_cpsd_multi(ocean_length_fits, title = "Ocean water C-PSD fits by shape", attribute = "Length")
+ggsave(ocean_length_cpsd_plot, filename = "figures/ocean_length_cpsd_plot.png", width = 8, height = 6, dpi = 300)
+ocean_length_cpsd_plot
+```
+
+### Particle surface area
+
+```{r cpsd-fits-ocean-area}
+cpsd_fit_area_ocean_frag  <- c(fit_cpsd_segur_r(raw_particles_ocean |> dplyr::filter(shape == "fragment") |> dplyr::pull(area_um2), bin_um = 500, fit_range_um = c(2000, 50000)),  list(shape = "fragment"))
+cpsd_fit_area_ocean_fiber <- c(fit_cpsd_segur_r(raw_particles_ocean |> dplyr::filter(shape == "fiber")    |> dplyr::pull(area_um2), bin_um = 500, fit_range_um = c(2000, 500000)), list(shape = "fiber"))
+cpsd_fit_area_ocean       <- c(fit_cpsd_segur_r(raw_particles_ocean |>                                         dplyr::pull(area_um2), bin_um = 500, fit_range_um = c(2000, 500000)), list(shape = "all"))
+
+cat("Ocean All SA: alpha =", signif(cpsd_fit_area_ocean$a_cpsd, 2), "±",
+    signif(cpsd_fit_area_ocean$se_a_cpsd, 2),
+    "| LOD =", signif(cpsd_fit_area_ocean$lower_lod_used_um, 2), "–",
+    signif(cpsd_fit_area_ocean$upper_lod_um, 2), "µm²\n")
+```
+
+#### Plots
+
+```{r}
+ocean_area_fits <- list(fragment = cpsd_fit_area_ocean_frag, fiber = cpsd_fit_area_ocean_fiber, all = cpsd_fit_area_ocean)
+ocean_area_cpsd_plot <- plot_cpsd_multi(ocean_area_fits, title = "Ocean water C-PSD fits by shape", attribute = "Area")
+ggsave(ocean_area_cpsd_plot, filename = "figures/ocean_surfacearea_cpsd_plot.png", width = 8, height = 6, dpi = 300)
+ocean_area_cpsd_plot
+```
+
+### Particle volume
+
+```{r cpsd-fits-ocean-volume}
+cpsd_fit_volume_ocean_frag  <- c(fit_cpsd_segur_r(raw_particles_ocean |> dplyr::filter(shape == "fragment") |> dplyr::pull(V_um3), bin_um = 1e4), list(shape = "fragment"))
+cpsd_fit_volume_ocean_fiber <- c(fit_cpsd_segur_r(raw_particles_ocean |> dplyr::filter(shape == "fiber")    |> dplyr::pull(V_um3), bin_um = 1e4), list(shape = "fiber"))
+cpsd_fit_volume_ocean       <- c(fit_cpsd_segur_r(raw_particles_ocean |>                                         dplyr::pull(V_um3), bin_um = 1e4), list(shape = "all"))
+
+cat("Ocean All Volume: alpha =", signif(cpsd_fit_volume_ocean$a_cpsd, 2), "±",
+    signif(cpsd_fit_volume_ocean$se_a_cpsd, 2),
+    "| LOD =", signif(cpsd_fit_volume_ocean$lower_lod_used_um, 2), "–",
+    signif(cpsd_fit_volume_ocean$upper_lod_um, 2), "µm³\n")
+```
+
+#### Plots
+
+```{r}
+ocean_volume_fits <- list(fragment = cpsd_fit_volume_ocean_frag, fiber = cpsd_fit_volume_ocean_fiber, all = cpsd_fit_volume_ocean)
+ocean_volume_cpsd_plot <- plot_cpsd_multi(ocean_volume_fits, title = "Ocean water C-PSD fits by shape", attribute = "Volume")
+ggsave(ocean_volume_cpsd_plot, filename = "figures/ocean_volume_cpsd_plot.png", width = 8, height = 6, dpi = 300)
+ocean_volume_cpsd_plot
+```
+
+## 12.2 Ocean monitoring concentrations and EED
+
+```{r ocean-monitoring}
+monitoring_ocean <- readRDS("data_input/Part_dets_summ.rds") |>
+  dplyr::filter(
+    sample_type    == "ocean water",
+    material_simple == "plastic",
+    sample_or_blank == "sample"
+  ) |>
+  dplyr::mutate(
+    date_raw      = stringr::str_extract(Client_ID_MSSupdate, "\\d{8}"),
+    date          = lubridate::ymd(date_raw),
+    sample_id     = Client_ID_MSSupdate,
+    C_measured_pL = extrap_conc_PPL,
+    Lmin_measured_um = 50,
+    Lmax_measured_um = 500
+  )
+
+cat("Ocean monitoring samples:", nrow(monitoring_ocean), "\n")
+
+monitoring_ocean <- monitoring_ocean |>
+  dplyr::mutate(
+    Lmin_biascorr_um = pmax(Lmin_measured_um, cpsd_fit_ocean_all$lower_lod_um, na.rm = TRUE),
+    Lmax_biascorr_um = pmin(Lmax_measured_um, cpsd_fit_ocean_all$upper_lod_um,  na.rm = TRUE)
+  )
+
+L_meas_min_ocean <- median(monitoring_ocean$Lmin_biascorr_um, na.rm = TRUE)
+L_meas_max_ocean <- median(monitoring_ocean$Lmax_biascorr_um, na.rm = TRUE)
+
+cf_rescale_ocean <- correction_factor(
+  a          = alpha_ocean,
+  L_meas_min = L_meas_min_ocean,
+  L_meas_max = L_meas_max_ocean,
+  L_tar_min  = 1,
+  L_tar_max  = 5000
+)
+combined_cf_ocean <- cf_rescale_ocean
+cat("Ocean CF: median =", round(median(combined_cf_ocean), 1), "× (90% CI",
+    round(quantile(combined_cf_ocean, 0.05), 1), "–",
+    round(quantile(combined_cf_ocean, 0.95), 1), "×)\n")
+
+C_corrected_draws_ocean <- monitoring_ocean |>
+  dplyr::mutate(idx = dplyr::row_number()) |>
+  tidyr::crossing(draw = 1:3000) |>
+  dplyr::mutate(
+    cf = sample(combined_cf_ocean, size = dplyr::n(), replace = TRUE),
+    C_corrected_pL = C_measured_pL * cf
+  )
+
+C_sample_median_ocean <- C_corrected_draws_ocean |>
+  dplyr::group_by(sample_id) |>
+  dplyr::summarise(C_corr_med = median(C_corrected_pL), .groups = "drop")
+
+eed_boot_ocean <- bootstrap_eed(C_sample_median_ocean$C_corr_med, n_boot = n_boot, probs = c(0.5, 0.95))
+summary(eed_boot_ocean)
+```
+
+## 12.3 Marine toxicity data
+
+```{r ocean-tox-data}
+tox_data_ocean <- tomex2 |>
+  dplyr::filter(
+    env_f            == "Marine",
+    Group            != "Bacterium",
+    Group            != "Plant",
+    effect.metric    != "HONEC",
+    tier_zero_tech_f == "Red Criteria Passed",
+    tier_zero_risk_f == "Red Criteria Passed",
+    risk.13          != 0
+  )
+
+cat("Marine tox endpoints:", nrow(tox_data_ocean), "records,",
+    length(unique(tox_data_ocean$Group)), "taxonomic groups\n")
+```
+
+### Parameter distributions
+
+```{r ocean-aspect-ratio}
+R.ave_ocean_result <- bootstrap_aspect_ratio(raw_particles_ocean$aspect_ratio, n_boot = n_boot)
+R.ave_ocean_vals   <- R.ave_ocean_result$vals
+R.ave_ocean_mean   <- R.ave_ocean_result$boot_mean
+R.ave_ocean_sd     <- R.ave_ocean_result$boot_sd
+
+param_values_ocean <- PSSDplusplus::param_default_values
+
+param_values_ocean[["alpha.marine"]]          <- -alpha_ocean_mu
+param_values_ocean[["alpha.marine.sd"]]       <- alpha_ocean_se
+param_values_ocean[["R.ave.water.marine"]]    <- R.ave_ocean_mean
+param_values_ocean[["R.ave.water.marine.sd"]] <- R.ave_ocean_sd
+param_values_ocean[["a.sa.marine"]]           <- -cpsd_fit_area_ocean$a_cpsd
+param_values_ocean[["a.sa.marine.sd"]]        <- cpsd_fit_area_ocean$se_a_cpsd
+param_values_ocean[["a.v.marine"]]            <- -cpsd_fit_volume_ocean$a_cpsd
+param_values_ocean[["a.v.marine.sd"]]         <- cpsd_fit_volume_ocean$se_a_cpsd
+# a.m.marine: use volume slope as proxy (mass ∝ density × volume; constant density → same slope)
+param_values_ocean[["a.m.marine"]]            <- -cpsd_fit_volume_ocean$a_cpsd
+param_values_ocean[["a.m.marine.sd"]]         <- cpsd_fit_volume_ocean$se_a_cpsd
+# Keep all remaining params from param_default_values (same pattern as river section)
+# a.ssa.marine, p.ave.marine etc. retain their validated defaults
+param_values_ocean
+```
+
+### Build and visualize parameter distributions
+
+```{r ocean-param-matrix}
+param_matrix_ocean <- matrix_function(
+  n    = n_boot,
+  params = param_values_ocean,
+  upper.tissue.truncation.limit = 500,
+  x1M_set = 1,
+  x2D_set = 5000,
+  include_marine_surface_water     = TRUE,
+  include_freshwater_surface_water = FALSE,
+  include_marine_sediment          = FALSE,
+  include_freshwater_sediment      = FALSE
+)
+
+ocean_R_col  <- rlang::sym("R.ave.water.marine")
+ocean_HW_col <- rlang::sym("H_W_ratio.water.marine")
+
+param_matrix_ocean <- param_matrix_ocean |>
+  dplyr::mutate(
+    !!ocean_R_col  := sample(R.ave_ocean_vals, size = dplyr::n(), replace = TRUE),
+    !!ocean_HW_col := sample(R.ave_ocean_vals, size = dplyr::n(), replace = TRUE)
+  )
+
+tryCatch(
+  parameter_histograms_function(param_matrix_ocean, compartments = c("Marine Surface Water"))$alpha_combined_plot,
+  error = function(e) message("Parameter histogram skipped: ", conditionMessage(e))
+)
+```
+
+### Align toxicity data
+
+```{r ocean-mc-sim}
+MC_sim_df_ocean <- MC_sim_align_parallel(
+  tox_data     = tox_data_ocean,
+  param_matrix = param_matrix_ocean,
+  n_sim        = n_boot,
+  x1D_set      = 1,
+  x2D_set      = 5000,
+  num_cores    = parallel::detectCores() - 2
+)
+
+results_df_food_ocean <- dplyr::filter(
+  MC_sim_df_ocean,
+  ingestible != "not ingestible",
+  particles_L_food_dilution > 0,
+  Group != "Algae"
+) |>
+  dplyr::mutate(dose_new_particles_L = particles_L_food_dilution) |>
+  tidyr::drop_na(particles_L_food_dilution)
+
+results_df_food_ocean_t3_t4 <- dplyr::filter(
+  results_df_food_ocean,
+  risk.13 != 1,
+  bio_f %in% c("Organism", "Population")
+)
+
+results_df_tissue_ocean <- dplyr::filter(
+  MC_sim_df_ocean,
+  translocatable != "not translocatable",
+  particles_L_ox_stress > 0
+) |>
+  dplyr::mutate(dose_new_particles_L = particles_L_ox_stress) |>
+  tidyr::drop_na(particles_L_ox_stress)
+
+results_df_tissue_ocean_t3_t4 <- dplyr::filter(
+  results_df_tissue_ocean,
+  risk.13 != 1,
+  bio_f %in% c("Organism", "Population")
+)
+
+erm_registry_ocean <- list(
+  "Food Dilution"        = list(base = results_df_food_ocean,   t3_t4 = results_df_food_ocean_t3_t4),
+  "Tissue Translocation" = list(base = results_df_tissue_ocean, t3_t4 = results_df_tissue_ocean_t3_t4)
+)
+```
+
+### pSSD fitting
+
+```{r ocean-pssds}
+pSSDs_ocean <- make_all_pSSDs(
+  MC_sim_df    = MC_sim_df_ocean,
+  environments = c("Marine"),
+  erm_registry = erm_registry_ocean,
+  sim          = 30,
+  cv_uf        = 0.5,
+  rmore_method = "lognormal",
+  parallel     = TRUE,
+  workers      = parallel::detectCores() - 2,
+  base_cache_dir   = file.path(tempdir(), "pssd_cache_ocean"),
+  base_output_path = file.path(tempdir(), "pssd_figures_ocean"),
+  overwrite_cache  = TRUE
+)
+```
+
+#### Display pSSD plots
+
+```{r}
+pSSDs_ocean$`Tier3_Marine_Food Dilution`$pSSD_plot
+```
+
+## 12.4 Ocean water probabilistic risk characterization
+
+```{r}
+haz_ocean_HC5_food    <- pSSDs_ocean$`Tier3_Marine_Food Dilution`$summary_05$df        |> dplyr::mutate(HCx = 5,  ERM = "Food Dilution")
+haz_ocean_HC10_food   <- pSSDs_ocean$`Tier3_Marine_Food Dilution`$summary_10$df        |> dplyr::mutate(HCx = 10, ERM = "Food Dilution")
+haz_ocean_HC5_tissue  <- pSSDs_ocean$`Tier3_Marine_Tissue Translocation`$summary_05$df |> dplyr::mutate(HCx = 5,  ERM = "Tissue Translocation")
+haz_ocean_HC10_tissue <- pSSDs_ocean$`Tier3_Marine_Tissue Translocation`$summary_10$df |> dplyr::mutate(HCx = 10, ERM = "Tissue Translocation")
+
+haz_ocean <- dplyr::bind_rows(haz_ocean_HC5_food, haz_ocean_HC10_food, haz_ocean_HC5_tissue, haz_ocean_HC10_tissue)
+
+mc2d_ocean <- mc2d_risk(
+  monitoring_df = monitoring_ocean,
+  combined_cf   = combined_cf_ocean,
+  haz_df        = haz_ocean,
+  n_uncertainty = 300,
+  n_variability = 1000,
+  seed          = 1
+)
+
+mc2d_ocean_summary <- mc2d_ocean |>
+  dplyr::group_by(ERM, HCx) |>
+  dplyr::summarise(
+    P_exceed_med = median(P_exceed),
+    P_exceed_p95 = quantile(P_exceed, 0.95),
+    P_exceed_p05 = quantile(P_exceed, 0.05),
+    RQ_p50_med   = median(RQ_p50),
+    RQ_p95_med   = median(RQ_p95),
+    .groups = "drop"
+  )
+mc2d_ocean_summary
+```
+
+#### Visualize ocean risk characterization results
+
+```{r ocean-rq-plot}
+ggplot2::ggplot(mc2d_ocean, ggplot2::aes(x = P_exceed, fill = ERM)) +
+  ggplot2::geom_histogram(bins = 30, alpha = 0.6, position = "identity") +
+  ggplot2::facet_grid(HCx ~ ERM, scales = "free_y",
+                      labeller = ggplot2::labeller(HCx = function(x) paste0("HC", x))) +
+  ggplot2::labs(x = "P(RQ > 1) across uncertainty", y = "count",
+                title = "Ocean water MC2D uncertainty distribution for exceedance probability") +
+  ggplot2::theme_minimal(base_size = 15) +
+  ggplot2::theme(legend.position = "none")
+```
+
+```{r ocean-risk-inline, include=FALSE}
+rs_ocean_food_hc5   <- dplyr::filter(mc2d_ocean_summary, ERM == "Food Dilution",        HCx == 5)
+rs_ocean_tissue_hc5 <- dplyr::filter(mc2d_ocean_summary, ERM == "Tissue Translocation", HCx == 5)
+```
+
+Ocean water risk: median P(RQ>1) = `r round(rs_ocean_food_hc5$P_exceed_med * 100, 1)`% (Food Dilution HC5; median RQ = `r round(rs_ocean_food_hc5$RQ_p50_med, 3)`) and `r round(rs_ocean_tissue_hc5$P_exceed_med * 100, 1)`% (Tissue Translocation HC5; median RQ = `r round(rs_ocean_tissue_hc5$RQ_p50_med, 3)`).
+
+---
+
+# 13. Key Findings Summary
+
+```{r key-findings, echo=FALSE}
+knitr::kable(
+  dplyr::bind_rows(
+    tibble::tibble(
+      Matrix  = "River water",
+      Shape   = "All",
+      alpha_cpsd = round(cpsd_fit_all$a_cpsd, 3),
+      se         = round(cpsd_fit_all$se_a_cpsd, 3),
+      LOD_low_um = round(cpsd_fit_all$lower_lod_used_um),
+      LOD_hi_um  = round(cpsd_fit_all$upper_lod_um),
+      R2         = round(cpsd_fit_all$r2, 3)
+    ),
+    tibble::tibble(
+      Matrix  = "River water",
+      Shape   = "Fragment",
+      alpha_cpsd = round(cpsd_fit_frag$a_cpsd, 3),
+      se         = round(cpsd_fit_frag$se_a_cpsd, 3),
+      LOD_low_um = round(cpsd_fit_frag$lower_lod_used_um),
+      LOD_hi_um  = round(cpsd_fit_frag$upper_lod_um),
+      R2         = round(cpsd_fit_frag$r2, 3)
+    ),
+    tibble::tibble(
+      Matrix  = "River water",
+      Shape   = "Fiber",
+      alpha_cpsd = round(cpsd_fit_fiber$a_cpsd, 3),
+      se         = round(cpsd_fit_fiber$se_a_cpsd, 3),
+      LOD_low_um = round(cpsd_fit_fiber$lower_lod_used_um),
+      LOD_hi_um  = round(cpsd_fit_fiber$upper_lod_um),
+      R2         = round(cpsd_fit_fiber$r2, 3)
+    ),
+    tibble::tibble(
+      Matrix  = "Sediment",
+      Shape   = "All",
+      alpha_cpsd = round(cpsd_fit_sed_all$a_cpsd, 3),
+      se         = round(cpsd_fit_sed_all$se_a_cpsd, 3),
+      LOD_low_um = round(cpsd_fit_sed_all$lower_lod_used_um),
+      LOD_hi_um  = round(cpsd_fit_sed_all$upper_lod_um),
+      R2         = round(cpsd_fit_sed_all$r2, 3)
+    ),
+    tibble::tibble(
+      Matrix  = "Ocean water",
+      Shape   = "All",
+      alpha_cpsd = round(cpsd_fit_ocean_all$a_cpsd, 3),
+      se         = round(cpsd_fit_ocean_all$se_a_cpsd, 3),
+      LOD_low_um = round(cpsd_fit_ocean_all$lower_lod_used_um),
+      LOD_hi_um  = round(cpsd_fit_ocean_all$upper_lod_um),
+      R2         = round(cpsd_fit_ocean_all$r2, 3)
+    ),
+    tibble::tibble(
+      Matrix  = "Ocean water",
+      Shape   = "Fragment",
+      alpha_cpsd = round(cpsd_fit_ocean_frag$a_cpsd, 3),
+      se         = round(cpsd_fit_ocean_frag$se_a_cpsd, 3),
+      LOD_low_um = round(cpsd_fit_ocean_frag$lower_lod_used_um),
+      LOD_hi_um  = round(cpsd_fit_ocean_frag$upper_lod_um),
+      R2         = round(cpsd_fit_ocean_frag$r2, 3)
+    ),
+    tibble::tibble(
+      Matrix  = "Ocean water",
+      Shape   = "Fiber",
+      alpha_cpsd = round(cpsd_fit_ocean_fiber$a_cpsd, 3),
+      se         = round(cpsd_fit_ocean_fiber$se_a_cpsd, 3),
+      LOD_low_um = round(cpsd_fit_ocean_fiber$lower_lod_used_um),
+      LOD_hi_um  = round(cpsd_fit_ocean_fiber$upper_lod_um),
+      R2         = round(cpsd_fit_ocean_fiber$r2, 3)
+    )
+  ),
+  caption = "C-PSD power-law fits (Segur et al. 2026 algorithm). alpha_cpsd is the C-PSD slope; a_psd = alpha_cpsd − 1 is the differential BN-PSD slope used in PSSDplusplus.",
+  col.names = c("Matrix", "Shape", "α_CPSD", "SE", "LOD low (µm)", "LOD high (µm)", "R²")
+)
+```
+
+# 14. Session Information
+
+```{r session-info, echo=FALSE}
+sessionInfo()
+```
