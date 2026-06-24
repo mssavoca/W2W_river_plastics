@@ -181,348 +181,94 @@ head(monitoring)
 
 # 4. Step 1 — Derive power-law alpha via C-PSD (binned cumulative PSD)
 
-## 4.1 C-PSD fitting function (binned cumulative method)
+## 4.1 C-PSD fitting — Segur et al. (2026)
 
-The C-PSD approach fits the **cumulative** particle size distribution (counts ≥ L) using **binned** data, which can yield more coherent slopes/intercepts than MLE on raw data in some datasets (see discussion contrasting MLE vs C-PSD in the [draft manuscript by Segur et al. 2026](https://www.researchgate.net/publication/399568087_Using_the_power_law_size_distribution_to_extrapolate_and_compare_microplastic_number_and_mass_concentrations_in_environmental_media)).
+The C-PSD method fits the **cumulative** particle size distribution (counts ≥ L) on binned data,
+removing the binning bias that affects the BN-PSD (bin-normalised) approach (Segur et al. 2026,
+doi:10.1186/s43591-026-00205-5). The published Python code (`R/segur_psd_adapter.py`) is
+called via `reticulate`.  An R wrapper `fit_cpsd_segur_r()` reproduces the lm() object needed
+for confidence-band plotting.
 
-Below is a minimal, transparent implementation aligned with the C-PSD method in the Segur et al. draft:
+**Algorithm (two-step LOD detection):**
 
--   Bin particle lengths (default bin = 10 µm).
--   Compute cumulative counts `N(≥L)` using the **lower bin bound** (not the midpoint).
--   Fit a line on log-log scale: `log10 N(≥L) = a_cpsd * log10(L_low) + b_cpsd` over a chosen fitting range.
--   Use `a = a_cpsd - 1` to map to the corresponding *differential* PSD exponent.
--   Optionally apply the **bias-corrected lower size bound** method (MP#max rule) to define the lower fit limit.
+1. Compute BN-PSD and C-PSD from bins.
+2. Global OLS on all bins → normalised residuals; keep only bins with positive residuals that lie
+   at or above the BN-PSD peak (`Low_size ≥ L_max`).
+3. Exhaustively test all contiguous sub-windows ≥ 3 bins; keep windows with R² ≥ 0.90.
+4. Select the **longest** window (ties broken by R²) as the fit range.
+5. OLS on log10(C-PSD) ~ log10(L_low); BN-PSD slope = C-PSD slope − 1.
 
-```{r}
-bin_psd <- function(length_um, bin_um = 10) {
-  stopifnot(all(is.finite(length_um)))
-  length_um <- length_um[length_um > 0]
+```{r cpsd-setup, message=FALSE}
+if (!requireNamespace("reticulate", quietly = TRUE)) install.packages("reticulate")
+library(reticulate)
+reticulate::use_python(Sys.which("python"), required = TRUE)
+source_python(file.path(getwd(), "R/segur_psd_adapter.py"))
+```
 
-  # Start bins at the minimum observed size (rounded down) to avoid L=0 in the fit
-  min_edge <- floor(min(length_um, na.rm = TRUE) / bin_um) * bin_um
-  max_edge <- ceiling(max(length_um, na.rm = TRUE) / bin_um) * bin_um
-  breaks <- seq(min_edge, max_edge, by = bin_um)
+```{r fit-cpsd-segur-wrapper}
+# Wrapper: calls the Segur 2026 Python LOD algorithm and returns an lm()-compatible
+# list so that plot_cpsd_multi() and downstream param extractions work unchanged.
+fit_cpsd_segur_r <- function(x_um, bin_um = 10, fit_range_um = c(NA_real_, NA_real_)) {
+  x_um <- x_um[is.finite(x_um) & x_um > 0]
 
-  h <- hist(length_um, breaks = breaks, plot = FALSE)
-  tibble(
-    L_low = h$breaks[-length(h$breaks)],
-    L_high = h$breaks[-1],
-    L_mid = h$mids,
-    L_geom = sqrt(h$breaks[-length(h$breaks)] * h$breaks[-1]),
-    n = h$counts,
+  min_edge <- floor(min(x_um) / bin_um) * bin_um
+  max_edge <- ceiling(max(x_um) / bin_um) * bin_um
+  breaks   <- seq(min_edge, max_edge, by = bin_um)
+  h        <- hist(x_um, breaks = breaks, plot = FALSE)
+
+  bins <- tibble::tibble(
+    L_low     = h$breaks[-length(h$breaks)],
+    L_high    = h$breaks[-1],
+    L_mid     = h$mids,
+    L_geom    = sqrt(h$breaks[-length(h$breaks)] * h$breaks[-1]),
+    n         = h$counts,
     bin_width = h$breaks[-1] - h$breaks[-length(h$breaks)],
-    bn_psd = h$counts / (h$breaks[-1] - h$breaks[-length(h$breaks)])
+    bn_psd    = h$counts / (h$breaks[-1] - h$breaks[-length(h$breaks)])
   )
-}
 
-# Bias-corrected lower size bound (MP#max rule)
-# If the BN-PSD peak is not in the smallest bin, treat that as evidence of low bias
-# and set L_lower_LOD = 2 * geometric mean of the peak bin.
-infer_lower_lod <- function(bins) {
-  bins2 <- bins |>
-    filter(is.finite(L_low), L_low > 0, n > 0, is.finite(bn_psd))
+  # Optionally restrict the input range before passing to the Python algorithm
+  bins_fit <- bins
+  if (!is.na(fit_range_um[1])) bins_fit <- dplyr::filter(bins_fit, L_low >= fit_range_um[1])
+  hi_lim <- if (!is.na(fit_range_um[2])) fit_range_um[2] else max(bins$L_high)
 
-  if (nrow(bins2) == 0) {
-    return(list(L_lower_lod_um = NA_real_, bias_detected = FALSE, mpmax_bin = NULL))
-  }
-
-  bins2 <- bins2 |> arrange(L_low)
-  max_idx <- which.max(bins2$bn_psd)
-  bias_detected <- max_idx > 1
-  mpmax_bin <- bins2[max_idx, , drop = FALSE]
-
-  L_lower_lod_um <- if (bias_detected) {
-    2 * mpmax_bin$L_geom # uses 2x the geomean per the publication. Can try different values
-  } else {
-    min(bins2$L_low)
-  }
-
-  list(
-    L_lower_lod_um = as.numeric(L_lower_lod_um),
-    bias_detected = bias_detected,
-    mpmax_bin = mpmax_bin
+  py <- fit_psd_segur(
+    low_size        = bins_fit$L_low,
+    high_size       = bins_fit$L_high,
+    bin_count       = as.numeric(bins_fit$n),
+    max_low_size_um = hi_lim
   )
-}
 
-# Refine lower LOD by detecting under-counting at small sizes
-refine_lower_lod_by_resid <- function(df_cpsd,
-                                      start_lod,
-                                      upper_lod = NA_real_,
-                                      min_points = 6,
-                                      head_k = 4,
-                                      run_k = 3,
-                                      z = 1.5) {
-  df_cpsd <- df_cpsd |>
-    dplyr::arrange(L_low)
-
-  if (!is.finite(upper_lod)) {
-    upper_lod <- max(df_cpsd$L_high, na.rm = TRUE)
-  }
-
-  candidates <- sort(unique(df_cpsd$L_low[df_cpsd$L_low >= start_lod]))
-  if (length(candidates) == 0) {
-    return(list(L_lower_lod_um = start_lod, flagged = FALSE))
-  }
-
-  for (L_lo in candidates) {
-    sub <- df_cpsd |>
-      dplyr::filter(L_low >= L_lo, L_high <= upper_lod)
-    if (nrow(sub) < min_points) next
-
-    fit <- lm(log10(N_ge) ~ log10(L_low), data = sub)
-    r <- resid(fit)
-    sigma <- sd(r, na.rm = TRUE)
-
-    sub2 <- sub |>
-      dplyr::mutate(resid = r) |>
-      dplyr::arrange(L_low)
-    head_df <- utils::head(sub2, head_k)
-
-    strong_neg <- head_df$resid < (-z * sigma)
-    left_slump <- sum(strong_neg, na.rm = TRUE) >= run_k
-
-    if (!left_slump) {
-      return(list(L_lower_lod_um = L_lo, flagged = TRUE))
-    }
-  }
-
-  list(L_lower_lod_um = max(candidates, na.rm = TRUE), flagged = TRUE)
-}
-
-# Upper LOD inference via tail-slump detection in C-PSD residuals
-infer_upper_lod <- function(df_cpsd,
-                            min_points = 6,
-                            tail_k = 4,
-                            run_k = 3,
-                            z = 1.5,
-                            N_min = 10,
-                            min_nonzero_tail = 5,
-                            require_slope_stability = FALSE,
-                            slope_tol = 0.08) {
-
-  df_cpsd <- df_cpsd |>
-    dplyr::arrange(L_low)
-
-  if (nrow(df_cpsd) < min_points) {
-    return(list(
-      L_upper_lod_um = max(df_cpsd$L_high, na.rm = TRUE),
-      flagged = FALSE,
-      diagnostics = NULL
-    ))
-  }
-
-  # candidates only from supported bins
-  candidates <- sort(unique(df_cpsd$L_high[df_cpsd$n > 0]))
-  candidates <- candidates[candidates > min(df_cpsd$L_low, na.rm = TRUE)]
-  if (length(candidates) == 0) {
-    return(list(
-      L_upper_lod_um = max(df_cpsd$L_high, na.rm = TRUE),
-      flagged = FALSE,
-      diagnostics = NULL
-    ))
-  }
-
-  results <- vector("list", length(candidates))
-  names(results) <- as.character(candidates)
-  prev_slope <- NA_real_
-
-  supported_max <- max(df_cpsd$L_high[df_cpsd$N_ge >= N_min], na.rm = TRUE)
-  hard_cap <- max(df_cpsd$L_high[df_cpsd$n > 0], na.rm = TRUE)
-  supported_max <- min(supported_max, hard_cap, na.rm = TRUE)
-  if (!is.finite(supported_max)) supported_max <- hard_cap
-
-  for (i in seq_along(candidates)) {
-    L_up <- candidates[length(candidates) - i + 1]  # descending
-    if (is.finite(supported_max) && L_up > supported_max) next
-    sub <- df_cpsd |> dplyr::filter(L_high <= L_up)
-
-    if (nrow(sub) < min_points) next
-
-    fit <- lm(log10(N_ge) ~ log10(L_low), data = sub)
-    r <- resid(fit)
-    sigma <- sd(r, na.rm = TRUE)
-
-    sub2 <- sub |>
-      dplyr::mutate(resid = r) |>
-      dplyr::arrange(L_low)
-    tail_df <- utils::tail(sub2, tail_k)
-    
-    slump_flag <- FALSE
-    if (sum(tail_df$n > 0, na.rm = TRUE) < min_nonzero_tail) slump_flag <- TRUE
-    strong_neg <- tail_df$resid < (-z * sigma)
-    slump_flag <- slump_flag || (sum(strong_neg, na.rm = TRUE) >= run_k)
-
-    slope <- unname(coef(fit)[2])
-    stable_flag <- TRUE
-    if (require_slope_stability && is.finite(prev_slope)) {
-      stable_flag <- abs(slope - prev_slope) <= slope_tol
-    }
-
-    results[[as.character(L_up)]] <- list(
-      L_up = L_up,
-      n = nrow(sub),
-      slope = slope,
-      intercept = unname(coef(fit)[1]),
-      r2 = summary(fit)$r.squared,
-      sigma = sigma,
-      slump_flag = slump_flag,
-      stable_flag = stable_flag
-    )
-
-    if (!slump_flag && stable_flag) {
-      diag_df <- dplyr::bind_rows(lapply(results, function(x) {
-        if (is.null(x)) NULL else as.data.frame(x)
-      }))
-      return(list(
-        L_upper_lod_um = L_up,
-        flagged = TRUE,
-        diagnostics = diag_df
-      ))
-    }
-
-    prev_slope <- slope
-  }
-
-  fallback <- sort(unique(df_cpsd$L_high), decreasing = TRUE)
-  L_fallback <- if (length(fallback) >= 2) fallback[2] else fallback[1]
-  diag_df <- dplyr::bind_rows(lapply(results, function(x) {
-    if (is.null(x)) NULL else as.data.frame(x)
-  }))
-
-  list(
-    L_upper_lod_um = L_fallback,
-    flagged = TRUE,
-    diagnostics = diag_df
-  )
-}
-
-fit_cpsd <- function(length_um,
-                     bin_um = 10,
-                     fit_range_um = c(NA, NA),
-                     lower_lod_method = c("mpmax", "none"),
-                     lower_resid_method = c("none", "left_resid"),
-                     upper_lod_method = c("tail_resid", "none"),
-                     min_points = 5,
-                     upper_min_points = 8,
-                     tail_k = 10,
-                     run_k = 3,
-                     z = 1, # lower is more strict; 1.5 = moderately strict
-                     N_min = 10,
-                     min_nonzero_tail = 5,
-                     N_min_lowbias = 3,
-                     min_nonzero_tail_lowbias = 1,
-                     lower_tail_k = 4,
-                     lower_run_k = 3,
-                     lower_z = 1.5,
-                     require_slope_stability = TRUE,
-                     slope_tol = 0.08) {
-
-  lower_lod_method <- match.arg(lower_lod_method)
-  lower_resid_method <- match.arg(lower_resid_method)
-  upper_lod_method <- match.arg(upper_lod_method)
-  bins <- bin_psd(length_um, bin_um = bin_um)
-
-  lower_lod <- list(L_lower_lod_um = NA_real_, bias_detected = FALSE, mpmax_bin = NULL)
-  if (lower_lod_method == "mpmax") {
-    lower_lod <- infer_lower_lod(bins)
-  }
-
-  # Default fit range: start at bias-corrected lower LOD (if defined), end at max bin high
-  fit_range_um <- fit_range_um
-  if (is.na(fit_range_um[1])) {
-    fit_range_um[1] <- if (is.finite(lower_lod$L_lower_lod_um)) {
-      lower_lod$L_lower_lod_um
-    } else {
-      min(bins$L_low[bins$L_low > 0], na.rm = TRUE)
-    }
-  }
-  if (is.na(fit_range_um[2])) {
-    fit_range_um[2] <- max(bins$L_high, na.rm = TRUE)
-  }
-
+  # Reconstruct C-PSD data frame and lm() for plotting / prediction bands
   df_full <- bins |>
-    arrange(L_low) |>
-    mutate(N_ge = rev(cumsum(rev(n)))) |>
-    filter(L_low > 0,
-           N_ge > 0)
+    dplyr::arrange(L_low) |>
+    dplyr::mutate(N_ge = rev(cumsum(rev(n)))) |>
+    dplyr::filter(L_low > 0, N_ge > 0)
 
-  lower_lod_refined <- list(L_lower_lod_um = fit_range_um[1], flagged = FALSE)
-  if (lower_resid_method == "left_resid") {
-    lower_lod_refined <- refine_lower_lod_by_resid(
-      df_cpsd = df_full,
-      start_lod = fit_range_um[1],
-      upper_lod = fit_range_um[2],
-      min_points = min_points,
-      head_k = lower_tail_k,
-      run_k = lower_run_k,
-      z = lower_z
-    )
-    fit_range_um[1] <- max(fit_range_um[1], lower_lod_refined$L_lower_lod_um, na.rm = TRUE)
-  }
-  lower_lod_used_um <- fit_range_um[1]
+  df_fit <- df_full |>
+    dplyr::filter(L_low >= py$lod_low_um, L_low < py$lod_high_um)
 
-  df0 <- df_full |>
-    filter(L_low >= fit_range_um[1])
-
-  upper_lod <- list(L_upper_lod_um = fit_range_um[2], flagged = FALSE, diagnostics = NULL)
-  if (upper_lod_method == "tail_resid") {
-    N_min_use <- if (lower_lod_refined$flagged) N_min_lowbias else N_min
-    min_nonzero_tail_use <- if (lower_lod_refined$flagged) min_nonzero_tail_lowbias else min_nonzero_tail
-    upper_lod <- infer_upper_lod(
-      df_cpsd = df0,
-      min_points = upper_min_points,
-      tail_k = tail_k,
-      run_k = run_k,
-      z = z,
-      N_min = N_min_use,
-      min_nonzero_tail = min_nonzero_tail_use,
-      require_slope_stability = require_slope_stability,
-      slope_tol = slope_tol
-    )
-    fit_range_um[2] <- min(fit_range_um[2], upper_lod$L_upper_lod_um, na.rm = TRUE)
-  }
-
-  df <- df0 |>
-    filter(L_high <= fit_range_um[2])
-
-  if (nrow(df) < min_points) {
-    stop("Not enough bins in the fit range to fit the C-PSD model.")
-  }
-
-  # Linear fit in log-log space for the cumulative distribution
-  fit <- lm(log10(N_ge) ~ log10(L_low), data = df)
-  coefs <- coef(fit)
-  fit_summ <- summary(fit)
-  se_a_cpsd <- unname(fit_summ$coefficients["log10(L_low)", "Std. Error"])
-  se_b_cpsd <- unname(fit_summ$coefficients["(Intercept)", "Std. Error"])
-
-  a_cpsd <- unname(coefs[2])
-  b_cpsd <- unname(coefs[1])      # intercept of log10(N_ge)
-  b_cpsd_lin <- 10^b_cpsd         # b' in N_ge = b' * L^(a')
-  a_psd <- a_cpsd - 1             # a' = a + 1
-  b_psd <- -b_cpsd_lin * a_cpsd   # b = -b' * (a + 1) = -b' * a'
+  fit_lm   <- lm(log10(N_ge) ~ log10(L_low), data = df_fit)
+  fit_summ <- summary(fit_lm)
 
   list(
-    data = df,
-    bins = bins,
-    fit = fit,
-    fit_range_um = fit_range_um,
-    lower_lod_um = lower_lod$L_lower_lod_um,
-    lower_lod_bias_detected = lower_lod$bias_detected,
-    lower_lod_refined_um = lower_lod_refined$L_lower_lod_um,
-    lower_lod_refined_flag = lower_lod_refined$flagged,
-    lower_lod_used_um = lower_lod_used_um,
-    mpmax_bin = lower_lod$mpmax_bin,
-    upper_lod_um = upper_lod$L_upper_lod_um,
-    upper_lod_diagnostics = upper_lod$diagnostics,
-    a_cpsd = a_cpsd,          # slope in log10 N_ge vs log10 L_low
-    b_cpsd = b_cpsd,          # log10 intercept for N_ge
-    se_a_cpsd = se_a_cpsd,    # Std. Error of a_cpsd
-    se_b_cpsd = se_b_cpsd,    # Std. Error of b_cpsd (log10 scale)
-    b_cpsd_lin = b_cpsd_lin,  # linear intercept b'
-    a_psd = a_psd,            # differential exponent
-    se_a_psd = se_a_cpsd,     # same as se_a_cpsd (shift by -1 doesn't change SE)
-    b_psd = b_psd             # differential intercept
+    data              = df_fit,
+    bins              = bins,
+    fit               = fit_lm,
+    fit_range_um      = c(py$lod_low_um, py$lod_high_um),
+    lower_lod_um      = py$lod_low_um,
+    lower_lod_used_um = py$lod_low_um,
+    upper_lod_um      = py$lod_high_um,
+    a_cpsd            = py$slope_C_PSD,
+    b_cpsd            = py$intercept_C_PSD,
+    se_a_cpsd         = py$se_slope_C_PSD,
+    se_b_cpsd         = unname(fit_summ$coefficients["(Intercept)", "Std. Error"]),
+    b_cpsd_lin        = 10^py$intercept_C_PSD,
+    a_psd             = py$slope_BN_PSD,
+    se_a_psd          = py$se_slope_C_PSD,
+    b_psd             = py$intercept_BN_PSD,
+    r2                = py$r2,
+    n_bins            = py$n_bins_used,
+    fit_mode          = py$fit_mode
   )
 }
 ```
@@ -530,45 +276,62 @@ fit_cpsd <- function(length_um,
 ## 4.2 Fit C-PSD to the raw particle data
 
 ### 4.2.1 Particle Length
-```{r}
-cpsd_fit_frag <- fit_cpsd(raw_particles |> filter(shape == "fragment") |> pull(length_um),
-                          bin_um = 5,
-                          fit_range_um = c(NA, 5000),
-                          lower_lod_method = "mpmax",
-                          lower_resid_method = "left_resid",
-                          N_min_lowbias = 3,
-                          min_nonzero_tail_lowbias = 1
-                           ) |> 
-                          c(list(shape = "fragment"))
 
-cpsd_fit_fiber <- fit_cpsd(raw_particles |> filter(shape == "fiber") |> pull(length_um),
-                           bin_um = 5,
-                           fit_range_um = c(NA, 5000),
-                           lower_lod_method = "mpmax",
-                           lower_resid_method = "left_resid",
-                           N_min_lowbias = 3,
-                           min_nonzero_tail_lowbias = 1
-                            ) |> 
-                           c(list(shape = "fiber"))
+```{r cpsd-fits-by-shape}
+# Pooled fits across all river locations
+cpsd_fit_frag  <- c(fit_cpsd_segur_r(raw_particles |> dplyr::filter(shape == "fragment") |> dplyr::pull(length_um), bin_um = 5), list(shape = "fragment"))
+cpsd_fit_fiber <- c(fit_cpsd_segur_r(raw_particles |> dplyr::filter(shape == "fiber")    |> dplyr::pull(length_um), bin_um = 5), list(shape = "fiber"))
+cpsd_fit_all   <- c(fit_cpsd_segur_r(raw_particles |> dplyr::pull(length_um),              bin_um = 5), list(shape = "all"))
 
-cpsd_fit_all <- fit_cpsd(raw_particles |> pull(length_um),
-                           bin_um = 5,
-                           fit_range_um = c(NA, 5000),
-                           lower_lod_method = "mpmax",
-                           lower_resid_method = "left_resid",
-                           N_min_lowbias = 3,
-                           min_nonzero_tail_lowbias = 1
-                            ) |> 
-                           c(list(shape = "all"))
+cat("Fragment: alpha =", signif(cpsd_fit_frag$a_cpsd,  2), "+-", signif(cpsd_fit_frag$se_a_cpsd,  2),
+    ", LOD =", signif(cpsd_fit_frag$lower_lod_used_um,  2), "–", signif(cpsd_fit_frag$upper_lod_um,  2), "µm\n")
+cat("Fiber:    alpha =", signif(cpsd_fit_fiber$a_cpsd, 2), "+-", signif(cpsd_fit_fiber$se_a_cpsd, 2),
+    ", LOD =", signif(cpsd_fit_fiber$lower_lod_used_um, 2), "–", signif(cpsd_fit_fiber$upper_lod_um, 2), "µm\n")
+cat("All:      alpha =", signif(cpsd_fit_all$a_cpsd,   2), "+-", signif(cpsd_fit_all$se_a_cpsd,   2),
+    ", LOD =", signif(cpsd_fit_all$lower_lod_used_um,   2), "–", signif(cpsd_fit_all$upper_lod_um,   2), "µm\n")
+```
 
-                          
-                           
-# report alpha +- sd, and lower LODs for each shape
-cat("Fragment: alpha =", signif(cpsd_fit_frag$a_cpsd,2), "+-", signif(cpsd_fit_frag$se_a_cpsd,2), ", lower LOD =", signif(cpsd_fit_frag$lower_lod_used_um,2), ", upper LOD =", signif(cpsd_fit_frag$upper_lod_um,2), "\n")
+```{r cpsd-fits-by-location}
+# Per-location fits (Carmel, Pajaro, Salinas, San Lorenzo) — all particles pooled by site
+locations <- sort(unique(raw_particles$sample_location))
 
-cat("Fiber: alpha =", signif(cpsd_fit_fiber$a_cpsd,2), "+-", signif(cpsd_fit_fiber$se_a_cpsd,2), ", lower LOD =", signif(cpsd_fit_fiber$lower_lod_used_um,2), ", upper LOD =", signif(cpsd_fit_fiber$upper_lod_um,2), "\n")
+cpsd_fits_by_loc <- lapply(setNames(locations, locations), function(loc) {
+  dat <- raw_particles |> dplyr::filter(sample_location == loc) |> dplyr::pull(length_um)
+  c(fit_cpsd_segur_r(dat, bin_um = 5), list(shape = loc))
+})
 
-cat("All: alpha =", signif(cpsd_fit_all$a_cpsd,2), "+-", signif(cpsd_fit_all$se_a_cpsd,2), ", lower LOD =", signif(cpsd_fit_all$lower_lod_used_um,2), ", upper LOD =", signif(cpsd_fit_all$upper_lod_um,2), "\n")
+# Summary table: slope and LOD window by location
+loc_summary <- dplyr::bind_rows(lapply(names(cpsd_fits_by_loc), function(loc) {
+  fo <- cpsd_fits_by_loc[[loc]]
+  tibble::tibble(
+    location     = loc,
+    n_particles  = sum(raw_particles$sample_location == loc),
+    a_cpsd       = round(fo$a_cpsd,   3),
+    se_a_cpsd    = round(fo$se_a_cpsd, 3),
+    a_psd        = round(fo$a_psd,    3),
+    lod_low_um   = round(fo$lower_lod_used_um, 0),
+    lod_high_um  = round(fo$upper_lod_um,       0),
+    r2           = round(fo$r2,       3),
+    n_bins       = fo$n_bins,
+    fit_mode     = fo$fit_mode
+  )
+}))
+
+knitr::kable(loc_summary, caption = "C-PSD length fits by river location (Segur 2026 algorithm)")
+```
+
+```{r cpsd-location-slope-plot}
+loc_summary |>
+  ggplot(aes(x = location, y = a_psd)) +
+  geom_point(size = 4, color = "#56B4E9") +
+  geom_errorbar(aes(ymin = a_psd - se_a_cpsd, ymax = a_psd + se_a_cpsd), width = 0.2, color = "#56B4E9") +
+  geom_hline(yintercept = -2.66, linetype = "dashed", color = "gray40") +
+  annotate("text", x = 0.55, y = -2.55,
+           label = "Segur 2026 fragment mean (−2.66)", size = 3.2, hjust = 0, color = "gray40") +
+  labs(x = "River location", y = "BN-PSD slope (a = a_cpsd − 1)",
+       title = "Power-law slope by river location",
+       subtitle = "Error bars = ±1 SE  |  Dashed = Segur 2026 literature fragment mean") +
+  theme_minimal(base_size = 14)
 ```
 
 #### 4.2.1.1 Plot C-PSD fits (model uncertainty)
@@ -735,52 +498,20 @@ ggsave(alpha_cpsh_plot,
 alpha_cpsh_plot
 ```
 
-```{r}
-# re-calculate particles/L count for samples based on analytically-determined LODs
-
-
-```
 
 ### 4.2.2 Fit C-PSD model to Particle Surface Area
 
-```{r}
-cpsd_fit_area_fragment <- fit_cpsd(raw_particles |> filter(shape == "fragment") |> pull(area_um2),
-                           bin_um = 500,
-                           fit_range_um = c(2000, 50000),
-                           lower_lod_method = "mpmax",
-                           lower_resid_method = "left_resid",
-                           N_min_lowbias = 3,
-                           min_nonzero_tail_lowbias = 1
-                            ) |> 
-                           c(list(shape = "fragment"))
+```{r cpsd-fits-surface-area}
+cpsd_fit_area_fragment <- c(fit_cpsd_segur_r(raw_particles |> dplyr::filter(shape == "fragment") |> dplyr::pull(area_um2), bin_um = 500, fit_range_um = c(2000, 50000)),  list(shape = "fragment"))
+cpsd_fit_area_fiber    <- c(fit_cpsd_segur_r(raw_particles |> dplyr::filter(shape == "fiber")    |> dplyr::pull(area_um2), bin_um = 500, fit_range_um = c(2000, 500000)), list(shape = "fiber"))
+cpsd_fit_area          <- c(fit_cpsd_segur_r(raw_particles |> dplyr::pull(area_um2),              bin_um = 500, fit_range_um = c(2000, 500000)),                          list(shape = "all"))
 
-cpsd_fit_area_fiber <- fit_cpsd(raw_particles |> filter(shape == "fiber") |> pull(area_um2),
-                           bin_um = 500,
-                           fit_range_um = c(2000, 500000),
-                           lower_lod_method = "mpmax",
-                           lower_resid_method = "left_resid",
-                           N_min_lowbias = 3,
-                           min_nonzero_tail_lowbias = 1
-                            ) |> 
-                           c(list(shape = "fiber"))
-
-cpsd_fit_area <- fit_cpsd(raw_particles |> pull(area_um2),
-                           bin_um = 500,
-                           fit_range_um = c(2000, 500000),
-                           lower_lod_method = "mpmax",
-                           lower_resid_method = "left_resid",
-                           N_min_lowbias = 3,
-                           min_nonzero_tail_lowbias = 1
-                            ) |> 
-                           c(list(shape = "all"))
-                          
-                           
-# report alpha +- sd, and lower LODs for each shape
-cat("Fragment Surface Area: alpha =", signif(cpsd_fit_area_fragment$a_cpsd,2), "+-", signif(cpsd_fit_area_fragment$se_a_cpsd,2), ", lower LOD =", signif(cpsd_fit_area_fragment$lower_lod_used_um,2), ", upper LOD =", signif(cpsd_fit_area_fragment$upper_lod_um,2), "\n")
-
-cat("Fiber Surface Area: alpha =", signif(cpsd_fit_area_fiber$a_cpsd,2), "+-", signif(cpsd_fit_area_fiber$se_a_cpsd,2), ", lower LOD =", signif(cpsd_fit_area_fiber$lower_lod_used_um,2), ", upper LOD =", signif(cpsd_fit_area_fiber$upper_lod_um,2), "\n")
-
-cat("All Shape Surface Area: alpha =", signif(cpsd_fit_area$a_cpsd,2), "+-", signif(cpsd_fit_area$se_a_cpsd,2), ", lower LOD =", signif(cpsd_fit_area$lower_lod_used_um,2), ", upper LOD =", signif(cpsd_fit_area$upper_lod_um,2), "\n")
+cat("Fragment Surface Area: alpha =", signif(cpsd_fit_area_fragment$a_cpsd, 2), "+-", signif(cpsd_fit_area_fragment$se_a_cpsd, 2),
+    ", LOD =", signif(cpsd_fit_area_fragment$lower_lod_used_um, 2), "–", signif(cpsd_fit_area_fragment$upper_lod_um, 2), "µm²\n")
+cat("Fiber Surface Area:    alpha =", signif(cpsd_fit_area_fiber$a_cpsd,    2), "+-", signif(cpsd_fit_area_fiber$se_a_cpsd,    2),
+    ", LOD =", signif(cpsd_fit_area_fiber$lower_lod_used_um,    2), "–", signif(cpsd_fit_area_fiber$upper_lod_um,    2), "µm²\n")
+cat("All Shape Surface Area: alpha =", signif(cpsd_fit_area$a_cpsd,         2), "+-", signif(cpsd_fit_area$se_a_cpsd,         2),
+    ", LOD =", signif(cpsd_fit_area$lower_lod_used_um,          2), "–", signif(cpsd_fit_area$upper_lod_um,          2), "µm²\n")
 ```
 
 For reference, Kooi et al. (2021) found the following:
@@ -838,44 +569,17 @@ cat("upper volume LOD (all):", signif(all_volume_lod_upper, 2), "\n")
 ```
 
 
-```{r}
-cpsd_fit_volume_fragment <- fit_cpsd(raw_particles |> filter(shape == "fragment") |> pull(V_um3),
-                           bin_um = 1e3,
-                           fit_range_um = c(fragment_volume_lod_lower, fragment_volume_lod_upper),
-                           lower_lod_method = "mpmax",
-                           lower_resid_method = "left_resid",
-                           N_min_lowbias = 3,
-                           min_nonzero_tail_lowbias = 1
-                            ) |> 
-                           c(list(shape = "fragment"))
+```{r cpsd-fits-volume}
+cpsd_fit_volume_fragment <- c(fit_cpsd_segur_r(raw_particles |> dplyr::filter(shape == "fragment") |> dplyr::pull(V_um3), bin_um = 1e3, fit_range_um = c(fragment_volume_lod_lower, fragment_volume_lod_upper)), list(shape = "fragment"))
+cpsd_fit_volume_fiber    <- c(fit_cpsd_segur_r(raw_particles |> dplyr::filter(shape == "fiber")    |> dplyr::pull(V_um3), bin_um = 1e4, fit_range_um = c(fiber_volume_lod_lower,    fiber_volume_lod_upper)),    list(shape = "fiber"))
+cpsd_fit_volume          <- c(fit_cpsd_segur_r(raw_particles |> dplyr::pull(V_um3),                                       bin_um = 1e2, fit_range_um = c(1e7, 1e8)),                                             list(shape = "all"))
 
-cpsd_fit_volume_fiber <- fit_cpsd(raw_particles |> filter(shape == "fiber") |> pull(V_um3),
-                           bin_um = 1e4,
-                           fit_range_um = c(fiber_volume_lod_lower, fiber_volume_lod_upper),
-                           lower_lod_method = "mpmax",
-                           lower_resid_method = "left_resid",
-                           N_min_lowbias = 3,
-                           min_nonzero_tail_lowbias = 1
-                            ) |> 
-                           c(list(shape = "fiber"))
-
-cpsd_fit_volume <- fit_cpsd(raw_particles |> pull(V_um3),
-                           bin_um = 1e2,
-                           fit_range_um = c(1e7,1e8),#c(fragment_volume_lod_lower, fragment_volume_lod_upper),
-                           lower_lod_method = "mpmax",
-                           lower_resid_method = "left_resid",
-                           N_min_lowbias = 3,
-                           min_nonzero_tail_lowbias = 1,
-                            ) |> 
-                           c(list(shape = "all"))
-
-
-# report alpha +- sd, and lower LODs for each shape
-cat("Fragment Volume: alpha =", signif(cpsd_fit_volume_fragment$a_cpsd,2), "+-", signif(cpsd_fit_volume_fragment$se_a_cpsd,2), ", lower LOD =", signif(cpsd_fit_volume_fragment$lower_lod_used_um,2), ", upper LOD =", signif(cpsd_fit_volume_fragment$upper_lod_um,2), "\n")
-
-cat("Fiber Volume: alpha =", signif(cpsd_fit_volume_fiber$a_cpsd,2), "+-", signif(cpsd_fit_volume_fiber$se_a_cpsd,2), ", lower LOD =", signif(cpsd_fit_volume_fiber$lower_lod_used_um,2), ", upper LOD =", signif(cpsd_fit_volume_fiber$upper_lod_um,2), "\n")
-
-cat(crayon::blue("All Shape Volume: alpha =", signif(cpsd_fit_volume$a_cpsd,2), "+-", signif(cpsd_fit_volume$se_a_cpsd,2), ", lower LOD =", signif(cpsd_fit_volume$lower_lod_used_um,2), ", upper LOD =", signif(cpsd_fit_volume$upper_lod_um,2), "\n"))
+cat("Fragment Volume: alpha =", signif(cpsd_fit_volume_fragment$a_cpsd, 2), "+-", signif(cpsd_fit_volume_fragment$se_a_cpsd, 2),
+    ", LOD =", signif(cpsd_fit_volume_fragment$lower_lod_used_um, 2), "–", signif(cpsd_fit_volume_fragment$upper_lod_um, 2), "µm³\n")
+cat("Fiber Volume:    alpha =", signif(cpsd_fit_volume_fiber$a_cpsd,    2), "+-", signif(cpsd_fit_volume_fiber$se_a_cpsd,    2),
+    ", LOD =", signif(cpsd_fit_volume_fiber$lower_lod_used_um,    2), "–", signif(cpsd_fit_volume_fiber$upper_lod_um,    2), "µm³\n")
+cat("All Shape Volume: alpha =", signif(cpsd_fit_volume$a_cpsd,         2), "+-", signif(cpsd_fit_volume$se_a_cpsd,         2),
+    ", LOD =", signif(cpsd_fit_volume$lower_lod_used_um,          2), "–", signif(cpsd_fit_volume$upper_lod_um,          2), "µm³\n")
 ```
 
 #### Plot Volume C-PSD fitting
@@ -1788,36 +1492,10 @@ raw_particles_sed <- raw_particles_sed |>
 ```
 
 ### Particle length
-```{r}
-cpsd_fit_sed_frag <- fit_cpsd(raw_particles_sed |> filter(shape == "fragment") |> pull(length_um),
-                          bin_um = 5,
-                          fit_range_um = c(NA, 5000),
-                          lower_lod_method = "mpmax",
-                          lower_resid_method = "left_resid",
-                          N_min_lowbias = 3,
-                          min_nonzero_tail_lowbias = 1
-                           ) |> 
-                          c(list(shape = "fragment"))
-
-cpsd_fit_sed_fiber <- fit_cpsd(raw_particles_sed |> filter(shape == "fiber") |> pull(length_um),
-                          bin_um = 5,
-                          fit_range_um = c(NA, 5000),
-                          lower_lod_method = "mpmax",
-                          lower_resid_method = "left_resid",
-                          N_min_lowbias = 3,
-                          min_nonzero_tail_lowbias = 1
-                           ) |> 
-                          c(list(shape = "fiber"))
-
-cpsd_fit_sed_all <- fit_cpsd(raw_particles_sed |> pull(length_um),
-                          bin_um = 5,
-                          fit_range_um = c(NA, 5000),
-                          lower_lod_method = "mpmax",
-                          lower_resid_method = "left_resid",
-                          N_min_lowbias = 3,
-                          min_nonzero_tail_lowbias = 1
-                           ) |> 
-                          c(list(shape = "all"))
+```{r cpsd-fits-sed-length}
+cpsd_fit_sed_frag  <- c(fit_cpsd_segur_r(raw_particles_sed |> dplyr::filter(shape == "fragment") |> dplyr::pull(length_um), bin_um = 5), list(shape = "fragment"))
+cpsd_fit_sed_fiber <- c(fit_cpsd_segur_r(raw_particles_sed |> dplyr::filter(shape == "fiber")    |> dplyr::pull(length_um), bin_um = 5), list(shape = "fiber"))
+cpsd_fit_sed_all   <- c(fit_cpsd_segur_r(raw_particles_sed |> dplyr::pull(length_um),              bin_um = 5), list(shape = "all"))
 
 alpha_sed <- alpha_dist(
   mu = cpsd_fit_sed_all$a_cpsd,
@@ -1850,38 +1528,13 @@ sed_length_cpsd_plot
 ```
 
 ### Particle surface area
-```{r}
-cpsd_fit_area_sed_fragment <- fit_cpsd(raw_particles_sed |> filter(shape == "fragment") |> pull(area_um2),
-                           bin_um = 500,
-                           fit_range_um = c(2000, 50000),
-                           lower_lod_method = "mpmax",
-                           lower_resid_method = "left_resid",
-                           N_min_lowbias = 3,
-                           min_nonzero_tail_lowbias = 1
-                            ) |> 
-                           c(list(shape = "fragment"))
+```{r cpsd-fits-sed-area}
+cpsd_fit_area_sed_fragment <- c(fit_cpsd_segur_r(raw_particles_sed |> dplyr::filter(shape == "fragment") |> dplyr::pull(area_um2), bin_um = 500, fit_range_um = c(2000, 50000)),  list(shape = "fragment"))
+cpsd_fit_area_sed_fiber    <- c(fit_cpsd_segur_r(raw_particles_sed |> dplyr::filter(shape == "fiber")    |> dplyr::pull(area_um2), bin_um = 500, fit_range_um = c(2000, 500000)), list(shape = "fiber"))
+cpsd_fit_area_sed          <- c(fit_cpsd_segur_r(raw_particles_sed |> dplyr::pull(area_um2),              bin_um = 500, fit_range_um = c(2000, 500000)),                          list(shape = "all"))
 
-cpsd_fit_area_sed_fiber <- fit_cpsd(raw_particles_sed |> filter(shape == "fiber") |> pull(area_um2),
-                           bin_um = 500,
-                           fit_range_um = c(2000, 500000),
-                           lower_lod_method = "mpmax",
-                           lower_resid_method = "left_resid",
-                           N_min_lowbias = 3,
-                           min_nonzero_tail_lowbias = 1
-                            ) |> 
-                           c(list(shape = "fiber"))
-
-cpsd_fit_area_sed <- fit_cpsd(raw_particles_sed |> pull(area_um2),
-                           bin_um = 500,
-                           fit_range_um = c(2000, 500000),
-                           lower_lod_method = "mpmax",
-                           lower_resid_method = "left_resid",
-                           N_min_lowbias = 3,
-                           min_nonzero_tail_lowbias = 1
-                            ) |> 
-                           c(list(shape = "all"))
-
-cat(crayon::blue("All Shape Sediment Area: alpha =", signif(cpsd_fit_area_sed$a_cpsd,2), "+-", signif(cpsd_fit_area_sed$se_a_cpsd,2), ", lower LOD =", signif(cpsd_fit_area_sed$lower_lod_used_um,2), ", upper LOD =", signif(cpsd_fit_area_sed$upper_lod_um,2), "\n"))
+cat("All Shape Sediment Area: alpha =", signif(cpsd_fit_area_sed$a_cpsd, 2), "+-", signif(cpsd_fit_area_sed$se_a_cpsd, 2),
+    ", LOD =", signif(cpsd_fit_area_sed$lower_lod_used_um, 2), "–", signif(cpsd_fit_area_sed$upper_lod_um, 2), "µm²\n")
 ```
 
 #### Plots
@@ -1902,43 +1555,17 @@ sed_area_cpsd_plot
 ```
 
 ### Particle volume
-```{r}
-cpsd_fit_volume_sed_fragment <- fit_cpsd(raw_particles_sed |> filter(shape == "fragment") |> pull(V_um3),
-                           bin_um = 1e4,
-                           fit_range_um = c(NA, NA),
-                           lower_lod_method = "mpmax",
-                           lower_resid_method = "left_resid",
-                           N_min_lowbias = 3,
-                           min_nonzero_tail_lowbias = 1
-                            ) |> 
-                           c(list(shape = "fragment"))
+```{r cpsd-fits-sed-volume}
+cpsd_fit_volume_sed_fragment <- c(fit_cpsd_segur_r(raw_particles_sed |> dplyr::filter(shape == "fragment") |> dplyr::pull(V_um3), bin_um = 1e4), list(shape = "fragment"))
+cpsd_fit_volume_sed_fiber    <- c(fit_cpsd_segur_r(raw_particles_sed |> dplyr::filter(shape == "fiber")    |> dplyr::pull(V_um3), bin_um = 1e4), list(shape = "fiber"))
+cpsd_fit_volume_sed          <- c(fit_cpsd_segur_r(raw_particles_sed |> dplyr::pull(V_um3),                 bin_um = 1e4), list(shape = "all"))
 
-cpsd_fit_volume_sed_fiber <- fit_cpsd(raw_particles_sed |> filter(shape == "fiber") |> pull(V_um3),
-                           bin_um = 1e4,
-                           fit_range_um = c(NA, NA),
-                           lower_lod_method = "mpmax",
-                           lower_resid_method = "left_resid",
-                           N_min_lowbias = 3,
-                           min_nonzero_tail_lowbias = 1
-                            ) |> 
-                           c(list(shape = "fiber"))
-
-cpsd_fit_volume_sed <- fit_cpsd(raw_particles_sed |> pull(V_um3),
-                           bin_um = 1e4,
-                           fit_range_um = c(NA, NA),
-                           lower_lod_method = "mpmax",
-                           lower_resid_method = "left_resid",
-                           N_min_lowbias = 3,
-                           min_nonzero_tail_lowbias = 1
-                            ) |> 
-                           c(list(shape = "all"))
-# print fit values
-# report alpha +- sd, and lower LODs for each shape
-cat("Sediment Fragment Volume: alpha =", signif(-cpsd_fit_volume_sed_fragment$a_cpsd,2), "+-", signif(cpsd_fit_volume_sed_fragment$se_a_cpsd,2), ", lower LOD =", signif(cpsd_fit_volume_sed_fragment$lower_lod_used_um,2), ", upper LOD =", signif(cpsd_fit_volume_sed_fragment$upper_lod_um,2), "\n")
-
-cat("Sediment Fiber Volume: alpha =", signif(-cpsd_fit_volume_sed_fiber$a_cpsd,2), "+-", signif(cpsd_fit_volume_sed_fiber$se_a_cpsd,2), ", lower LOD =", signif(cpsd_fit_volume_sed_fiber$lower_lod_used_um,2), ", upper LOD =", signif(cpsd_fit_volume_sed_fiber$upper_lod_um,2), "\n")
-
-cat(crayon::blue("Sediment All Shape Volume: alpha =", signif(-cpsd_fit_volume_sed$a_cpsd,2), "+-", signif(cpsd_fit_volume_sed$se_a_cpsd,2), ", lower LOD =", signif(cpsd_fit_volume_sed$lower_lod_used_um,2), ", upper LOD =", signif(cpsd_fit_volume_sed$upper_lod_um,2), "\n"))
+cat("Sediment Fragment Volume: alpha =", signif(-cpsd_fit_volume_sed_fragment$a_cpsd, 2), "+-", signif(cpsd_fit_volume_sed_fragment$se_a_cpsd, 2),
+    ", LOD =", signif(cpsd_fit_volume_sed_fragment$lower_lod_used_um, 2), "–", signif(cpsd_fit_volume_sed_fragment$upper_lod_um, 2), "µm³\n")
+cat("Sediment Fiber Volume:    alpha =", signif(-cpsd_fit_volume_sed_fiber$a_cpsd,    2), "+-", signif(cpsd_fit_volume_sed_fiber$se_a_cpsd,    2),
+    ", LOD =", signif(cpsd_fit_volume_sed_fiber$lower_lod_used_um,    2), "–", signif(cpsd_fit_volume_sed_fiber$upper_lod_um,    2), "µm³\n")
+cat("Sediment All Shape Volume: alpha =", signif(-cpsd_fit_volume_sed$a_cpsd,         2), "+-", signif(cpsd_fit_volume_sed$se_a_cpsd,         2),
+    ", LOD =", signif(cpsd_fit_volume_sed$lower_lod_used_um,          2), "–", signif(cpsd_fit_volume_sed$upper_lod_um,          2), "µm³\n")
 ```
 
 #### Plots
