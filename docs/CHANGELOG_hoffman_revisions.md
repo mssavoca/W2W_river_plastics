@@ -117,3 +117,21 @@ Open questions: the a.sa-only isolation is river-only (compute budget); full-bud
 **Downstream headline-conclusion changes:** Section 14's combined RQ plot now labels the sediment series "(illustrative only, SPEC 1d)"; Section 15.3(a) no longer reports the sediment Food Dilution RQ as a corrected finding alongside river/ocean (moved to a caveat sentence); added new Section 15.3(e) stating the sediment exclusion explicitly and updated the closing "Summary" paragraph accordingly.
 
 Open questions: whether a genuine dry-weight sediment concentration can be sourced from field/lab records outside this repository is a data-collection question for the study team, not a code question; 1d-ii's attribution (MC-budget noise vs. size-alignment sensitivity) should be revisited once a real sediment concentration exists and a full-budget run is available to separate those two effects.
+
+---
+
+# Corrective follow-up revisions, round 3 (2026-07-28): SPEC Q1 and SPEC 1e
+
+Two scoped additions on branch `sediment-temporal-and-cpsd-bitparity`: reconciling the native-R vs. Segur-Python C-PSD fits to bit-identity (SPEC Q1, a QA fix), and incorporating the Thuy-Dung et al. (2026) temporal-fragmentation framing into the sediment section (SPEC 1e, a framework/sensitivity addition). Neither disturbs SPEC 1/1b/1c/1d/2b/3b/3c or the river/ocean pipelines; sediment remains excluded from the headline risk characterization (`sediment_concentration_is_quantitative` stays FALSE). Numbers below are from the same development-scale render (`n_boot = 10`, `n_mc = 20000`) as prior entries.
+
+## SPEC Q1 - R/Python C-PSD bit-identity
+
+**Root cause confirmed before editing:** `fit_cpsd_segur_r()`'s two-step LOD-window *search* (`.segur_detect_lod()`) already restricted itself to populated (`n > 0`) bins, matching `PSD_fit.py` exactly (its input CSV never contains zero-count bins: `segur_bins_from_fit()` filters `n > 0` before export, and the script's `__main__` re-filters `Bin_concentration != 0`) — this is why the two implementations always agreed on the LOD window. But the *final* regression (`R/mp_risk_utils.R:203-211`, pre-fix) re-derived its data (`df_full`/`df_fit`) from the full uniform `bin_um` grid, including empty (`n == 0`) bins, instead of reusing the already-populated-only subset the window search used. This silently regressed the reported slope over many redundant flat-`N_ge`-step points at fixed bin-width intervals, inflating `n_bins` and biasing `a_cpsd` — worst case ocean-fiber, R `n_bins` = 102 vs. Python `n_bins_used` = 5, `|delta_a_cpsd|` ~= 0.044 (matching the spec's cited numbers exactly).
+
+**Fix:** added `n > 0` to `df_full`'s filter (`R/mp_risk_utils.R`, `fit_cpsd_segur_r()`), so the final regression uses the identical populated-bin set already used for LOD-window selection and already exported to Python. One-line change; no other function signature or behavior touched.
+
+**Verified in isolation before touching the qmd:** reproduced the ocean-fiber case end-to-end (real particle data from `data_input/Part_dets_comb.rds`, real `PSD_fit.py` run) post-fix: R `a_cpsd = -0.980550233595`, `n_bins = 5`; Python `slope_C_PSD = -0.980550233595`, `n_bins_used = 5`; `|delta_a_cpsd| = 2.26e-13` (well under the 1e-6 acceptance bound), on the single worst-offending PSD identified by the spec.
+
+**qmd changes (Section 12.1.2):** added prose explaining the fix and its rationale; added a rendered `stopifnot()` acceptance check after the R/Python comparison table asserting `max(abs(delta_a_cpsd)) < 1e-6` and `n_bins_R == n_bins_Python` across all nine matrix x shape PSDs, printing a diagnostic table of any mismatch before failing rather than failing silently; added a standing note flagging the sparse ocean-fiber fit (5 populated bins) as low-n regardless of the bit-identity result.
+
+Open questions: none identified in the isolated worst-case reproduction; the full nine-PSD assertion in the rendered document is the authoritative check going forward, and any future residual it reports would need its own root-cause note per the spec's acceptance criteria (empty-bin handling / tie-breaking), rather than being left unexplained.

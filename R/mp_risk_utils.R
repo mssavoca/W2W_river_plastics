@@ -200,10 +200,19 @@ fit_cpsd_segur_r <- function(x_um, bin_um = 10, fit_range_um = c(NA_real_, NA_re
 
   fit_mode <- if (is.null(lod$fit)) "no_fit" else "ok"
 
+  # SPEC Q1: N_ge (cumulative count at/above each bin's L_low) is computed over
+  # the full uniform bin_um grid so its *values* are unaffected by empty bins,
+  # but the regression itself must be restricted to populated (n > 0) bins only
+  # -- exactly mirroring PSD_fit.py, whose input CSV never contains zero-count
+  # bins to begin with (segur_bins_from_fit() filters n > 0 before export, and
+  # Python's __main__ re-filters `Bin_concentration != 0`). Without the `n > 0`
+  # filter here, R silently regresses over every empty 5-um grid cell inside
+  # the LOD window (flat N_ge step-function points), inflating n_bins and
+  # biasing a_cpsd relative to Python's populated-bins-only fit.
   df_full <- bins |>
     dplyr::arrange(L_low) |>
     dplyr::mutate(N_ge = rev(cumsum(rev(n)))) |>
-    dplyr::filter(L_low > 0, N_ge > 0)
+    dplyr::filter(L_low > 0, N_ge > 0, n > 0)
 
   df_fit <- df_full |>
     dplyr::filter(L_low >= lod$lod_low, L_low < lod$lod_high)
