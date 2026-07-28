@@ -968,3 +968,170 @@ build_haz_df <- function(pSSDs, environment_key) {
 
   dplyr::bind_rows(haz_HC5_food, haz_HC10_food, haz_HC5_tissue, haz_HC10_tissue)
 }
+
+
+# ── SPEC 1e: sediment temporal-fragmentation screens ──────────────────────────
+
+#' Most-sensitive-species screen (SPEC 1e-iv)
+#'
+#' For each ERM in an erm_registry (as returned by run_pssd_pipeline()), groups
+#' the aligned MC records by Species and identifies the single species with the
+#' lowest median aligned effect dose -- the most sensitive species -- alongside
+#' the number of species considered. Per Thuy-Dung, Groenenberg & Koelmans
+#' (2026), individual-species risk can precede a derivable community SSD signal
+#' by roughly a decade, so this screen is reported *alongside*, not instead of,
+#' the community HC5 (which remains build_haz_df()'s job).
+#'
+#' @param erm_registry List as returned by run_pssd_pipeline()$erm_registry:
+#'   list(`Food Dilution` = list(base=..., t3_t4=...), `Tissue Translocation` = list(...)).
+#' @param dose_col Column holding the aligned dose, e.g. "dose_new_particles_kg"
+#'   (sediment) or "dose_new_particles_L" (river/ocean) -- matches the
+#'   `dose_col` naming already constructed by run_pssd_pipeline().
+#' @param records_subset Which erm_registry tier to summarize: "base" (all
+#'   aligned records passing the ingestible/translocatable + dose>0 filters) or
+#'   "t3_t4" (further restricted to risk.13 tier-3/4, Organism/Population). Default "base".
+#' @return Tibble, one row per ERM: ERM, Species (most sensitive), n_records
+#'   (records for that species), median_EC (its median aligned dose), n_species
+#'   (total distinct species considered for that ERM).
+most_sensitive_species <- function(erm_registry, dose_col, records_subset = "base") {
+  empty_row <- function(erm_name) {
+    tibble::tibble(ERM = erm_name, Species = NA_character_, n_records = 0L,
+                   median_EC = NA_real_, n_species = 0L)
+  }
+  rows <- lapply(names(erm_registry), function(erm_name) {
+    df <- erm_registry[[erm_name]][[records_subset]]
+    if (is.null(df) || nrow(df) == 0 || !dose_col %in% names(df) || !"Species" %in% names(df)) {
+      return(empty_row(erm_name))
+    }
+    by_species <- df |>
+      dplyr::filter(is.finite(.data[[dose_col]]), .data[[dose_col]] > 0) |>
+      dplyr::group_by(Species) |>
+      dplyr::summarise(median_EC = stats::median(.data[[dose_col]]), n_records = dplyr::n(), .groups = "drop")
+    if (nrow(by_species) == 0) return(empty_row(erm_name))
+    most_sensitive <- by_species |> dplyr::slice_min(median_EC, n = 1, with_ties = FALSE)
+    tibble::tibble(
+      ERM       = erm_name,
+      Species   = most_sensitive$Species,
+      n_records = most_sensitive$n_records,
+      median_EC = most_sensitive$median_EC,
+      n_species = nrow(by_species)
+    )
+  })
+  dplyr::bind_rows(rows)
+}
+
+#' Individual-species risk characterization ratio (SPEC 1e-iv, early-warning companion)
+#'
+#' RCR = EED / lowest-species EC, as a companion to the community-HC5 RQ. Only
+#' meaningful where the exposure concentration (EED) is quantitative (river,
+#' ocean) -- deliberately not applied to sediment, whose exposure concentration
+#' is non-quantitative (SPEC 1d).
+#'
+#' @param eed_draws Numeric vector of bootstrap EED draws (e.g. eed_boot$q50).
+#' @param lowest_species_EC Single numeric value from most_sensitive_species()$median_EC.
+#' @return List: RCR_p50, RCR_p95, P_exceed (fraction of draws with RCR > 1).
+individual_species_rcr <- function(eed_draws, lowest_species_EC) {
+  if (length(lowest_species_EC) != 1 || !is.finite(lowest_species_EC) || lowest_species_EC <= 0) {
+    return(list(RCR_p50 = NA_real_, RCR_p95 = NA_real_, P_exceed = NA_real_))
+  }
+  rcr_draws <- eed_draws / lowest_species_EC
+  list(
+    RCR_p50  = stats::median(rcr_draws, na.rm = TRUE),
+    RCR_p95  = unname(stats::quantile(rcr_draws, 0.95, na.rm = TRUE)),
+    P_exceed = mean(rcr_draws > 1, na.rm = TRUE)
+  )
+}
+
+#' Sediment PSD-shift sensitivity (SPEC 1e-ii)
+#'
+#' Illustrative, methods-demonstration sensitivity (gated on
+#' `quantitative_flag`): re-runs the full sediment hazard alignment
+#' (matrix_function() -> run_pssd_pipeline() -> build_haz_df()) across a grid
+#' of progressively finer sediment PSDs, representing continued in-situ
+#' fragmentation of deposited microplastics over residence time (Thuy-Dung,
+#' Groenenberg & Koelmans 2026). Each grid point is an explicit, cited
+#' assumption -- an added shift to the differential length/area/volume/mass
+#' slopes -- NOT a fitted fragmentation kinetic rate: Thuy-Dung's k_frag/
+#' shell-geometry model is calibrated to polymer-coated-fertilizer prills with
+#' 7-year field data and is not transplanted to heterogeneous mixed-polymer
+#' sediment MPs of unknown age.
+#'
+#' A genuine (not merely cosmetic) hazard-side response requires re-running
+#' MC_sim_align_parallel()/make_all_pSSDs(), because steepening the PSD shifts
+#' the simulated particle-size population that PSSDplusplus's ingestible/
+#' translocatable size-gating operates on -- i.e. it can change *which*
+#' species clear the bioaccessibility threshold and enter the SSD, not just
+#' rescale an existing exposure number. This is why the sensitivity re-runs
+#' the full alignment rather than only shifting the CF/EED exposure side.
+#'
+#' @param param_values_base Baseline param_values_sed (already alpha/a.v/a.sa/
+#'   a.m.sediment.freshwater-populated, as built in Section 11.2).
+#' @param slope_shift_grid Numeric vector of *added* shifts (positive = finer/
+#'   steeper, on the same positive-alpha convention as
+#'   param_values_sed$alpha.sediment.freshwater) applied identically to alpha,
+#'   a.v, a.sa, and a.m (simplifying assumption: fragmentation shifts all four
+#'   size-metric slopes proportionally; noted as such wherever reported).
+#' @param tox_data_sed,n_boot,cv_uf,rmore_method,sim,num_cores Passed through
+#'   to matrix_function()/run_pssd_pipeline() using the *same* values as the
+#'   production sediment call (Section 11.2/11.3) -- no analytical-budget change.
+#' @param quantitative_flag The sediment_concentration_is_quantitative flag;
+#'   every returned row carries this as `is_quantitative` so callers can label
+#'   the table/plot as illustrative (FALSE) vs. production (TRUE) without
+#'   re-deriving that decision downstream.
+#' @return Tibble: one row per grid point x ERM x HCx, with columns
+#'   slope_shift, alpha_sediment_freshwater (post-shift), ERM, HCx, HC5/HC10
+#'   value (PNEC, particles/kg dw), and is_quantitative.
+sediment_psd_shift_sensitivity <- function(param_values_base, slope_shift_grid,
+                                            tox_data_sed, n_boot, cv_uf = 0.5,
+                                            rmore_method = "lognormal", sim = 30,
+                                            num_cores = parallel::detectCores() - 2,
+                                            quantitative_flag = FALSE) {
+  rows <- lapply(seq_along(slope_shift_grid), function(i) {
+    delta <- slope_shift_grid[i]
+
+    pv <- param_values_base
+    pv$alpha.sediment.freshwater <- pv$alpha.sediment.freshwater + delta
+    pv$a.v.sediment.freshwater   <- pv$a.v.sediment.freshwater   + delta
+    pv$a.sa.sediment.freshwater  <- pv$a.sa.sediment.freshwater  + delta
+    pv$a.m.sediment.freshwater   <- pv$a.m.sediment.freshwater   + delta
+
+    param_matrix_shift <- PSSDplusplus::matrix_function(
+      n = n_boot,
+      params = pv,
+      upper.tissue.truncation.limit = 500,
+      x1M_set = 1,
+      x2D_set = 5000,
+      include_marine_surface_water = FALSE,
+      include_freshwater_surface_water = FALSE,
+      include_marine_sediment = FALSE,
+      include_freshwater_sediment = TRUE
+    )
+
+    pssd_shift <- run_pssd_pipeline(
+      tox_data     = tox_data_sed,
+      param_matrix = param_matrix_shift,
+      environments = c("Freshwater Sediment"),
+      cache_suffix = paste0("sediment_psd_shift_", i),
+      dose_unit    = "kg",
+      n_sim        = n_boot,
+      num_cores    = num_cores,
+      sim          = sim,
+      cv_uf        = cv_uf,
+      rmore_method = rmore_method
+    )
+
+    haz_shift <- build_haz_df(pssd_shift$pSSDs, "Freshwater Sediment")
+
+    haz_shift |>
+      dplyr::group_by(ERM, HCx) |>
+      dplyr::summarise(HC_value_particles_kg = stats::median(PNEC), .groups = "drop") |>
+      dplyr::mutate(
+        slope_shift                 = delta,
+        alpha_sediment_freshwater   = pv$alpha.sediment.freshwater,
+        is_quantitative             = quantitative_flag
+      )
+  })
+
+  dplyr::bind_rows(rows) |>
+    dplyr::relocate(slope_shift, alpha_sediment_freshwater, ERM, HCx, HC_value_particles_kg, is_quantitative)
+}
