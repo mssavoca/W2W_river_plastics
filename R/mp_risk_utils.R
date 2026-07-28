@@ -254,6 +254,45 @@ volume_particle <- function(shape, length_um, width_um, height_um) {
   )
 }
 
+#' Derive volume-fit LOD bounds from length LOD bounds and shape geometry
+#'
+#' Converts each shape's length-based C-PSD LOD window into a volume-based LOD
+#' window using the *measured* width/length ratio for that shape (`r_med`,
+#' typically `median(W/L)` from the same ratio table used to compute particle
+#' volume), rather than assuming an isotropic (L=W=H) particle. An isotropic
+#' assumption is a rough approximation for fragments and badly wrong for
+#' fibers (aspect ratio >= 3 means width is a small fraction of length), which
+#' can produce a volume window containing zero real fiber particles for
+#' small/elongated samples. The "all" (pooled shapes) window is the union of
+#' the fragment and fiber windows, so the fit range used for the pooled volume
+#' fit stays consistent with what's actually reliably measured for each shape.
+#'
+#' @param cpsd_fit_frag,cpsd_fit_fiber fit_cpsd_segur_r() outputs for length,
+#'   by shape (uses $lower_lod_um / $upper_lod_um).
+#' @param r_med_frag,r_med_fiber Median W/L ratio for each shape (e.g. the
+#'   `r_med` column of the ratio_tbl computed alongside particle volume).
+#' @return Named list of length-2 numeric vectors c(lower, upper), in µm³:
+#'   fragment, fiber, all (union of fragment/fiber ranges).
+volume_lod_bounds <- function(cpsd_fit_frag, cpsd_fit_fiber, r_med_frag, r_med_fiber) {
+  frag_bounds <- c(
+    volume_particle("fragment",
+      cpsd_fit_frag$lower_lod_um, r_med_frag * cpsd_fit_frag$lower_lod_um, r_med_frag^2 * cpsd_fit_frag$lower_lod_um),
+    volume_particle("fragment",
+      cpsd_fit_frag$upper_lod_um, r_med_frag * cpsd_fit_frag$upper_lod_um, r_med_frag^2 * cpsd_fit_frag$upper_lod_um)
+  )
+  fiber_bounds <- c(
+    volume_particle("fiber",
+      cpsd_fit_fiber$lower_lod_um, r_med_fiber * cpsd_fit_fiber$lower_lod_um, r_med_fiber * cpsd_fit_fiber$lower_lod_um),
+    volume_particle("fiber",
+      cpsd_fit_fiber$upper_lod_um, r_med_fiber * cpsd_fit_fiber$upper_lod_um, r_med_fiber * cpsd_fit_fiber$upper_lod_um)
+  )
+  list(
+    fragment = frag_bounds,
+    fiber    = fiber_bounds,
+    all      = c(min(frag_bounds[1], fiber_bounds[1]), max(frag_bounds[2], fiber_bounds[2]))
+  )
+}
+
 #' Bootstrap aspect ratio and derive length:width summary
 #'
 #' Returns inverse aspect ratios (W/L), their bootstrap mean and SD,
@@ -299,8 +338,18 @@ bootstrap_aspect_ratio <- function(aspect_ratio_vec, n_boot = 100) {
 #' @param n Number of Monte Carlo draws.
 #' @param lower,upper Truncation bounds (default −6, −1.1). Ensure integrals converge.
 #' @return Numeric vector of length n.
-alpha_dist <- function(mu, sd, n = 10000, lower = -6, upper = -1.1) {
-  truncnorm::rtruncnorm(n, a = lower, b = upper, mean = mu, sd = sd)
+alpha_dist <- function(mu, sd, n = 10000, lower = -6, upper = -1.1, structural_sd = 0) {
+  total_sd <- sqrt(sd^2 + structural_sd^2)
+  truncnorm::rtruncnorm(n, a = lower, b = upper, mean = mu, sd = total_sd)
+}
+
+#' Convert cumulative C-PSD slope to differential PSD slope
+#'
+#' Segur-style C-PSD fits model N(>=L) proportional to L^a_cpsd. The
+#' corresponding differential PSD exponent used by correction_factor() is
+#' a_psd = a_cpsd - 1.
+cpsd_to_differential_slope <- function(a_cpsd) {
+  a_cpsd - 1
 }
 
 
@@ -319,11 +368,126 @@ alpha_dist <- function(mu, sd, n = 10000, lower = -6, upper = -1.1) {
 #' @param L_meas_min,L_meas_max Measured size range in µm.
 #' @param L_tar_min,L_tar_max Target size range in µm.
 #' @return Correction factor (same length as a).
-correction_factor <- function(a, L_meas_min, L_meas_max, L_tar_min, L_tar_max) {
+correction_factor <- function(a, L_meas_min, L_meas_max, L_tar_min, L_tar_max,
+                              slope_convention = c("differential", "cumulative")) {
+  slope_convention <- match.arg(slope_convention)
+  if (identical(slope_convention, "cumulative")) {
+    a <- cpsd_to_differential_slope(a)
+  }
   stopifnot(all(a < -1, na.rm = TRUE))
   num <- (L_tar_max^(a + 1) - L_tar_min^(a + 1)) / (a + 1)
   den <- (L_meas_max^(a + 1) - L_meas_min^(a + 1)) / (a + 1)
   num / den
+}
+
+#' Polymer density lookup used for particle-level density sensitivity
+#'
+#' Values are screening defaults in g/cm3 for broad FTIR library classes. They
+#' are intentionally editable inputs rather than hidden constants.
+polymer_density_lookup <- function() {
+  tibble::tribble(
+    ~pattern, ~polymer_group, ~density_g_cm3, ~source_note,
+    "poly\\(ethylene\\)|polyethylene", "polyethylene", 0.94, "TODO(cite): polymer density handbook/default table",
+    "poly\\(propylene\\)|polypropylene", "polypropylene", 0.90, "TODO(cite): polymer density handbook/default table",
+    "polystyrene|styrene", "styrenic polymers", 1.05, "TODO(cite): polymer density handbook/default table",
+    "poly\\(tetrafluoroethylene\\)|ptfe", "PTFE", 2.20, "TODO(cite): polymer density handbook/default table",
+    "poly\\(esters|terephthalate|polyester", "polyester/PET", 1.38, "TODO(cite): polymer density handbook/default table",
+    "polycarbonates", "polycarbonate", 1.20, "TODO(cite): polymer density handbook/default table",
+    "polyurethanes", "polyurethane", 1.20, "TODO(cite): polymer density handbook/default table",
+    "polyamides|poly\\(acrylamide", "polyamide/acrylamide", 1.14, "TODO(cite): polymer density handbook/default table",
+    "polyacryl|polymethacryl", "acrylic polymers", 1.18, "TODO(cite): polymer density handbook/default table",
+    "polyvinylalcohol|polyvinyl", "vinyl polymers", 1.25, "TODO(cite): polymer density handbook/default table",
+    "polyhaloolefins|vinylhalides", "halogenated vinyl polymers", 1.35, "TODO(cite): polymer density handbook/default table",
+    "polysiloxanes", "silicone polymers", 1.05, "TODO(cite): polymer density handbook/default table",
+    "cellulose", "cellulose derivatives", 1.50, "TODO(cite): polymer density handbook/default table"
+  )
+}
+
+#' Assign polymer-resolved density and buoyancy flags
+assign_polymer_density <- function(df, polymer_col = "material_class",
+                                   lookup = polymer_density_lookup(),
+                                   default_density_g_cm3 = 1.10,
+                                   freshwater_density_g_cm3 = 1.00,
+                                   seawater_density_g_cm3 = 1.025) {
+  stopifnot(is.data.frame(df), polymer_col %in% names(df))
+  polymer <- tolower(as.character(df[[polymer_col]]))
+  density <- rep(default_density_g_cm3, length(polymer))
+  group <- rep("default_fixed_1.10", length(polymer))
+  note <- rep("Fallback fixed density retained for unmatched polymer class", length(polymer))
+
+  for (i in seq_len(nrow(lookup))) {
+    hit <- grepl(lookup$pattern[i], polymer, perl = TRUE) & group == "default_fixed_1.10"
+    density[hit] <- lookup$density_g_cm3[i]
+    group[hit] <- lookup$polymer_group[i]
+    note[hit] <- lookup$source_note[i]
+  }
+
+  dplyr::mutate(
+    df,
+    polymer_density_group = group,
+    density_g_cm3 = density,
+    density_source_note = note,
+    buoyancy_freshwater = dplyr::case_when(
+      density_g_cm3 < freshwater_density_g_cm3 ~ "buoyant",
+      density_g_cm3 > freshwater_density_g_cm3 ~ "settling",
+      TRUE ~ "neutral"
+    ),
+    buoyancy_marine = dplyr::case_when(
+      density_g_cm3 < seawater_density_g_cm3 ~ "buoyant",
+      density_g_cm3 > seawater_density_g_cm3 ~ "settling",
+      TRUE ~ "neutral"
+    )
+  )
+}
+
+#' Estimate Hoffman-style critical size for transport distortion
+estimate_critical_size <- function(delta_m = 0.10, K_m2_s = 1e-5,
+                                   density_g_cm3 = 1.10,
+                                   water_density_g_cm3 = 1.00,
+                                   viscosity_pa_s = 0.001,
+                                   diameter_bounds_um = c(1, 5000)) {
+  rho_p <- density_g_cm3 * 1000
+  rho_w <- water_density_g_cm3 * 1000
+  f <- function(d_um) {
+    d_m <- d_um * 1e-6
+    ws <- abs((rho_p - rho_w) * 9.80665 * d_m^2 / (18 * viscosity_pa_s))
+    ws * delta_m / K_m2_s - 1
+  }
+  vals <- f(diameter_bounds_um)
+  if (!all(is.finite(vals)) || vals[1] * vals[2] > 0) return(NA_real_)
+  uniroot(f, interval = diameter_bounds_um)$root
+}
+
+#' Fit a two-segment diagnostic to a fitted C-PSD window
+piecewise_cpsd_diagnostic <- function(cpsd_fit, min_bins_per_segment = 3) {
+  df <- cpsd_fit$data
+  if (is.null(df) || nrow(df) < (2 * min_bins_per_segment + 1)) {
+    return(tibble::tibble(
+      break_um = NA_real_, slope_low = NA_real_, slope_high = NA_real_,
+      aic_single = stats::AIC(cpsd_fit$fit), aic_piecewise = NA_real_,
+      delta_aic = NA_real_
+    ))
+  }
+  df <- dplyr::mutate(df, log_L = log10(L_low), log_N = log10(N_ge))
+  candidates <- df$L_low[(min_bins_per_segment + 1):(nrow(df) - min_bins_per_segment)]
+  fits <- lapply(candidates, function(brk) {
+    dat <- dplyr::mutate(df, segment = ifelse(L_low < brk, "low", "high"))
+    fit <- stats::lm(log_N ~ log_L * segment, data = dat)
+    co <- stats::coef(fit)
+    high_term <- ifelse("log_L:segmentlow" %in% names(co), co["log_L:segmentlow"], 0)
+    tibble::tibble(
+      break_um = brk,
+      slope_low = unname(co["log_L"] + high_term),
+      slope_high = unname(co["log_L"]),
+      aic_piecewise = stats::AIC(fit)
+    )
+  })
+  best <- dplyr::bind_rows(fits) |> dplyr::slice_min(aic_piecewise, n = 1, with_ties = FALSE)
+  dplyr::mutate(
+    best,
+    aic_single = stats::AIC(cpsd_fit$fit),
+    delta_aic = aic_piecewise - aic_single
+  )
 }
 
 
@@ -491,4 +655,224 @@ param_bounds <- function(param_values, k = 2) {
   ) |>
     dplyr::filter(is.finite(mean), is.finite(sd), sd > 0) |>
     dplyr::mutate(min = mean - k * sd, max = mean + k * sd)
+}
+
+
+# ── Shared per-matrix pipeline helpers ────────────────────────────────────────
+# These consolidate steps that are repeated near-identically across the three
+# environmental matrices (river water, sediment, ocean water) analyzed in
+# probabilistic_risk_characterization.qmd.
+
+#' Fit C-PSD power law separately by shape category
+#'
+#' Thin wrapper around fit_cpsd_segur_r() that fits "fragment", "fiber", and
+#' pooled "all" models from one data frame in a single call, replacing the
+#' repeated fragment/fiber/all triplication used for every size metric
+#' (length/area/volume) in every matrix (river/sediment/ocean).
+#'
+#' @param df Data frame containing a shape column and the value column to fit.
+#' @param value_col Name of the numeric column to fit (e.g. "length_um",
+#'   "area_um2", "V_um3").
+#' @param shape_col Name of the shape column (default "shape").
+#' @param config Named list with elements "fragment", "fiber", "all", each a
+#'   list(bin_um = , fit_range_um = c(NA_real_, NA_real_)) passed through to
+#'   fit_cpsd_segur_r(). Names present in `config` determine which
+#'   shapes/groups are fitted; "all" fits the full (unfiltered) `value_col`.
+#' @return Named list (matching names(config)) of fit_cpsd_segur_r() outputs,
+#'   each with a $shape element appended.
+fit_cpsd_by_shape <- function(df, value_col, shape_col = "shape", config) {
+  stopifnot(is.data.frame(df), value_col %in% names(df), is.list(config))
+  out <- lapply(names(config), function(shape_name) {
+    cfg  <- config[[shape_name]]
+    vals <- if (identical(shape_name, "all")) {
+      df[[value_col]]
+    } else {
+      df[[value_col]][df[[shape_col]] == shape_name]
+    }
+    c(
+      fit_cpsd_segur_r(vals, bin_um = cfg$bin_um, fit_range_um = cfg$fit_range_um),
+      list(shape = shape_name)
+    )
+  })
+  stats::setNames(out, names(config))
+}
+
+#' Bias-correct monitoring data, apply power-law CF, and bootstrap the EED
+#'
+#' Shared post-load pipeline step: bias-corrects the measured LOD window
+#' against the C-PSD fit, computes the power-law correction_factor(), draws
+#' Monte Carlo corrected concentrations, collapses to per-sample medians, and
+#' bootstraps the Environmental Exposure Distribution. Matrix-specific
+#' monitoring *loading* (query filters, one-off date/QA fixes, unit columns)
+#' stays outside this function since it differs meaningfully by matrix.
+#'
+#' @param monitoring Data frame with columns sample_id, Lmin_measured_um,
+#'   Lmax_measured_um, and `conc_col`.
+#' @param conc_col Name of the measured-concentration column (e.g. "C_measured_pL").
+#' @param cpsd_fit A fit_cpsd_segur_r() output supplying lower_lod_um/upper_lod_um.
+#' @param alpha_draws Numeric vector of BN-PSD slope draws (alpha_dist() output).
+#' @param L_tar_min,L_tar_max Target size range in µm (default 1, 5000).
+#' @param n_draws Monte Carlo draws per monitoring sample (default 3000).
+#' @param n_boot Bootstrap replicates for bootstrap_eed().
+#' @param probs Quantile levels for bootstrap_eed() (default c(0.5, 0.95)).
+#' @return List: monitoring (with bias-corrected LOD columns), combined_cf,
+#'   C_corrected_draws (with a generic $C_corrected column), C_sample_median,
+#'   eed_boot, L_meas_min_use, L_meas_max_use.
+correct_and_bootstrap_eed <- function(monitoring, conc_col, cpsd_fit, alpha_draws,
+                                       L_tar_min = 1, L_tar_max = 5000,
+                                       n_draws = 3000, n_boot, probs = c(0.5, 0.95),
+                                       slope_convention = c("differential", "cumulative")) {
+  stopifnot(is.data.frame(monitoring), conc_col %in% names(monitoring))
+  slope_convention <- match.arg(slope_convention)
+
+  monitoring <- monitoring |>
+    dplyr::mutate(
+      Lmin_biascorr_um = pmax(Lmin_measured_um, cpsd_fit$lower_lod_um, na.rm = TRUE),
+      Lmax_biascorr_um = pmin(Lmax_measured_um, cpsd_fit$upper_lod_um,  na.rm = TRUE)
+    )
+
+  L_meas_min_use <- stats::median(monitoring$Lmin_biascorr_um, na.rm = TRUE)
+  L_meas_max_use <- stats::median(monitoring$Lmax_biascorr_um, na.rm = TRUE)
+
+  combined_cf <- correction_factor(
+    a          = alpha_draws,
+    L_meas_min = L_meas_min_use,
+    L_meas_max = L_meas_max_use,
+    L_tar_min  = L_tar_min,
+    L_tar_max  = L_tar_max,
+    slope_convention = slope_convention
+  )
+
+  C_corrected_draws <- monitoring |>
+    dplyr::mutate(idx = dplyr::row_number()) |>
+    tidyr::crossing(draw = seq_len(n_draws)) |>
+    dplyr::mutate(
+      cf          = sample(combined_cf, size = dplyr::n(), replace = TRUE),
+      C_corrected = .data[[conc_col]] * cf
+    )
+
+  C_sample_median <- C_corrected_draws |>
+    dplyr::group_by(sample_id) |>
+    dplyr::summarise(C_corr_med = stats::median(C_corrected), .groups = "drop")
+
+  eed_boot <- bootstrap_eed(C_sample_median$C_corr_med, n_boot = n_boot, probs = probs)
+
+  list(
+    monitoring        = monitoring,
+    combined_cf       = combined_cf,
+    C_corrected_draws = C_corrected_draws,
+    C_sample_median   = C_sample_median,
+    eed_boot          = eed_boot,
+    L_meas_min_use    = L_meas_min_use,
+    L_meas_max_use    = L_meas_max_use
+  )
+}
+
+#' Run the MC_sim_align_parallel() + make_all_pSSDs() pipeline for one matrix
+#'
+#' Wraps toxicity-data/particle-trait Monte Carlo alignment, ERM-specific
+#' results filtering, erm_registry construction, and pSSD++ fitting — the
+#' ~90-line block repeated once per matrix (river/sediment/ocean) that differs
+#' only in the dose unit (particles/L vs particles/kg for sediment), the
+#' `environments` value passed to make_all_pSSDs(), and cache/output dirs.
+#'
+#' @param tox_data Filtered toxicity data frame for this matrix.
+#' @param param_matrix Parameter matrix (matrix_function() output) for this matrix.
+#' @param environments Character vector passed to make_all_pSSDs()'s `environments`
+#'   argument (e.g. "Freshwater", "Freshwater Sediment", "Marine").
+#' @param cache_suffix String appended to the pssd_cache_/pssd_figures_ tempdir
+#'   subdirectory names, to keep matrices' caches separate.
+#' @param dose_unit "L" (particles/L; river, ocean) or "kg" (particles/kg; sediment).
+#' @param n_sim Size of param_matrix / MC_sim_align_parallel's n_sim.
+#' @param num_cores Worker count (default parallel::detectCores() - 2).
+#' @param sim,cv_uf,rmore_method Passed through to make_all_pSSDs().
+#' @param base_tempdir Base directory for cache/output subfolders (default tempdir()).
+#' @return List: MC_sim_df, erm_registry, pSSDs.
+run_pssd_pipeline <- function(tox_data, param_matrix, environments, cache_suffix,
+                               dose_unit = c("L", "kg"),
+                               n_sim, num_cores = parallel::detectCores() - 2,
+                               sim = 30, cv_uf = 0.5, rmore_method = "lognormal",
+                               base_tempdir = tempdir()) {
+  dose_unit <- match.arg(dose_unit)
+  food_col   <- paste0("particles_", dose_unit, "_food_dilution")
+  tissue_col <- paste0("particles_", dose_unit, "_ox_stress")
+  dose_col   <- paste0("dose_new_particles_", dose_unit)
+
+  MC_sim_df <- PSSDplusplus::MC_sim_align_parallel(
+    tox_data     = tox_data,
+    param_matrix = param_matrix,
+    n_sim        = n_sim,
+    x1D_set      = 1,
+    x2D_set      = 5000,
+    num_cores    = num_cores
+  )
+
+  results_df_food <- dplyr::filter(
+    MC_sim_df,
+    ingestible != "not ingestible",
+    .data[[food_col]] > 0,
+    Group != "Algae"
+  ) |>
+    dplyr::mutate(!!dose_col := .data[[food_col]]) |>
+    tidyr::drop_na(dplyr::all_of(food_col))
+  results_df_food_t3_t4 <- dplyr::filter(
+    results_df_food, risk.13 != 1, bio_f %in% c("Organism", "Population")
+  )
+
+  results_df_tissue <- dplyr::filter(
+    MC_sim_df,
+    translocatable != "not translocatable",
+    .data[[tissue_col]] > 0
+  ) |>
+    dplyr::mutate(!!dose_col := .data[[tissue_col]]) |>
+    tidyr::drop_na(dplyr::all_of(tissue_col))
+  results_df_tissue_t3_t4 <- dplyr::filter(
+    results_df_tissue, risk.13 != 1, bio_f %in% c("Organism", "Population")
+  )
+
+  erm_registry <- list(
+    "Food Dilution"        = list(base = results_df_food,   t3_t4 = results_df_food_t3_t4),
+    "Tissue Translocation" = list(base = results_df_tissue, t3_t4 = results_df_tissue_t3_t4)
+  )
+
+  pSSDs <- PSSDplusplus::make_all_pSSDs(
+    MC_sim_df        = MC_sim_df,
+    environments     = environments,
+    erm_registry     = erm_registry,
+    sim              = sim,
+    cv_uf            = cv_uf,
+    rmore_method     = rmore_method,
+    parallel         = TRUE,
+    workers          = num_cores,
+    base_cache_dir   = file.path(base_tempdir, paste0("pssd_cache_",   cache_suffix)),
+    base_output_path = file.path(base_tempdir, paste0("pssd_figures_", cache_suffix)),
+    overwrite_cache  = TRUE
+  )
+
+  list(MC_sim_df = MC_sim_df, erm_registry = erm_registry, pSSDs = pSSDs)
+}
+
+#' Build combined HC5/HC10 hazard data frame for one matrix/environment
+#'
+#' Extracts and row-binds the HC5 and HC10 summaries for the Food Dilution and
+#' Tissue Translocation ERMs from a make_all_pSSDs() output, tagging each with
+#' HCx and ERM columns. Replaces the repeated 4-block
+#' haz_HC5_food/haz_HC10_food/haz_HC5_tissue/haz_HC10_tissue construction
+#' duplicated once per matrix.
+#'
+#' @param pSSDs Output of make_all_pSSDs() (or run_pssd_pipeline()$pSSDs).
+#' @param environment_key Tier key used to index pSSDs, e.g. "Freshwater",
+#'   "Freshwater Sediment", "Marine" — matched against
+#'   `Tier3_<environment_key>_Food Dilution` / `...Tissue Translocation`.
+#' @return Data frame with HC5 + HC10 rows for both ERMs, columns include HCx, ERM.
+build_haz_df <- function(pSSDs, environment_key) {
+  food_key   <- paste0("Tier3_", environment_key, "_Food Dilution")
+  tissue_key <- paste0("Tier3_", environment_key, "_Tissue Translocation")
+
+  haz_HC5_food    <- pSSDs[[food_key]]$summary_05$df   |> dplyr::mutate(HCx = 5,  ERM = "Food Dilution")
+  haz_HC10_food   <- pSSDs[[food_key]]$summary_10$df   |> dplyr::mutate(HCx = 10, ERM = "Food Dilution")
+  haz_HC5_tissue  <- pSSDs[[tissue_key]]$summary_05$df |> dplyr::mutate(HCx = 5,  ERM = "Tissue Translocation")
+  haz_HC10_tissue <- pSSDs[[tissue_key]]$summary_10$df |> dplyr::mutate(HCx = 10, ERM = "Tissue Translocation")
+
+  dplyr::bind_rows(haz_HC5_food, haz_HC10_food, haz_HC5_tissue, haz_HC10_tissue)
 }
