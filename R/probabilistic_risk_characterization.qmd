@@ -3127,6 +3127,8 @@ knitr::kable(
 
 The Segur et al. Python script is run here against the W2W binned particle-length PSDs. The QMD first writes our C-PSD bins to a compact CSV, the Python chunk builds the Excel sheet structure expected by `PSD_fit.py`, runs the script in an isolated output directory, and the following R chunk compares the script output with the native R implementation.
 
+**SPEC Q1 (bin-identity fix).** Prior to this revision, the native R fit (`fit_cpsd_segur_r()`) regressed the final C-PSD slope over its *full uniform `bin_um` grid* (including empty, zero-count bins), while `PSD_fit.py` only ever sees the populated bins (`segur_bins_from_fit()` already filters `n > 0` before export, and the script's own `__main__` re-filters `Bin_concentration != 0`). The two-step LOD-window *search* already matched (both restrict to populated bins internally), so the reported LOD windows were always identical — but the *final regression* re-derived its data from the padded uniform grid, silently including many redundant flat-step points at fixed bin-width intervals and inflating `n_bins` and biasing `a_cpsd` (worst case: ocean-fiber, R `n_bins` = 102 vs Python `n_bins_used` = 5, `|Δa_cpsd|` ≈ 0.044). `fit_cpsd_segur_r()` now filters its final regression to populated (`n > 0`) bins only, matching Python's input exactly. Reconciling to the identical populated-bin set is the only allowed fix (not exporting the R uniform grid to Python instead), per the spec's requirement not to compare two different binnings.
+
 ```{r prepare-w2w-bins-for-segur-python, echo=FALSE}
 segur_bins_from_fit <- function(psd_id, fit, shape_dimension = 3) {
   fit$bins |>
@@ -3263,7 +3265,35 @@ knitr::kable(
   digits = 4,
   caption = "Segur PSD_fit.py run on W2W binned particle-length PSDs compared with the native R C-PSD implementation"
 )
+
+# SPEC Q1 acceptance checks: (1) max(|delta_a_cpsd|) < 1e-6 across all nine
+# matrix x shape PSDs, (2) R and Python agree on which bins were populated
+# (n_bins_R == n_bins_Python). Both are asserted (not just reported) so a
+# future data or algorithm change that reintroduces a binning mismatch fails
+# loudly here rather than silently drifting.
+q1_max_abs_delta_a_cpsd <- max(abs(segur_python_compare$delta_a_cpsd), na.rm = TRUE)
+q1_n_bins_mismatch <- segur_python_compare |>
+  dplyr::filter(R_n_bins != Python_n_bins | is.na(R_n_bins) != is.na(Python_n_bins))
+
+cat("SPEC Q1: max(|delta_a_cpsd|) across", nrow(segur_python_compare), "PSDs =",
+    format(q1_max_abs_delta_a_cpsd, scientific = TRUE), "\n")
+
+if (nrow(q1_n_bins_mismatch) > 0) {
+  cat("SPEC Q1: n_bins mismatch remains for", nrow(q1_n_bins_mismatch), "PSD(s) -- documenting rather than silently failing:\n")
+  print(q1_n_bins_mismatch |> dplyr::select(PSD_ID, R_n_bins, Python_n_bins, R_a_cpsd, Python_a_cpsd, delta_a_cpsd))
+} else {
+  cat("SPEC Q1: n_bins_R == n_bins_Python for all", nrow(segur_python_compare), "PSDs.\n")
+}
+
+stopifnot(
+  "SPEC Q1 acceptance failed: max(|delta_a_cpsd|) >= 1e-6 -- see printed diagnostic above" =
+    q1_max_abs_delta_a_cpsd < 1e-6,
+  "SPEC Q1 acceptance failed: n_bins mismatch between R and Python -- see printed diagnostic above" =
+    nrow(q1_n_bins_mismatch) == 0
+)
 ```
+
+The sparse ocean-fiber PSD (n = `r (this_study_length_alpha |> dplyr::filter(PSD_ID == "W2W_ocean_fiber"))$n_bins` populated bins in the fitted window) is flagged as low-n regardless of the bit-identity result above: five bins is too few to place much confidence in a single power-law slope, and this PSD's C-PSD slope should be read as indicative rather than precise, independent of the R/Python reconciliation.
 
 ## 12.2 Ocean monitoring concentrations and EED
 
