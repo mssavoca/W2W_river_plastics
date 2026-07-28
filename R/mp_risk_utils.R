@@ -490,6 +490,62 @@ piecewise_cpsd_diagnostic <- function(cpsd_fit, min_bins_per_segment = 3) {
   )
 }
 
+#' Piecewise (dual-slope) power-law rescaling correction factor
+#'
+#' Bounding-sensitivity counterpart to correction_factor() (SPEC 2b). Rather
+#' than extrapolating a single power-law slope across the full target range,
+#' integrates dN/dL = k * L^a using the fine-size segment's slope below
+#' `break_um` and the coarse-size segment's slope at/above `break_um`, with
+#' the coarse segment's density scaled so dN/dL is continuous at `break_um`
+#' (i.e., the two segments meet exactly at the break, not just piecewise in
+#' isolation). Both the target-range and measured-range integrals are
+#' evaluated with this same piecewise density, so segments that straddle
+#' `break_um` are split automatically and segments that fall entirely on one
+#' side reduce to a single-slope integral.
+#'
+#' The 1 um-to-LOD_low sub-window below the fitted C-PSD window is
+#' unconstrained by data in both the single-slope and piecewise case; the
+#' piecewise result is a labeled bounding sensitivity that quantifies
+#' structural (model-form) uncertainty in how that sub-window is
+#' extrapolated (Hoffman et al. 2026), not a replacement for the single-slope
+#' production correction factor.
+#'
+#' @param a_low,a_high Fine- and coarse-segment slopes (numeric scalar or
+#'   vector; must be < -1 after conversion to the differential convention).
+#' @param break_um Break point between the fine and coarse segments (um).
+#' @param L_meas_min,L_meas_max Measured size range in um.
+#' @param L_tar_min,L_tar_max Target size range in um.
+#' @param slope_convention "differential" (default; a_low/a_high are already
+#'   BN-PSD slopes) or "cumulative" (a_low/a_high are C-PSD slopes and will be
+#'   converted via a_psd = a_cpsd - 1 before integrating).
+#' @return Correction factor (same length as a_low/a_high).
+correction_factor_piecewise <- function(a_low, a_high, break_um,
+                                        L_meas_min, L_meas_max,
+                                        L_tar_min, L_tar_max,
+                                        slope_convention = c("differential", "cumulative")) {
+  slope_convention <- match.arg(slope_convention)
+  if (identical(slope_convention, "cumulative")) {
+    a_low  <- cpsd_to_differential_slope(a_low)
+    a_high <- cpsd_to_differential_slope(a_high)
+  }
+  stopifnot(all(a_low < -1, na.rm = TRUE), all(a_high < -1, na.rm = TRUE), all(break_um > 0, na.rm = TRUE))
+
+  k_low  <- 1
+  k_high <- k_low * break_um^(a_low - a_high)   # density-continuity at break_um
+
+  seg_integral <- function(lo, hi, a, k) k * (hi^(a + 1) - lo^(a + 1)) / (a + 1)
+
+  integrate_window <- function(lo, hi) {
+    lo_low  <- pmin(lo, break_um); hi_low  <- pmin(hi, break_um)
+    lo_high <- pmax(lo, break_um); hi_high <- pmax(hi, break_um)
+    seg_integral(lo_low, hi_low, a_low, k_low) + seg_integral(lo_high, hi_high, a_high, k_high)
+  }
+
+  num <- integrate_window(L_tar_min, L_tar_max)
+  den <- integrate_window(L_meas_min, L_meas_max)
+  num / den
+}
+
 
 # ── Environmental Exposure Distribution ───────────────────────────────────────
 
@@ -850,6 +906,33 @@ run_pssd_pipeline <- function(tox_data, param_matrix, environments, cache_suffix
   )
 
   list(MC_sim_df = MC_sim_df, erm_registry = erm_registry, pSSDs = pSSDs)
+}
+
+#' Build a "legacy" (cumulative-slope) copy of a param_values row (SPEC 1b)
+#'
+#' Returns a copy of `param_values` with the `a.v.<suffix>`, `a.sa.<suffix>`,
+#' and `a.m.<suffix>` fields overwritten with the (incorrect) cumulative C-PSD
+#' slope `$a_cpsd`, instead of the differential `$a_psd` used by the corrected
+#' pipeline. All other parameters (length slope, R.ave, etc.) are left as-is,
+#' isolating the volume/area-slope convention as the only difference between
+#' the legacy and corrected hazard alignment — used to build the SPEC 1b
+#' before/after Food Dilution RQ decomposition table.
+#'
+#' @param param_values A param_default_values-shaped one-row data frame/tibble
+#'   already carrying the corrected (differential) overrides.
+#' @param suffix PSSDplusplus environment suffix, e.g. "freshwater", "marine",
+#'   "sediment.freshwater".
+#' @param cpsd_fit_volume,cpsd_fit_area fit_cpsd_segur_r() outputs for volume/area.
+#' @return Copy of param_values with legacy (cumulative-slope) a.v/a.sa/a.m.
+legacy_cumulative_av_params <- function(param_values, suffix, cpsd_fit_volume, cpsd_fit_area) {
+  pv <- param_values
+  pv[[paste0("a.v.", suffix)]]        <- -cpsd_fit_volume$a_cpsd
+  pv[[paste0("a.v.", suffix, ".sd")]] <- cpsd_fit_volume$se_a_cpsd
+  pv[[paste0("a.sa.", suffix)]]        <- -cpsd_fit_area$a_cpsd
+  pv[[paste0("a.sa.", suffix, ".sd")]] <- cpsd_fit_area$se_a_cpsd
+  pv[[paste0("a.m.", suffix)]]        <- -cpsd_fit_volume$a_cpsd
+  pv[[paste0("a.m.", suffix, ".sd")]] <- cpsd_fit_volume$se_a_cpsd
+  pv
 }
 
 #' Build combined HC5/HC10 hazard data frame for one matrix/environment

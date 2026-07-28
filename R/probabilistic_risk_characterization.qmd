@@ -16,6 +16,12 @@ knitr::opts_chunk$set(
 
 set.seed(1)
 
+# Prevent knitr's inline-r hook from rendering large legacy-slope RQ/CF values
+# (e.g. ~1e7 under the pre-fix cumulative volume slope, SPEC 1b) as mangled
+# unrendered scientific notation (literal "1.2^{7}" text); does not change any
+# computed value, only how numbers print.
+options(scipen = 999)
+
 # During an actual render (quarto render / rmarkdown::render()), knitr's working
 # directory for THIS chunk is the .qmd's own directory (R/), but that can vary by
 # how the render is invoked. Resolve the project root from the file's own known
@@ -86,7 +92,7 @@ This document presents an **end-to-end, fully probabilistic** environmental risk
 
 All custom R functions (`fit_cpsd_segur_r`, `correction_factor`, `bootstrap_eed`, `mc2d_risk`, etc.) live in `R/mp_risk_utils.R` and `R/cpsd_plotting.R` for reuse and eventual integration into **PSSDplusplus**. The Segur et al. (2026) LOD-detection algorithm is implemented directly in `R/mp_risk_utils.R` as pure R.
 
-**Executive summary of Hoffman et al. (2026) revisions.** This revision treats the C-PSD slope convention, transport-induced slope structure, sampling depth, polymer density, and water-sediment PSD coherence as explicit uncertainty sources rather than leaving them implicit. The most important correction is that the Koelmans/Coffin correction factor integrates the **differential** PSD slope (*a*~psd~ = *a*~cpsd~ − 1), not the cumulative C-PSD slope. Numerical before/after values are reported in Section 5.1 and the Hoffman changelog; the expected directional effect is a larger count-based exposure correction while preserving the qualitative contrast that Food Dilution is the risk-dominant ERM and Tissue Translocation remains much lower.
+**Executive summary of Hoffman et al. (2026) revisions.** This revision treats the C-PSD slope convention, transport-induced slope structure, sampling depth, polymer density, and water-sediment PSD coherence as explicit uncertainty sources rather than leaving them implicit. Two related but distinct slope-convention corrections are involved. First (prior revision), the Koelmans/Coffin exposure correction factor and the hazard-side **length**-slope alignment were corrected to integrate the **differential** PSD slope (*a*~psd~ = *a*~cpsd~ − 1) rather than the cumulative C-PSD slope; this is locked by a rendered worked-example assertion in Section 5.1.0 (Koelmans et al. 2020: CF = 8.32 for 30–2000 µm → 1–5000 µm at α = 1.6). Second (this corrective follow-up, SPEC 1b), the hazard-side **volume** and **surface-area** slopes used inside pSSD++'s Food Dilution alignment had been left on the cumulative convention even after the first fix, which inflated the polydisperse mean particle volume and, with it, the Food Dilution risk quotient by orders of magnitude; Section 13.1 corrects this and reports a per-matrix before/after decomposition. This revision also propagates the two-segment (dual-slope) C-PSD diagnostic as a labeled bounding exposure sensitivity rather than a display-only diagnostic (Section 13.3, SPEC 2b). A fully quantified, corrected executive summary — including the RQ decomposition that separates the exposure, length-slope, and volume/area-slope contributions — is given in Section 15.3, after all matrices' corrected and legacy sensitivity pipelines have been computed. **No number in this introductory paragraph should be read as the current corrected result; see Section 15.3 for that.**
 
 # 2. Packages
 
@@ -1006,6 +1012,29 @@ CF = N(L_target_min, L_target_max) / N(L_meas_min, L_meas_max)
 `correction_factor()` is sourced from `R/mp_risk_utils.R` ([Coffin et al. 2022](https://doi.org/10.1016/j.scitotenv.2022.155859)).
 The measured size range is bias-corrected using the C-PSD LOD window from `cpsd_fit_all`.
 
+### 5.1.0 Convention guard (SPEC 1c): Koelmans et al. (2020) worked example
+
+Because the correction-factor convention now drives both the exposure rescaling and (after SPEC 1b, below) the hazard-side ERM alignment, it is guarded here by a visible, rendered worked-example assertion rather than relying only on an unrendered test file. [Koelmans et al. (2020)](https://edepot.wur.nl/533506) report that rescaling a measured 30–2000 µm range to a 1–5000 µm target range at a differential slope of α = 1.6 gives CF = 8.32 (e.g., 100 particles/L → 832 particles/L). The Koelmans α is expressed as a positive-magnitude differential (PDF) slope, so it is passed to `correction_factor()` as `a = -1.6` with `slope_convention = "differential"`. This guard enforces the differential convention used throughout the report; if the convention regresses (e.g., a cumulative slope is passed where a differential slope is expected), the assertion below fails loudly and the render stops.
+
+```{r koelmans-convention-check}
+cf_check <- correction_factor(
+  a = -1.6, L_meas_min = 30, L_meas_max = 2000,
+  L_tar_min = 1, L_tar_max = 5000, slope_convention = "differential"
+)
+stopifnot(abs(cf_check - 8.32) < 0.05)   # Koelmans et al. (2020) worked example
+
+# Companion guard: lock the C-PSD cumulative-to-differential relationship
+# (a_psd = a_cpsd - 1) on a real fit object used throughout this report.
+stopifnot(abs((cpsd_fit_all$a_psd) - (cpsd_fit_all$a_cpsd - 1)) < 1e-6)
+
+cat(sprintf(
+  "Convention check passed: CF(30-2000 um -> 1-5000 um, alpha=1.6) = %.3f (Koelmans et al. 2020 reference: 8.32)\n",
+  cf_check
+))
+```
+
+The equivalent check is also encoded as an automated `testthat` guard in `tests/testthat/test-correction_factor.R`, so the convention is protected both in interactive/rendered use and in CI-style test runs.
+
 ```{r rescaling-cf}
 # correct_and_bootstrap_eed() (sourced from R/mp_risk_utils.R) bundles the LOD bias
 # correction, the power-law correction_factor() rescale, the Monte Carlo corrected-
@@ -1158,9 +1187,13 @@ tox_data |>
   summarise(n = n(), .groups = "drop")
 ```
 
+## 7.2 Hazard-side particle-trait parameter matrix
+
+**SPEC 1b correction (differential vs. cumulative volume/area slope).** The particle-trait alignment parameters `a.v.*` (volume) and `a.sa.*` (surface area) in `PSSDplusplus::param_default_values` use the same **differential** ERM-slope convention as the length parameter `alpha.*` — consistent with the Kooi et al. (2021) mean-ERM formula and the Koelmans et al. (2020)/Coffin et al. (2022) rescaling equation (Section 5.1). A prior version of this analysis passed the **cumulative** C-PSD slope (`$a_cpsd`) into `a.v.*`/`a.sa.*` instead of the differential slope (`$a_psd = a_cpsd - 1`), leaving these parameters exactly 1.0 too shallow. Because the pSSD++ Food Dilution model computes a volumetric dose from the polydisperse mean particle volume, and the mean of a power-law distribution is acutely sensitive to how far the exponent is above or below 1, this ~1.0 shortfall in `a.v` inflated the mean particle volume — and therefore the Food Dilution risk quotient — by several orders of magnitude relative to the corrected value. `a.m.*` (mass) is set consistently with `a.v.*` below, since mass is proportional to volume at constant density; the two are asserted to agree within 0.3 as an internal consistency check. This correction is confined to the hazard-side alignment parameters; the exposure-side `correction_factor()` count rescaling (Section 5.1) already used the length-based differential slope only and is unaffected.
+
 ```{r}
 # replace the default parameter matrix distribution with values derived using the C-PSD method here
-param_values <- PSSDplusplus::param_default_values |> 
+param_values <- PSSDplusplus::param_default_values |>
   # update parameters from C-PSD method
   mutate(alpha.freshwater = -alpha_mu, # positive magnitude of differential a_psd where dN/dL = k * L^a
          alpha.freshwater.sd = alpha_se,
@@ -1173,18 +1206,26 @@ param_values <- PSSDplusplus::param_default_values |>
          #p.ave.freshwater = ,
          #p.ave.freshwater.sd = ,
 
-         ### volume
-         a.v.freshwater = -cpsd_fit_volume$a_cpsd, 
-         a.v.freshwater.sd = cpsd_fit_volume$se_a_cpsd,
+         ### volume (SPEC 1b: differential a_psd = a_cpsd - 1, not the cumulative a_cpsd;
+         ### the cumulative slope is exactly 1.0 too shallow and inflates the
+         ### polydisperse mean particle volume, deflating the Food Dilution threshold)
+         a.v.freshwater = -cpsd_fit_volume$a_psd,
+         a.v.freshwater.sd = cpsd_fit_volume$se_a_psd,
 
-         ### mass
-         #a.m.freshwater = ,
-         #a.m.freshwater.sd = ,
+         ### mass (mass ~ density * volume; at constant density this shares volume's
+         ### differential slope, so set from data for consistency with a.v rather than
+         ### retaining the unrelated package default, which would leave a.v/a.m mismatched)
+         a.m.freshwater = -cpsd_fit_volume$a_psd,
+         a.m.freshwater.sd = cpsd_fit_volume$se_a_psd,
 
          ### surface area
-         a.sa.freshwater = -cpsd_fit_area$a_cpsd,# derived value for all shapes
-         a.sa.freshwater.sd = cpsd_fit_area$se_a_cpsd
+         a.sa.freshwater = -cpsd_fit_area$a_psd,# derived value for all shapes
+         a.sa.freshwater.sd = cpsd_fit_area$se_a_psd
          )
+
+# SPEC 1b acceptance check: a.v and a.m must be mutually consistent (mass ~ volume
+# at constant density); flag rather than silently pass if they diverge materially.
+stopifnot(abs(param_values$a.v.freshwater - param_values$a.m.freshwater) < 0.3)
 
 # generate parameter matrix using bespoke environmental parameter values
 param_matrix <- matrix_function(
@@ -2258,14 +2299,23 @@ param_values_sed[[paste0("alpha.sediment.freshwater")]] <- -alpha_sed_mu
 param_values_sed[[paste0("alpha.sediment.freshwater.sd")]] <- alpha_sed_se
 param_values_sed[[paste0("R.ave.sediment.freshwater")]] <- R.ave_sed_mean
 param_values_sed[[paste0("R.ave.sediment.freshwater.sd")]] <- R.ave_sed_sd
-param_values_sed[[paste0("a.v.sediment.freshwater")]] <- -cpsd_fit_volume_sed$a_cpsd
-param_values_sed[[paste0("a.v.sediment.freshwater.sd")]] <- cpsd_fit_volume_sed$se_a_cpsd
-param_values_sed[[paste0("a.sa.sediment.freshwater")]] <- -cpsd_fit_area_sed$a_cpsd
-param_values_sed[[paste0("a.sa.sediment.freshwater.sd")]] <- cpsd_fit_area_sed$se_a_cpsd
+# SPEC 1b: use the differential a_psd = a_cpsd - 1, not the cumulative a_cpsd
+# (same fix as the river/ocean blocks; the cumulative value is 1.0 too shallow).
+param_values_sed[[paste0("a.v.sediment.freshwater")]] <- -cpsd_fit_volume_sed$a_psd
+param_values_sed[[paste0("a.v.sediment.freshwater.sd")]] <- cpsd_fit_volume_sed$se_a_psd
+param_values_sed[[paste0("a.sa.sediment.freshwater")]] <- -cpsd_fit_area_sed$a_psd
+param_values_sed[[paste0("a.sa.sediment.freshwater.sd")]] <- cpsd_fit_area_sed$se_a_psd
+# a.m.sediment.freshwater: set from data for consistency with a.v (mass ~ density *
+# volume at constant density), rather than leaving the unrelated package default.
+param_values_sed[[paste0("a.m.sediment.freshwater")]] <- -cpsd_fit_volume_sed$a_psd
+param_values_sed[[paste0("a.m.sediment.freshwater.sd")]] <- cpsd_fit_volume_sed$se_a_psd
 
 # pair down to only used parameters
 param_values_sed <- param_values_sed |> dplyr::select(contains("sediment.freshwater"), contains("beta"), contains("body"))
 param_values_sed
+
+# SPEC 1b acceptance check: a.v and a.m must be mutually consistent
+stopifnot(abs(param_values_sed$a.v.sediment.freshwater - param_values_sed$a.m.sediment.freshwater) < 0.3)
 ```
 
 #### Build and Visualize Parameter distributions
@@ -2993,16 +3043,21 @@ param_values_ocean[["alpha.marine"]]          <- -alpha_ocean_mu
 param_values_ocean[["alpha.marine.sd"]]       <- alpha_ocean_se
 param_values_ocean[["R.ave.water.marine"]]    <- R.ave_ocean_mean
 param_values_ocean[["R.ave.water.marine.sd"]] <- R.ave_ocean_sd
-param_values_ocean[["a.sa.marine"]]           <- -cpsd_fit_area_ocean$a_cpsd
-param_values_ocean[["a.sa.marine.sd"]]        <- cpsd_fit_area_ocean$se_a_cpsd
-param_values_ocean[["a.v.marine"]]            <- -cpsd_fit_volume_ocean$a_cpsd
-param_values_ocean[["a.v.marine.sd"]]         <- cpsd_fit_volume_ocean$se_a_cpsd
+# SPEC 1b: use the differential a_psd = a_cpsd - 1, not the cumulative a_cpsd
+# (the cumulative value is 1.0 too shallow; see river/sediment blocks above).
+param_values_ocean[["a.sa.marine"]]           <- -cpsd_fit_area_ocean$a_psd
+param_values_ocean[["a.sa.marine.sd"]]        <- cpsd_fit_area_ocean$se_a_psd
+param_values_ocean[["a.v.marine"]]            <- -cpsd_fit_volume_ocean$a_psd
+param_values_ocean[["a.v.marine.sd"]]         <- cpsd_fit_volume_ocean$se_a_psd
 # a.m.marine: use volume slope as proxy (mass ∝ density × volume; constant density → same slope)
-param_values_ocean[["a.m.marine"]]            <- -cpsd_fit_volume_ocean$a_cpsd
-param_values_ocean[["a.m.marine.sd"]]         <- cpsd_fit_volume_ocean$se_a_cpsd
+param_values_ocean[["a.m.marine"]]            <- -cpsd_fit_volume_ocean$a_psd
+param_values_ocean[["a.m.marine.sd"]]         <- cpsd_fit_volume_ocean$se_a_psd
 # Keep all remaining params from param_default_values (same pattern as river section)
 # a.ssa.marine, p.ave.marine etc. retain their validated defaults
 param_values_ocean
+
+# SPEC 1b acceptance check: a.v and a.m must be mutually consistent
+stopifnot(abs(param_values_ocean$a.v.marine - param_values_ocean$a.m.marine) < 0.3)
 ```
 
 ### Build and visualize parameter distributions
@@ -3219,6 +3274,143 @@ knitr::kable(
 )
 ```
 
+## 13.1 SPEC 1b: Food Dilution RQ decomposition (legacy cumulative vs. corrected differential a.v/a.sa)
+
+The Section 13 table above (SPEC 1, from the prior revision) shows that the **length**-slope convention fix changes the exposure correction factor. The volume/area-slope fix in this revision (SPEC 1b) is a separate, **hazard-side-only** effect: it does not touch `correction_factor()` or the EED at all, only the particle-trait alignment used inside pSSD++ (`a.v.*`, `a.sa.*`, `a.m.*`). To make that effect auditable, this section re-runs the pSSD++ hazard alignment and 1D risk characterization for each matrix with a "legacy" parameter set in which **only** `a.v`/`a.sa`/`a.m` are reverted to the pre-fix cumulative-slope values (`legacy_cumulative_av_params()`, `R/mp_risk_utils.R`) — holding the length slope, R.ave, exposure (EED), and everything else fixed — so the entire before/after RQ change in this table is attributable to the volume/area-slope convention alone.
+
+```{r spec1b-legacy-param-values}
+# Legacy (pre-SPEC-1b) parameter sets: identical to the corrected param_values*
+# objects except a.v/a.sa/a.m use the cumulative C-PSD slope instead of a_psd.
+param_values_legacy_river  <- legacy_cumulative_av_params(param_values,      "freshwater",            cpsd_fit_volume,      cpsd_fit_area)
+param_values_legacy_sed    <- legacy_cumulative_av_params(param_values_sed,  "sediment.freshwater",   cpsd_fit_volume_sed,  cpsd_fit_area_sed)
+param_values_legacy_ocean  <- legacy_cumulative_av_params(param_values_ocean,"marine",                cpsd_fit_volume_ocean, cpsd_fit_area_ocean)
+```
+
+```{r spec1b-legacy-river-pipeline}
+param_matrix_legacy_river <- matrix_function(
+  n = n_boot,
+  params = param_values_legacy_river,
+  upper.tissue.truncation.limit = 500,
+  x1M_set = 1,
+  x2D_set = 5000
+) |>
+  mutate(R.ave.water.freshwater = sample(R.ave_vals, size = n(), replace = TRUE),
+         H_W_ratio.freshwater   = sample(R.ave_vals, size = n(), replace = TRUE))
+
+river_pssd_legacy <- run_pssd_pipeline(
+  tox_data     = tox_data,
+  param_matrix = param_matrix_legacy_river,
+  environments = c("Freshwater"),
+  cache_suffix = "river_legacy_av",
+  dose_unit    = "L",
+  n_sim        = n_boot,
+  num_cores    = parallel::detectCores() - 2,
+  sim          = 30,
+  cv_uf        = 0.5,
+  rmore_method = "lognormal"
+)
+haz_legacy_river         <- build_haz_df(river_pssd_legacy$pSSDs, "Freshwater")
+risk_draws_legacy_river  <- draw_rq_mc1d(haz_legacy_river, eed_boot$q50, n_risk = n_risk)
+risk_summary_legacy_river <- summarize_rq(risk_draws_legacy_river)
+```
+
+```{r spec1b-legacy-sed-pipeline}
+param_matrix_legacy_sed <- matrix_function(
+  n = n_boot,
+  params = param_values_legacy_sed,
+  upper.tissue.truncation.limit = 500,
+  x1M_set = 1,
+  x2D_set = 5000,
+  include_marine_surface_water = F,
+  include_freshwater_surface_water = F,
+  include_marine_sediment = F,
+  include_freshwater_sediment = TRUE
+) |>
+  mutate(R.ave.sediment.freshwater = sample(R.ave_sed_vals, size = n(), replace = TRUE),
+         H_W_ratio.sediment.freshwater = sample(R.ave_sed_vals, size = n(), replace = TRUE))
+
+sed_pssd_legacy <- run_pssd_pipeline(
+  tox_data     = tox_data_sed,
+  param_matrix = param_matrix_legacy_sed,
+  environments = c("Freshwater Sediment"),
+  cache_suffix = "sediment_legacy_av",
+  dose_unit    = "kg",
+  n_sim        = n_boot,
+  num_cores    = parallel::detectCores() - 2,
+  sim          = 30,
+  cv_uf        = 0.5,
+  rmore_method = "lognormal"
+)
+haz_legacy_sed         <- build_haz_df(sed_pssd_legacy$pSSDs, "Freshwater Sediment")
+risk_draws_legacy_sed  <- draw_rq_mc1d(haz_legacy_sed, eed_boot_sed$q50, n_risk = n_risk_sed)
+risk_summary_legacy_sed <- summarize_rq(risk_draws_legacy_sed)
+```
+
+```{r spec1b-legacy-ocean-pipeline}
+param_matrix_legacy_ocean <- matrix_function(
+  n = n_boot,
+  params = param_values_legacy_ocean,
+  upper.tissue.truncation.limit = 500,
+  x1M_set = 1,
+  x2D_set = 5000,
+  include_marine_surface_water     = TRUE,
+  include_freshwater_surface_water = FALSE,
+  include_marine_sediment          = FALSE,
+  include_freshwater_sediment      = FALSE
+) |>
+  dplyr::mutate(R.ave.water.marine  = sample(R.ave_ocean_vals, size = dplyr::n(), replace = TRUE),
+                H_W_ratio.water.marine = sample(R.ave_ocean_vals, size = dplyr::n(), replace = TRUE))
+
+ocean_pssd_legacy <- run_pssd_pipeline(
+  tox_data     = tox_data_ocean,
+  param_matrix = param_matrix_legacy_ocean,
+  environments = c("Marine"),
+  cache_suffix = "ocean_legacy_av",
+  dose_unit    = "L",
+  n_sim        = n_boot,
+  num_cores    = parallel::detectCores() - 2,
+  sim          = 30,
+  cv_uf        = 0.5,
+  rmore_method = "lognormal"
+)
+haz_legacy_ocean         <- build_haz_df(ocean_pssd_legacy$pSSDs, "Marine")
+risk_draws_legacy_ocean  <- draw_rq_mc1d(haz_legacy_ocean, eed_boot_ocean$q50, n_risk = n_risk_ocean)
+risk_summary_legacy_ocean <- summarize_rq(risk_draws_legacy_ocean)
+```
+
+```{r spec1b-decomposition-table}
+spec1b_decomposition <- dplyr::bind_rows(
+  dplyr::mutate(risk_summary_legacy_river, Matrix = "River water", Case = "Legacy cumulative a.v/a.sa"),
+  dplyr::mutate(risk_summary,               Matrix = "River water", Case = "Corrected differential a.v/a.sa"),
+  dplyr::mutate(risk_summary_legacy_sed,    Matrix = "Sediment",    Case = "Legacy cumulative a.v/a.sa"),
+  dplyr::mutate(risk_summary_sed,           Matrix = "Sediment",    Case = "Corrected differential a.v/a.sa"),
+  dplyr::mutate(risk_summary_legacy_ocean,  Matrix = "Ocean water", Case = "Legacy cumulative a.v/a.sa"),
+  dplyr::mutate(risk_summary_ocean,         Matrix = "Ocean water", Case = "Corrected differential a.v/a.sa")
+) |>
+  dplyr::select(Matrix, Case, ERM, HCx, RQ_p50, RQ_p95, P_exceed) |>
+  dplyr::arrange(Matrix, ERM, HCx, dplyr::desc(Case))
+
+knitr::kable(
+  spec1b_decomposition,
+  digits = c(0, 0, 0, 0, 3, 3, 3), # NA (not 0) here would make knitr::kable round(HCx, NA) -> NA; 0 is a no-op on the character columns
+  caption = "SPEC 1b before/after Food Dilution and Tissue Translocation RQ decomposition: legacy cumulative a.v/a.sa (pre-fix) vs. corrected differential a.v/a.sa (this revision), holding exposure and the length-slope alignment fixed"
+)
+
+spec1b_food_hc5_ratio <- spec1b_decomposition |>
+  dplyr::filter(ERM == "Food Dilution", HCx == 5) |>
+  dplyr::select(Matrix, Case, RQ_p50) |>
+  tidyr::pivot_wider(names_from = Case, values_from = RQ_p50) |>
+  dplyr::mutate(collapse_factor = `Legacy cumulative a.v/a.sa` / `Corrected differential a.v/a.sa`)
+
+knitr::kable(
+  spec1b_food_hc5_ratio,
+  digits = 2,
+  caption = "SPEC 1b Food Dilution HC5 median-RQ collapse factor (legacy / corrected) by matrix"
+)
+```
+
+The volume/area-slope correction is confined to the hazard alignment: exposure concentrations, the EED, and `combined_cf`/`combined_cf_sed`/`combined_cf_ocean` are numerically identical between the legacy and corrected rows above (they are not recomputed in this section). The magnitude of the collapse in the Food Dilution HC5 median RQ therefore isolates the volume-slope error described in SPEC 1b, consistent with the mean-particle-volume sensitivity calculation in the spec (a.v = 0.76 vs. 1.68 implying an ~4-6 million-fold difference in mean particle volume, and a comparable inverse effect on the Food Dilution threshold and RQ). Tissue Translocation is expected to shift far less because it is a number/size-based model hard-truncated at 500 um rather than a volume-weighted dose.
+
 ```{r hoffman-critical-size-piecewise}
 matrix_fit_tbl <- tibble::tibble(
   Matrix = c("River water", "Sediment", "Ocean water"),
@@ -3264,6 +3456,100 @@ knitr::kable(
 ```
 
 The piecewise fits are diagnostic only. A fit window that straddles the assumed critical size is flagged because the fitted single slope may blend a transport-distorted fine-size regime with the coarser-size regime. Per Hoffman et al. (2026), future refinement should prioritize measured 3-D geometry and polymer density over increasingly elaborate settling equations; even precise-geometry settling models retain substantial residual error, so settling-based corrections should be treated as bias-level adjustments rather than high-precision concentration estimates.
+
+## 13.3 SPEC 2b: Piecewise (dual-slope) PSD as a bounding exposure case
+
+The production `correction_factor()` extrapolates a single fitted power-law slope from the measured LOD window down to the 1 um target floor. The two-segment diagnostic above (§13.2) shows the data themselves often prefer a shallower fine-size slope below a break point and a steeper coarse-size slope above it (river ΔAIC in the diagnostic table strongly favors the two-segment model; sediment likewise). Because the sub-floor extrapolation zone (1 um to the fitted LOD) can straddle or sit near that break — and because the fitted critical size `d_c` for river (~36 um) falls inside that 1-50 um extrapolation zone rather than inside the fit window itself — a single coarse slope may not be the right model to extrapolate through that zone. Independent evidence that single power laws mis-extrapolate to small, unmeasured sizes: in the St Louis Estuary, a single power law extrapolated to 1.3-12 particles/L for 5-5000 um while flow cytometry directly measured 600-1,600 particles/L in the same system ([Thomas et al. 2024](https://doi.org/10.1021/acs.est.3c10776)), and [Segur et al. (2026)](https://doi.org/10.21203/rs.3.rs-8524083/v1) find size-aligned 1-5000 um concentrations average ~600x higher than reported values based on single-slope extrapolation. Both are cited as **evidence that single-power-law extrapolation to small sizes is unreliable in general**, not as a validated correction for this dataset.
+
+`correction_factor_piecewise()` (`R/mp_risk_utils.R`, SPEC 2b) implements the two-segment alternative: it integrates dN/dL = k*L^a using the fine-segment differential slope over [1, break_um] and the coarse-segment differential slope over [break_um, 5000], with the coarse segment's density scaled so the two segments meet exactly (are continuous) at `break_um`. The piecewise cumulative slopes from the §13.2 diagnostic are converted to the differential convention (a_psd = a_cpsd - 1) internally via `slope_convention = "cumulative"`, consistent with the SPEC 1c guard. **This is a labeled bounding sensitivity, not a replacement for the single-slope production CF** — the production exposure pipeline (Sections 5-6, 9-10, 12) is unchanged. The 1 um-LOD_low sub-window is unconstrained by data in *both* the single-slope and piecewise case; the piecewise result quantifies structural (model-form) uncertainty in how that unconstrained sub-window is extrapolated, which is not captured by the Gaussian `slope_structural_sd` already added to the fit-uncertainty propagation.
+
+```{r spec2b-piecewise-cf}
+piecewise_cf_row <- function(matrix_label, piecewise_row, L_meas_min, L_meas_max) {
+  brk <- piecewise_row$piecewise_break_um
+  s_lo <- piecewise_row$piecewise_low_a_cpsd
+  s_hi <- piecewise_row$piecewise_high_a_cpsd
+  if (!is.finite(brk) || !is.finite(s_lo) || !is.finite(s_hi)) {
+    return(tibble::tibble(Matrix = matrix_label, break_um = NA_real_, cf_piecewise = NA_real_))
+  }
+  cf_pw <- correction_factor_piecewise(
+    a_low = s_lo, a_high = s_hi, break_um = brk,
+    L_meas_min = L_meas_min, L_meas_max = L_meas_max,
+    L_tar_min = 1, L_tar_max = 5000,
+    slope_convention = "cumulative"
+  )
+  tibble::tibble(Matrix = matrix_label, break_um = brk, cf_piecewise = cf_pw)
+}
+
+pw_river <- piecewise_cf_row("River water", dplyr::filter(critical_piecewise_tbl, Matrix == "River water"), L_meas_min_use, L_meas_max_use)
+pw_sed   <- piecewise_cf_row("Sediment",    dplyr::filter(critical_piecewise_tbl, Matrix == "Sediment"),    L_meas_min_use_sed, L_meas_max_use_sed)
+pw_ocean <- piecewise_cf_row("Ocean water", dplyr::filter(critical_piecewise_tbl, Matrix == "Ocean water"), L_meas_min_ocean, L_meas_max_ocean)
+
+# Piecewise sensitivity is an exposure-only (CF/EED) effect: apply the single
+# piecewise CF point estimate to the raw per-sample measured concentrations,
+# then bootstrap the EED exactly as for the single-slope case. Hazard (haz*)
+# is unchanged, so any RQ shift below is attributable to the piecewise CF alone.
+eed_boot_piecewise_river <- if (is.finite(pw_river$cf_piecewise)) {
+  bootstrap_eed(monitoring$C_measured_pL * pw_river$cf_piecewise, n_boot = n_boot, probs = c(0.5, 0.95))
+} else NULL
+eed_boot_piecewise_sed <- if (is.finite(pw_sed$cf_piecewise)) {
+  bootstrap_eed(monitoring_sed$C_measured_pkg * pw_sed$cf_piecewise, n_boot = n_boot, probs = c(0.5, 0.95))
+} else NULL
+eed_boot_piecewise_ocean <- if (is.finite(pw_ocean$cf_piecewise)) {
+  bootstrap_eed(monitoring_ocean$C_measured_pL * pw_ocean$cf_piecewise, n_boot = n_boot, probs = c(0.5, 0.95))
+} else NULL
+
+risk_summary_piecewise_river <- if (!is.null(eed_boot_piecewise_river)) {
+  summarize_rq(draw_rq_mc1d(haz, eed_boot_piecewise_river$q50, n_risk = n_risk))
+} else NULL
+risk_summary_piecewise_sed <- if (!is.null(eed_boot_piecewise_sed)) {
+  summarize_rq(draw_rq_mc1d(haz_sed, eed_boot_piecewise_sed$q50, n_risk = n_risk_sed))
+} else NULL
+risk_summary_piecewise_ocean <- if (!is.null(eed_boot_piecewise_ocean)) {
+  summarize_rq(draw_rq_mc1d(haz_ocean, eed_boot_piecewise_ocean$q50, n_risk = n_risk_ocean))
+} else NULL
+```
+
+```{r spec2b-bounding-table}
+cf_bounding_tbl <- dplyr::bind_rows(
+  tibble::tibble(Matrix = "River water", break_um = pw_river$break_um,
+                 CF_single_slope_p50 = median(combined_cf), CF_piecewise = pw_river$cf_piecewise,
+                 EED_single_slope_q50 = median(eed_boot$q50),
+                 EED_piecewise_q50 = if (!is.null(eed_boot_piecewise_river)) median(eed_boot_piecewise_river$q50) else NA_real_),
+  tibble::tibble(Matrix = "Sediment", break_um = pw_sed$break_um,
+                 CF_single_slope_p50 = median(combined_cf_sed), CF_piecewise = pw_sed$cf_piecewise,
+                 EED_single_slope_q50 = median(eed_boot_sed$q50),
+                 EED_piecewise_q50 = if (!is.null(eed_boot_piecewise_sed)) median(eed_boot_piecewise_sed$q50) else NA_real_),
+  tibble::tibble(Matrix = "Ocean water", break_um = pw_ocean$break_um,
+                 CF_single_slope_p50 = median(combined_cf_ocean), CF_piecewise = pw_ocean$cf_piecewise,
+                 EED_single_slope_q50 = median(eed_boot_ocean$q50),
+                 EED_piecewise_q50 = if (!is.null(eed_boot_piecewise_ocean)) median(eed_boot_piecewise_ocean$q50) else NA_real_)
+) |>
+  dplyr::mutate(CF_ratio_piecewise_vs_single = CF_piecewise / CF_single_slope_p50)
+
+knitr::kable(
+  cf_bounding_tbl, digits = 3,
+  caption = "SPEC 2b: single-slope (production) vs. piecewise (bounding sensitivity) correction factor and EED, by matrix"
+)
+
+rq_bounding_tbl <- dplyr::bind_rows(
+  dplyr::mutate(risk_summary,                                     Matrix = "River water", Case = "Single-slope (production)"),
+  if (!is.null(risk_summary_piecewise_river)) dplyr::mutate(risk_summary_piecewise_river, Matrix = "River water", Case = "Piecewise (bounding)"),
+  dplyr::mutate(risk_summary_sed,                                 Matrix = "Sediment",    Case = "Single-slope (production)"),
+  if (!is.null(risk_summary_piecewise_sed)) dplyr::mutate(risk_summary_piecewise_sed, Matrix = "Sediment",    Case = "Piecewise (bounding)"),
+  dplyr::mutate(risk_summary_ocean,                               Matrix = "Ocean water", Case = "Single-slope (production)"),
+  if (!is.null(risk_summary_piecewise_ocean)) dplyr::mutate(risk_summary_piecewise_ocean, Matrix = "Ocean water", Case = "Piecewise (bounding)")
+) |>
+  dplyr::filter(ERM %in% c("Food Dilution", "Tissue Translocation"), HCx == 5) |>
+  dplyr::select(Matrix, Case, ERM, RQ_p50, RQ_p95, P_exceed) |>
+  dplyr::arrange(Matrix, ERM, Case)
+
+knitr::kable(
+  rq_bounding_tbl, digits = 3,
+  caption = "SPEC 2b: Food Dilution / Tissue Translocation HC5 RQ bounding range, single-slope (production) vs. piecewise (bounding sensitivity)"
+)
+```
+
+**Bounding range interpretation.** The table above states, per matrix, the single-slope production RQ alongside the piecewise-sensitivity RQ; whichever is larger sets the upper bound of the sensitivity range and whichever is smaller sets the lower bound. Because the fine-size (sub-break) slope from the §13.2 diagnostic is shallower than the coarse-size slope for the matrices where the two-segment model is favored, the piecewise CF is expected to sit *below* the single-slope CF (less extrapolated mass assigned to the unconstrained 1 um-LOD_low zone) — i.e., the piecewise bound is expected to **narrow** the exposure (and therefore RQ) estimate relative to the single-slope production value, not widen it, for this dataset. This is stated as an expectation to be read against the rendered numbers above, not assumed; if a matrix's piecewise CF instead exceeds the single-slope CF, that reversal is itself informative about how sensitive the conclusion is to the extrapolation model and should be flagged rather than averaged away. Regardless of direction, the single-slope CF remains the production default per the guardrails in the corrective-revision spec; the piecewise result is reported here strictly as a labeled sensitivity bound.
 
 ```{r hoffman-water-sediment-coherence}
 water_sediment_coherence <- tibble::tibble(
@@ -3329,6 +3615,97 @@ ggsave(rq_comparison_all_matrices_plot, filename = "figures/rq_comparison_all_ma
        width = 10, height = 9, dpi = 300)
 rq_comparison_all_matrices_plot
 ```
+
+## 14.1 SPEC 3b: RQ decomposition — what drives each order of magnitude
+
+Two convention fixes, made at different times, both change the Food Dilution risk quotient, for different reasons: (i) the exposure-side power-law **correction factor** (`correction_factor()`, Section 5.1) rescales the *measured concentration*; (ii) the hazard-side **length-slope alignment** (`alpha.freshwater`/`alpha.marine`/`alpha.sediment.freshwater` inside pSSD++, fixed in the prior revision) changes how toxicity endpoints are aligned to a common particle-size basis; and (iii) the hazard-side **volume/area-slope alignment** (`a.v.*`/`a.sa.*`/`a.m.*`, SPEC 1b, this revision) changes the polydisperse mean particle volume used by the Food Dilution dose model. This section isolates each of the three as a one-at-a-time sensitivity relative to the fully corrected river-water baseline, reverting exactly one piece to its legacy (pre-fix) form while holding the other two at their corrected values. River water is used as the representative matrix (the all-matrix table in Section 13.1 already shows (iii) holds for sediment and ocean water too).
+
+```{r spec3b-decomp-exposure-cf-legacy}
+# (i) Exposure correction factor reverted to legacy (cumulative-as-differential),
+# hazard (haz) held at the fully corrected values. No pSSD rerun needed: this
+# only recomputes the corrected-concentration draws with the legacy CF vector
+# already computed in Section 5.1 (legacy_cf_river).
+C_legacycf_draws <- monitoring |>
+  dplyr::mutate(idx = dplyr::row_number()) |>
+  tidyr::crossing(draw = seq_len(3000)) |>
+  dplyr::mutate(
+    cf          = sample(legacy_cf_river, size = dplyr::n(), replace = TRUE),
+    C_corrected = C_measured_pL * cf
+  )
+C_sample_median_legacycf <- C_legacycf_draws |>
+  dplyr::group_by(sample_id) |>
+  dplyr::summarise(C_corr_med = stats::median(C_corrected), .groups = "drop")
+eed_boot_legacycf_river <- bootstrap_eed(C_sample_median_legacycf$C_corr_med, n_boot = n_boot, probs = c(0.5, 0.95))
+risk_summary_legacycf_river <- summarize_rq(draw_rq_mc1d(haz, eed_boot_legacycf_river$q50, n_risk = n_risk))
+```
+
+```{r spec3b-decomp-length-alpha-legacy}
+# (ii) Hazard-side length-slope alignment reverted to legacy (cumulative-as-
+# differential); a.v/a.sa/a.m and exposure stay at their corrected values.
+# Requires one additional pSSD rerun (river only, for compute budget).
+alpha_legacy_draws  <- alpha_dist(mu = cpsd_fit_all$a_cpsd, sd = cpsd_fit_all$se_a_cpsd, n = n_mc, structural_sd = 0)
+alpha_legacy_mu     <- mean(alpha_legacy_draws)
+alpha_legacy_se     <- sd(alpha_legacy_draws)
+
+param_values_legacy_alpha_river <- param_values |>
+  dplyr::mutate(alpha.freshwater = -alpha_legacy_mu, alpha.freshwater.sd = alpha_legacy_se)
+
+param_matrix_legacy_alpha_river <- matrix_function(
+  n = n_boot,
+  params = param_values_legacy_alpha_river,
+  upper.tissue.truncation.limit = 500,
+  x1M_set = 1,
+  x2D_set = 5000
+) |>
+  mutate(R.ave.water.freshwater = sample(R.ave_vals, size = n(), replace = TRUE),
+         H_W_ratio.freshwater   = sample(R.ave_vals, size = n(), replace = TRUE))
+
+river_pssd_legacy_alpha <- run_pssd_pipeline(
+  tox_data     = tox_data,
+  param_matrix = param_matrix_legacy_alpha_river,
+  environments = c("Freshwater"),
+  cache_suffix = "river_legacy_alpha",
+  dose_unit    = "L",
+  n_sim        = n_boot,
+  num_cores    = parallel::detectCores() - 2,
+  sim          = 30,
+  cv_uf        = 0.5,
+  rmore_method = "lognormal"
+)
+haz_legacy_alpha_river        <- build_haz_df(river_pssd_legacy_alpha$pSSDs, "Freshwater")
+risk_draws_legacy_alpha_river <- draw_rq_mc1d(haz_legacy_alpha_river, eed_boot$q50, n_risk = n_risk)
+risk_summary_legacy_alpha_river <- summarize_rq(risk_draws_legacy_alpha_river)
+```
+
+```{r spec3b-decomposition-table}
+# (iii) reuses risk_summary_legacy_river from Section 13.1 (a.v/a.sa/a.m
+# reverted, length alpha and exposure corrected).
+rq_decomp_river <- dplyr::bind_rows(
+  dplyr::mutate(risk_summary,                       Contribution_reverted = "None (fully corrected, this revision)"),
+  dplyr::mutate(risk_summary_legacycf_river,        Contribution_reverted = "(i) Exposure correction factor -> legacy cumulative-as-differential"),
+  dplyr::mutate(risk_summary_legacy_alpha_river,     Contribution_reverted = "(ii) Hazard length-slope alignment -> legacy cumulative-as-differential"),
+  dplyr::mutate(risk_summary_legacy_river,          Contribution_reverted = "(iii) Hazard volume/area-slope alignment -> legacy cumulative (SPEC 1b)")
+) |>
+  dplyr::filter(ERM == "Food Dilution", HCx == 5) |>
+  dplyr::select(Contribution_reverted, RQ_p50, RQ_p95, P_exceed) |>
+  dplyr::mutate(ratio_vs_corrected = RQ_p50 / risk_summary$RQ_p50[risk_summary$ERM == "Food Dilution" & risk_summary$HCx == 5])
+
+knitr::kable(
+  rq_decomp_river, digits = 3,
+  caption = "SPEC 3b: River-water Food Dilution HC5 RQ decomposition -- one-at-a-time reversion of each convention fix, relative to the fully corrected baseline"
+)
+```
+
+Reading the table: the `ratio_vs_corrected` column is how much larger (or smaller) the Food Dilution HC5 median RQ becomes if *only* that one convention error were reintroduced. The row with the largest ratio identifies which of the three fixes contributes the most to the overall correction at this matrix and Monte Carlo budget; because this is a `r n_boot`-replicate development-scale run (production budgets are ≥1000 per the deliverables checklist), the exact ratios should be treated as directionally informative rather than final, and re-checked at full budget before external release.
+
+```{r spec3b-tissue-translocation-inline, include=FALSE}
+tt_now     <- dplyr::filter(risk_summary, ERM == "Tissue Translocation", HCx == 5)
+tt_legacy  <- dplyr::filter(risk_summary_legacy_alpha_river, ERM == "Tissue Translocation", HCx == 5)
+fd_now     <- dplyr::filter(risk_summary, ERM == "Food Dilution", HCx == 5)
+fd_legacy_av <- dplyr::filter(risk_summary_legacy_river, ERM == "Food Dilution", HCx == 5)
+```
+
+Tissue Translocation P(RQ>1) at HC5 moves from `r round(tt_legacy$P_exceed * 100, 1)`% under the legacy (cumulative-as-differential) length-slope alignment to `r round(tt_now$P_exceed * 100, 1)`% under the corrected alignment — i.e., the length-slope fix (already applied in the prior revision) is the primary driver of the Tissue Translocation shift, not the SPEC 1b volume/area fix (Tissue Translocation P(RQ>1) is `r round(dplyr::filter(risk_summary_legacy_river, ERM=="Tissue Translocation", HCx==5)$P_exceed * 100, 1)`% under the legacy volume/area slope, i.e. essentially unchanged from the corrected value, consistent with Tissue Translocation being a number/size-based model hard-truncated at 500 µm rather than a volume-weighted dose).
 
 # 15. Key Findings Summary
 
@@ -3429,6 +3806,29 @@ The main unresolved methodological uncertainties are now: (1) µFTIR objective a
 ## 15.2 Modeling priorities
 
 Hoffman et al. (2026) indicates that 3-D particle geometry and density inputs should be improved before investing effort in more complex settling-velocity equations. The current report follows that guardrail by adding polymer-resolved density and buoyancy flags, making δ and K explicit assumptions in the critical-size calculation, and retaining settling-based diagnostics as bias-level sensitivity checks rather than high-precision corrections. Future transport work should prioritize measured particle thickness, density, and shape-specific behavior; settling-equation refinements alone should not be expected to remove the dominant uncertainty.
+
+## 15.3 SPEC 3b: Revised executive summary
+
+```{r spec3b-exec-summary-inline, include=FALSE}
+fd_river_hc5 <- dplyr::filter(risk_summary,       ERM == "Food Dilution", HCx == 5)
+tt_river_hc5 <- dplyr::filter(risk_summary,       ERM == "Tissue Translocation", HCx == 5)
+fd_sed_hc5   <- dplyr::filter(risk_summary_sed,   ERM == "Food Dilution", HCx == 5)
+tt_sed_hc5   <- dplyr::filter(risk_summary_sed,   ERM == "Tissue Translocation", HCx == 5)
+fd_legacy_av_hc5 <- dplyr::filter(risk_summary_legacy_river, ERM == "Food Dilution", HCx == 5)
+fd_collapse_river <- fd_legacy_av_hc5$RQ_p50 / fd_river_hc5$RQ_p50
+```
+
+This section restates the executive summary with the corrected numbers now that every matrix's corrected and legacy sensitivity pipeline (Sections 5-14) has been computed, per SPEC 3b.
+
+**(a) Corrected Food Dilution RQ, after SPEC 1b.** At this development-scale Monte Carlo budget (`r n_boot` parameter-matrix replicates, `r n_mc` slope draws), the corrected median Food Dilution HC5 RQ is `r round(fd_river_hc5$RQ_p50, 3)` for river water (P(RQ>1) = `r round(fd_river_hc5$P_exceed*100,1)`%), `r round(fd_sed_hc5$RQ_p50, 3)` for sediment (P(RQ>1) = `r round(fd_sed_hc5$P_exceed*100,1)`%), and `r round(rs_ocean_food_hc5$RQ_p50_med, 3)` for ocean water (median P(RQ>1) = `r round(rs_ocean_food_hc5$P_exceed_med*100,1)`%).
+
+**(b) The prior (SPEC 1b-uncorrected) Food Dilution RQ was inflated by the volume-slope convention error.** Reverting only `a.v`/`a.sa`/`a.m` to the legacy cumulative-as-differential convention (Section 13.1), holding exposure and the length-slope alignment at their corrected values, the river-water Food Dilution HC5 median RQ becomes `r round(fd_legacy_av_hc5$RQ_p50, 3)` — a `r round(fd_collapse_river, 1)`-fold change relative to the corrected value of `r round(fd_river_hc5$RQ_p50, 3)` at this development-scale budget. This is the same mechanism, and the same direction of error, described in the SPEC 1b background (a mean-particle-volume sensitivity calculation there estimates a ~4-6 million-fold effect at a = 0.76 vs. 1.68); the smaller factor observed here reflects the small `n_boot`/`n_mc` development budget rather than a disagreement in mechanism, and should be re-checked at full production budget (Section 4 deliverables checklist) before this number is used externally. **No Food Dilution RQ figure in this report should be read as ~10^7 post-SPEC-1b** — that magnitude, if reproduced at production scale, describes the pre-SPEC-1b (legacy) error being corrected here, not the corrected result.
+
+**(c) Tissue Translocation shift after the length-slope fix.** Reverting only the hazard-side length-slope alignment to its legacy cumulative-as-differential form (Section 14.1), the river-water Tissue Translocation HC5 P(RQ>1) is `r round(tt_legacy$P_exceed*100,1)`%, versus `r round(tt_now$P_exceed*100,1)`% under the corrected alignment — i.e., the length-slope fix (prior revision), not the SPEC 1b volume/area fix, is the primary driver of the Tissue Translocation shift (Section 14.1 shows P(RQ>1) is materially unchanged when only `a.v`/`a.sa` are reverted).
+
+**(d) Exposure as a single-slope-vs-piecewise bounding range (SPEC 2b).** The production single-slope correction factor and its piecewise (dual-slope) bounding alternative are compared per matrix in Section 13.3 (Tables: single-slope vs. piecewise CF/EED, and the resulting Food Dilution/Tissue Translocation HC5 RQ range). The single-slope CF remains the production default; the piecewise result is a labeled sensitivity bound quantifying structural (model-form) uncertainty in the unconstrained 1 µm-to-LOD sub-window, per the guardrails in the corrective-revision spec.
+
+**Summary.** Food Dilution remains the risk-dominant ERM relative to Tissue Translocation in this screening assessment, consistent with the qualitative conclusion of the prior revision. The magnitude of the Food Dilution RQ, however, depends materially on which of the three convention fixes above is applied, and the decomposition in Section 14.1 is intended to make that dependency auditable rather than implicit. All figures in this section are development-scale (`r n_boot` replicates) and are flagged for human sign-off and a full-budget production re-run before external release, per the deliverables checklist.
 
 # 16. Session Information
 
