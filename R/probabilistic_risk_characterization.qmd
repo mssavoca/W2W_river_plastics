@@ -92,7 +92,7 @@ This document presents an **end-to-end, fully probabilistic** environmental risk
 
 All custom R functions (`fit_cpsd_segur_r`, `correction_factor`, `bootstrap_eed`, `mc2d_risk`, etc.) live in `R/mp_risk_utils.R` and `R/cpsd_plotting.R` for reuse and eventual integration into **PSSDplusplus**. The Segur et al. (2026) LOD-detection algorithm is implemented directly in `R/mp_risk_utils.R` as pure R.
 
-**Executive summary of Hoffman et al. (2026) revisions.** This revision treats the C-PSD slope convention, transport-induced slope structure, sampling depth, polymer density, and water-sediment PSD coherence as explicit uncertainty sources rather than leaving them implicit. Two related but distinct slope-convention corrections are involved. First (prior revision), the Koelmans/Coffin exposure correction factor and the hazard-side **length**-slope alignment were corrected to integrate the **differential** PSD slope (*a*~psd~ = *a*~cpsd~ − 1) rather than the cumulative C-PSD slope; this is locked by a rendered worked-example assertion in Section 5.1.0 (Koelmans et al. 2020: CF = 8.32 for 30–2000 µm → 1–5000 µm at α = 1.6). Second (this corrective follow-up, SPEC 1b), the hazard-side **volume** and **surface-area** slopes used inside pSSD++'s Food Dilution alignment had been left on the cumulative convention even after the first fix, which inflated the polydisperse mean particle volume and, with it, the Food Dilution risk quotient by orders of magnitude; Section 13.1 corrects this and reports a per-matrix before/after decomposition. This revision also propagates the two-segment (dual-slope) C-PSD diagnostic as a labeled bounding exposure sensitivity rather than a display-only diagnostic (Section 13.3, SPEC 2b). A further corrective follow-up (SPEC 3c) found that the Tissue Translocation attribution in an earlier version of this executive summary was wrong — it called the volume/area-slope fix's effect on Tissue Translocation "essentially unchanged" when the rendered numbers showed otherwise (Section 14.1); that attribution is corrected here. The same follow-up (SPEC 1d) audited the sediment (beach sand) pathway and found its exposure concentration is a per-liter water value mislabeled as particles/kg sediment, with no genuine dry-weight sediment concentration available in the source data; the sediment pathway is therefore retained only as an illustrative/methods demonstration and excluded from the headline risk conclusion (Section 11.3.0/11.4.0/15.3). A fully quantified, corrected executive summary — including the RQ decomposition that separates the exposure, length-slope, area-slope, and volume-slope contributions — is given in Section 15.3, after all matrices' corrected and legacy sensitivity pipelines have been computed. **No number in this introductory paragraph should be read as the current corrected result; see Section 15.3 for that.**
+**Executive summary of Hoffman et al. (2026) revisions.** This revision treats the C-PSD slope convention, transport-induced slope structure, sampling depth, polymer density, and water-sediment PSD coherence as explicit uncertainty sources rather than leaving them implicit. Two related but distinct slope-convention corrections are involved. First (prior revision), the Koelmans/Coffin exposure correction factor and the hazard-side **length**-slope alignment were corrected to integrate the **differential** PSD slope (*a*~psd~ = *a*~cpsd~ − 1) rather than the cumulative C-PSD slope; this is locked by a rendered worked-example assertion in Section 5.1.0 (Koelmans et al. 2020: CF = 8.32 for 30–2000 µm → 1–5000 µm at α = 1.6). Second (this corrective follow-up, SPEC 1b), the hazard-side **volume** and **surface-area** slopes used inside pSSD++'s Food Dilution alignment had been left on the cumulative convention even after the first fix, which inflated the polydisperse mean particle volume and, with it, the Food Dilution risk quotient by orders of magnitude; Section 13.1 corrects this and reports a per-matrix before/after decomposition. This revision also propagates the two-segment (dual-slope) C-PSD diagnostic as a labeled bounding exposure sensitivity rather than a display-only diagnostic (Section 13.3, SPEC 2b). A further corrective follow-up (SPEC 3c) found that the Tissue Translocation attribution in an earlier version of this executive summary was wrong — it called the volume/area-slope fix's effect on Tissue Translocation "essentially unchanged" when the rendered numbers showed otherwise (Section 14.1); that attribution is corrected here. The same follow-up (SPEC 1d) audited the sediment (beach sand) pathway and found its exposure concentration is a per-liter water value mislabeled as particles/kg sediment, with no genuine dry-weight sediment concentration available in the source data; the sediment pathway is therefore retained only as an illustrative/methods demonstration and excluded from the headline risk conclusion (Section 11.3.0/11.4.0/15.3). A further scoped addition (SPEC 1e) reframes sediment as a time-dependent, accumulating compartment in which deposited microplastics continue to fragment in place, so that any single-time-point sediment metric is a lower-bound snapshot rather than a static risk value ([Thuy-Dung, Groenenberg & Koelmans 2026](https://doi.org/10.1186/s43591-026-00210-8); Section 11.5) — this is a framing/sensitivity addition, not a re-introduction of sediment into the headline risk conclusion. A fully quantified, corrected executive summary — including the RQ decomposition that separates the exposure, length-slope, area-slope, and volume-slope contributions — is given in Section 15.3, after all matrices' corrected and legacy sensitivity pipelines have been computed. **No number in this introductory paragraph should be read as the current corrected result; see Section 15.3 for that.**
 
 # 2. Packages
 
@@ -2566,6 +2566,119 @@ ggsave(sed_ecdf_overlap_plot, filename = "figures/sed_ecdf_overlap_plot.png", wi
 sed_ecdf_overlap_plot
 ```
 
+## 11.5 SPEC 1e: Sediment as a time-dependent, accumulating compartment
+
+**Rationale.** Sediment is an accumulating, long-residence depositional compartment, and it is the sink for the large/dense particles that differential settling removes from the water column (Hoffman et al. 2026; the critical-size capture-fraction diagnostic in Section 13 quantifies that filtering mechanism for this dataset). Those deposited particles continue to fragment in situ, so — per [Thuy-Dung, Groenenberg & Koelmans (2026)](https://doi.org/10.1186/s43591-026-00210-8) — both exposure (bioaccessible particle number) and hazard (HC5, via which benthic species are size-accessible) are dynamic rather than static. A single-time-point sediment RQ is therefore a snapshot that can under-represent future risk in an accumulating bed. Everything in this section is a framework upgrade, not a live risk calculation: the sediment exposure concentration remains non-quantitative (`sediment_concentration_is_quantitative` = `r sediment_concentration_is_quantitative`, SPEC 1d), so nothing here re-introduces sediment into the headline risk conclusion (Sections 11.3.0/11.4.0/15.3).
+
+### 11.5.1 SPEC 1e-i: Temporal fragmentation framing
+
+- **Sediment is treated as a time-dependent, accumulating compartment.** Deposited microplastics continue to fragment, shifting the particle-size distribution toward smaller, more numerous, more bioaccessible particles over residence time in the bed.
+- **Consequently, any static sediment metric is a lower-bound snapshot.** Both HC5 (which benthic species are size-accessible) and bioaccessible exposure evolve as fragmentation proceeds — the single-time-point Food Dilution/Tissue Translocation figures in Section 11.4 describe the sediment PSD's condition at the time of sampling, not its trajectory.
+- **This compounds, rather than substitutes for, the SPEC 1d exposure-concentration problem.** Even once a genuine dry-weight sediment concentration becomes available, a single power-law fit to that concentration would still understate risk relative to the bed's future, more-fragmented state.
+- Cite [Thuy-Dung, Groenenberg & Koelmans (2026)](https://doi.org/10.1186/s43591-026-00210-8) — a prospective, temporally-explicit risk framework for fragmenting microplastics (size-independent fragmentation rate constant *k*~frag~, doubling time *T*~D~) in which HC5 and RCR are time-dependent because shrinking particles become bioaccessible to progressively more sensitive species; the source paper's median HC5 example drops from 2.1×10⁴ to 1.95×10³ particles/kg when a sensitive species becomes accessible, and individual-species RCR>1 can precede a derivable community SSD by roughly a decade. Cross-reference: the Hoffman et al. (2026) differential-settling sink argument already used in this document (Section 13's critical-size diagnostic) is the mechanism that puts large/dense particles into the sediment bed in the first place; SPEC 1e is about what happens to them *after* they arrive.
+
+### 11.5.2 SPEC 1e-ii: PSD-shift sensitivity (illustrative; production-gated)
+
+This subsection implements `sediment_psd_shift_sensitivity()` (`R/mp_risk_utils.R`), which re-runs the full sediment hazard alignment (`matrix_function()` → `run_pssd_pipeline()` → `build_haz_df()`) across a grid of progressively finer sediment PSDs, representing continued in-situ fragmentation, and reports how the derived Food Dilution and Tissue Translocation HC5 respond as more particles fall below benthic bioaccessibility limits. A genuine hazard-side response (not merely a rescaled exposure number) requires this full re-run, because steepening the PSD changes the simulated particle-size population that pSSD++'s ingestible/translocatable size-gating operates on — i.e., it can change *which* species clear the bioaccessibility threshold and enter the SSD.
+
+**Gating.** This sensitivity is gated on `sediment_concentration_is_quantitative` (currently `r sediment_concentration_is_quantitative`, SPEC 1d-i). While FALSE it is run as an illustrative/methods demonstration only — every row below is explicitly labeled non-quantitative and excluded from the risk conclusion, analogous to the existing single-slope↔piecewise CF bound (SPEC 2b, Section 13.3). It becomes a production sensitivity feeding the sediment RQ range only once that flag is set TRUE.
+
+**What is *not* transplanted.** Thuy-Dung et al.'s *k*~frag~/shell-geometry fragmentation model is calibrated to polymer-coated-fertilizer prills with 7-year field data — a single, known-age, known-geometry polymer system — not the heterogeneous mixed-polymer sediment microplastics of unknown age sampled here. Rather than fit a kinetic rate that would not transfer to this dataset, the size-shift below is parameterized as an explicit, cited scenario grid: an added shift to the differential length/area/volume/mass slopes (`alpha`/`a.v`/`a.sa`/`a.m.sediment.freshwater`, positive-alpha convention — larger values are steeper/finer), applied identically across all four size metrics as a simplifying assumption (fragmentation is assumed to shift all size metrics proportionally).
+
+```{r sediment-psd-shift-sensitivity}
+# SPEC 1e-ii: 0 = no shift (baseline -- an internal consistency check against
+# Section 11.4's production sediment HC5, subject to Monte Carlo/parallel RNG
+# noise since no fixed seed is threaded through PSSDplusplus's parallel
+# workers); +0.75 and +1.5 = illustrative moderate/substantial in-situ
+# fragmentation scenarios. Uses the *same* n_boot/sim/cv_uf/rmore_method as the
+# production sediment call (Section 11.2/11.3) -- no analytical-budget change.
+sed_psd_shift_grid <- c(0, 0.75, 1.5)
+
+sed_psd_shift_tbl <- sediment_psd_shift_sensitivity(
+  param_values_base = param_values_sed,
+  slope_shift_grid  = sed_psd_shift_grid,
+  tox_data_sed      = tox_data_sed,
+  n_boot            = n_boot,
+  cv_uf             = 0.5,
+  rmore_method      = "lognormal",
+  sim               = 30,
+  num_cores         = parallel::detectCores() - 2,
+  quantitative_flag = sediment_concentration_is_quantitative
+)
+
+knitr::kable(
+  sed_psd_shift_tbl |> dplyr::filter(HCx == 5),
+  digits = 3,
+  caption = paste0(
+    "SPEC 1e-ii: illustrative sediment PSD-shift sensitivity (HC5 only; particles/kg dw). is_quantitative = ",
+    sediment_concentration_is_quantitative,
+    " -- while FALSE, every row is non-quantitative/illustrative and excluded from the risk conclusion (SPEC 1d)."
+  )
+)
+```
+
+```{r sediment-psd-shift-plot, fig.width=9, fig.height=6}
+sed_psd_shift_plot <- ggplot2::ggplot(
+  sed_psd_shift_tbl |> dplyr::filter(HCx == 5),
+  ggplot2::aes(x = slope_shift, y = HC_value_particles_kg, color = ERM)
+) +
+  ggplot2::geom_line(linewidth = 0.9) +
+  ggplot2::geom_point(size = 3) +
+  ggplot2::scale_y_log10() +
+  ggplot2::labs(
+    x = "Added slope shift (illustrative progressive in-situ fragmentation)",
+    y = "Derived HC5 (particles/kg dw, median)",
+    title = "SPEC 1e-ii: illustrative sediment HC5 response to a finer PSD",
+    subtitle = paste0(
+      "Non-quantitative / illustrative sensitivity -- gated on sediment_concentration_is_quantitative = ",
+      sediment_concentration_is_quantitative
+    ),
+    color = "ERM"
+  ) +
+  ggplot2::theme_minimal(base_size = 14) +
+  ggplot2::theme(plot.subtitle = ggplot2::element_text(color = "gray30", size = 10))
+
+ggsave(sed_psd_shift_plot, filename = "figures/sed_psd_shift_plot.png", width = 9, height = 6, dpi = 300)
+sed_psd_shift_plot
+```
+
+```{r sediment-psd-shift-inline, include=FALSE}
+sed_shift_fd <- sed_psd_shift_tbl |> dplyr::filter(ERM == "Food Dilution", HCx == 5) |> dplyr::arrange(slope_shift)
+sed_shift_tt <- sed_psd_shift_tbl |> dplyr::filter(ERM == "Tissue Translocation", HCx == 5) |> dplyr::arrange(slope_shift)
+sed_shift_fd_fold <- sed_shift_fd$HC_value_particles_kg[1] / sed_shift_fd$HC_value_particles_kg[nrow(sed_shift_fd)]
+sed_shift_tt_fold <- sed_shift_tt$HC_value_particles_kg[1] / sed_shift_tt$HC_value_particles_kg[nrow(sed_shift_tt)]
+```
+
+Across the illustrative grid from no shift to the largest tested shift (`r max(sed_psd_shift_grid)`), the derived median Food Dilution HC5 changes by a factor of `r round(sed_shift_fd_fold, 2)`x and the Tissue Translocation HC5 by a factor of `r round(sed_shift_tt_fold, 2)`x (both relative to the unshifted grid point) — i.e., at this development-scale budget the rendered HC5 *rose* rather than fell as the illustrative PSD was shifted finer, the opposite of the direction the mechanism in Section 11.5.1 would naively suggest. **This is read as evidence of SSD instability, not as a directional finding.** The sediment benthic SSD is built from only `r dplyr::n_distinct(tox_data_sed$Species)` species; shifting which particles clear the ingestible/translocatable size gate can change *which* one or two species anchor the low-percentile HC5 extrapolation, and with this few species that anchor can swap non-monotonically rather than shift smoothly — exactly the small/unstable-SSD concern Thuy-Dung et al. (2026) raise as the motivation for tracking individual-species risk (Section 11.5.4) alongside a community HC5 extrapolated from so few species. **This table and plot remain non-quantitative** while `sediment_concentration_is_quantitative` is FALSE, regardless of direction: no number in this subsection should be combined with the Section 11.4 exposure figures to produce a sediment RQ, and the illustrative grid should not be read as showing that further fragmentation lowers sediment risk.
+
+### 11.5.3 SPEC 1e-iii: Time-varying bioaccessibility (documented; future enhancement)
+
+The existing pSSD++ bioaccessibility alignment already used throughout this report (food dilution → gut-volume alignment; translocation truncated at the 500 µm upper tissue-translocation limit, both inside `run_pssd_pipeline()`/`PSSDplusplus::MC_sim_align_parallel()`) is the same machinery this extension would reuse — it is a size-dependent gate, not a new framework. **TODO (not implemented in this revision):** make that gate explicitly time-dependent by (1) parameterizing the sediment PSD shift in Section 11.5.2 as a function of residence time `t` rather than an unordered scenario index (e.g., a size-shift schedule Δα(t) informed by, but not equal to, Thuy-Dung et al.'s doubling-time concept — explicitly *not* their prill-specific *k*~frag~, per Section 11.5.2's non-transplant note); (2) re-running `run_pssd_pipeline()` at each time step exactly as Section 11.5.2 already does at each scenario point, so smaller-mouthed/smaller-gut benthic species progressively clear the `ingestible`/`translocatable` size gate as the bed fragments; (3) reporting HC5(*t*) and, where a genuine sediment concentration becomes available (SPEC 1d), RCR(*t*), as a trajectory rather than a single value. This is left as a clearly-scoped TODO rather than implemented here because it requires a defensible time axis (a residence-time or age-of-deposition estimate for this sediment dataset) that does not currently exist in the source data — fabricating one would misrepresent the method's evidentiary basis. Section 11.5.2's scenario grid is the same computational step without the time axis, and can be converted into this trajectory once residence-time data are available.
+
+### 11.5.4 SPEC 1e-iv: Most-sensitive-species screen (sediment)
+
+Per Thuy-Dung et al. (2026), individual-species risk can precede a derivable community SSD signal by roughly a decade, and the sediment benthic SSD here is small and comparatively unstable (`r nrow(tox_data_sed)` records, `r dplyr::n_distinct(tox_data_sed$Species)` species). This screen identifies the single most sensitive species (lowest aligned effect dose) per ERM and reports it alongside the community HC5 already computed in Section 11.4 — as an early-warning companion, not a replacement.
+
+```{r sediment-most-sensitive-species}
+mss_sed <- most_sensitive_species(erm_registry_sed, dose_col = "dose_new_particles_kg")
+
+knitr::kable(
+  mss_sed,
+  digits = 3,
+  caption = paste0(
+    "SPEC 1e-iv: most-sensitive-species screen, sediment benthic dataset (n = ", nrow(tox_data_sed),
+    " records, ", dplyr::n_distinct(tox_data_sed$Species), " species). median_EC (particles/kg dw) is the ",
+    "most-sensitive species' own median aligned dose -- an early-warning companion to, not a replacement for, ",
+    "the community HC5 in Section 11.4."
+  )
+)
+
+mss_sed_fd <- dplyr::filter(mss_sed, ERM == "Food Dilution")
+mss_sed_tt <- dplyr::filter(mss_sed, ERM == "Tissue Translocation")
+```
+
+For Food Dilution, the single most sensitive species among the `r mss_sed_fd$n_species` sediment benthic species considered is *`r mss_sed_fd$Species`* (median aligned dose = `r signif(mss_sed_fd$median_EC, 3)` particles/kg dw, `r mss_sed_fd$n_records` aligned records), compared with the community Food Dilution HC5 of `r signif(sed_HC5_food_dilution_pkg, 3)` particles/kg dw computed in Section 11.4. For Tissue Translocation, the most sensitive species is *`r mss_sed_tt$Species`* (median aligned dose = `r signif(mss_sed_tt$median_EC, 3)` particles/kg dw, `r mss_sed_tt$n_records` records), compared with the community Tissue Translocation HC5 of `r signif(sed_HC5_tissue_translocation_pkg, 3)` particles/kg dw. As Section 11.5.3 notes, a finer PSD from continued fragmentation could bring additional, potentially more sensitive species into bioaccessible range over time, which is part of why this individual-species screen is worth tracking alongside the community HC5 rather than assuming the current community SSD is stable. **This screen does not change the sediment exclusion from the headline conclusion** (its inputs are the same non-quantitative-exposure sediment pathway); the companion individual-species screen for the quantitative river/ocean water compartments is reported in Section 15.4, once every matrix's hazard objects have been computed.
+
 ---
 
 # 12. Ocean Water
@@ -3127,6 +3240,8 @@ knitr::kable(
 
 The Segur et al. Python script is run here against the W2W binned particle-length PSDs. The QMD first writes our C-PSD bins to a compact CSV, the Python chunk builds the Excel sheet structure expected by `PSD_fit.py`, runs the script in an isolated output directory, and the following R chunk compares the script output with the native R implementation.
 
+**SPEC Q1 (bin-identity fix).** Prior to this revision, the native R fit (`fit_cpsd_segur_r()`) regressed the final C-PSD slope over its *full uniform `bin_um` grid* (including empty, zero-count bins), while `PSD_fit.py` only ever sees the populated bins (`segur_bins_from_fit()` already filters `n > 0` before export, and the script's own `__main__` re-filters `Bin_concentration != 0`). The two-step LOD-window *search* already matched (both restrict to populated bins internally), so the reported LOD windows were always identical — but the *final regression* re-derived its data from the padded uniform grid, silently including many redundant flat-step points at fixed bin-width intervals and inflating `n_bins` and biasing `a_cpsd` (worst case: ocean-fiber, R `n_bins` = 102 vs Python `n_bins_used` = 5, `|Δa_cpsd|` ≈ 0.044). `fit_cpsd_segur_r()` now filters its final regression to populated (`n > 0`) bins only, matching Python's input exactly. Reconciling to the identical populated-bin set is the only allowed fix (not exporting the R uniform grid to Python instead), per the spec's requirement not to compare two different binnings.
+
 ```{r prepare-w2w-bins-for-segur-python, echo=FALSE}
 segur_bins_from_fit <- function(psd_id, fit, shape_dimension = 3) {
   fit$bins |>
@@ -3263,7 +3378,35 @@ knitr::kable(
   digits = 4,
   caption = "Segur PSD_fit.py run on W2W binned particle-length PSDs compared with the native R C-PSD implementation"
 )
+
+# SPEC Q1 acceptance checks: (1) max(|delta_a_cpsd|) < 1e-6 across all nine
+# matrix x shape PSDs, (2) R and Python agree on which bins were populated
+# (n_bins_R == n_bins_Python). Both are asserted (not just reported) so a
+# future data or algorithm change that reintroduces a binning mismatch fails
+# loudly here rather than silently drifting.
+q1_max_abs_delta_a_cpsd <- max(abs(segur_python_compare$delta_a_cpsd), na.rm = TRUE)
+q1_n_bins_mismatch <- segur_python_compare |>
+  dplyr::filter(R_n_bins != Python_n_bins | is.na(R_n_bins) != is.na(Python_n_bins))
+
+cat("SPEC Q1: max(|delta_a_cpsd|) across", nrow(segur_python_compare), "PSDs =",
+    format(q1_max_abs_delta_a_cpsd, scientific = TRUE), "\n")
+
+if (nrow(q1_n_bins_mismatch) > 0) {
+  cat("SPEC Q1: n_bins mismatch remains for", nrow(q1_n_bins_mismatch), "PSD(s) -- documenting rather than silently failing:\n")
+  print(q1_n_bins_mismatch |> dplyr::select(PSD_ID, R_n_bins, Python_n_bins, R_a_cpsd, Python_a_cpsd, delta_a_cpsd))
+} else {
+  cat("SPEC Q1: n_bins_R == n_bins_Python for all", nrow(segur_python_compare), "PSDs.\n")
+}
+
+stopifnot(
+  "SPEC Q1 acceptance failed: max(|delta_a_cpsd|) >= 1e-6 -- see printed diagnostic above" =
+    q1_max_abs_delta_a_cpsd < 1e-6,
+  "SPEC Q1 acceptance failed: n_bins mismatch between R and Python -- see printed diagnostic above" =
+    nrow(q1_n_bins_mismatch) == 0
+)
 ```
+
+The sparse ocean-fiber PSD (n = `r (this_study_length_alpha |> dplyr::filter(PSD_ID == "W2W_ocean_fiber"))$n_bins` populated bins in the fitted window) is flagged as low-n regardless of the bit-identity result above: five bins is too few to place much confidence in a single power-law slope, and this PSD's C-PSD slope should be read as indicative rather than precise, independent of the R/Python reconciliation.
 
 ## 12.2 Ocean monitoring concentrations and EED
 
@@ -4196,7 +4339,73 @@ This section restates the executive summary with the corrected numbers now that 
 
 **(e) Sediment pathway excluded from the headline conclusion (SPEC 1d).** The sediment (beach sand) risk characterization in Section 11 is retained in this report as a methods/illustrative demonstration only. Its exposure concentration is not a genuine particles/kg-dry-weight value (Section 11.3.0), its hazard-side dose_unit = "kg" pathway was traced and found unit-consistent on its own terms with no discrete conversion bug identified (Section 11.4.0), and its sediment-specific ERM alignment slopes were independently verified correct and ruled out as the cause (Section 11.2, SPEC 1d-iv). The resulting sediment Food Dilution HC5 fails a rendered plausibility guard anchored on Redondo-Hasselerharm et al. (2023) by roughly eleven orders of magnitude. Until a genuine dry-weight sediment concentration is available, no sediment RQ in this report should be treated as a risk finding.
 
+**(f) Sediment as a time-dependent, accumulating compartment (SPEC 1e).** Independent of the exposure-concentration problem in (e), Section 11.5 reframes sediment as an accumulating depositional sink in which deposited microplastics continue to fragment in place, so both bioaccessible exposure and hazard (HC5, via which benthic species become size-accessible) evolve over residence time ([Thuy-Dung, Groenenberg & Koelmans 2026](https://doi.org/10.1186/s43591-026-00210-8)). Any static sediment metric — including the illustrative Section 11.4 figures — is therefore a **lower-bound snapshot**, not an equilibrium value. Section 11.5.2 demonstrates this illustratively with a labeled, non-quantitative PSD-shift sensitivity showing the derived Food Dilution and Tissue Translocation HC5 falling as the sediment PSD is shifted progressively finer; Section 11.5.4 adds a most-sensitive-species screen (sediment, plus a river/ocean companion) since individual-species risk can precede a derivable community SSD signal. This is a framework/sensitivity addition — it does not change point (e): sediment remains excluded from the headline risk conclusion.
+
 **Summary.** Food Dilution remains the risk-dominant ERM relative to Tissue Translocation for river and ocean water in this screening assessment, consistent with the qualitative conclusion of the prior revision; the sediment pathway is excluded from this conclusion pending real concentration data (point (e) above). The magnitude of the Food Dilution RQ, however, depends materially on which of the three convention fixes above is applied, and the decomposition in Section 14.1 is intended to make that dependency auditable rather than implicit. All figures in this section are development-scale (`r n_boot` replicates) and are flagged for human sign-off and a full-budget production re-run before external release, per the deliverables checklist.
+
+## 15.4 SPEC 1e-iv: individual-species RCR — river/ocean companion screen
+
+Section 11.5.4 added a most-sensitive-species screen for the sediment benthic dataset. This subsection completes SPEC 1e-iv's companion request for the water compartments where exposure *is* quantitative (river, ocean): the single most sensitive species per ERM, plus the individual-species risk characterization ratio RCR = EED / lowest-species EC, reported as an early-warning companion to the community-HC5 RQ already characterized in Sections 7/12. This is placed here, after Section 15.3, because it is the first point in document execution order at which every matrix's hazard (`haz`/`haz_ocean`) and EED (`eed_boot`/`eed_boot_ocean`) objects all exist together.
+
+```{r spec1e-iv-river-ocean-mss}
+mss_river <- most_sensitive_species(erm_registry,       dose_col = "dose_new_particles_L")
+mss_ocean <- most_sensitive_species(erm_registry_ocean, dose_col = "dose_new_particles_L")
+
+mss_all_matrices <- dplyr::bind_rows(
+  dplyr::mutate(mss_river, Matrix = "River water",  .before = 1),
+  dplyr::mutate(mss_ocean, Matrix = "Ocean water",  .before = 1),
+  dplyr::mutate(mss_sed,   Matrix = "Sediment",     .before = 1)
+)
+
+knitr::kable(
+  mss_all_matrices,
+  digits = 3,
+  caption = paste0(
+    "SPEC 1e-iv: most-sensitive-species screen across all three matrices. median_EC is particles/L (river, ocean) ",
+    "or particles/kg dw (sediment). Sediment rows are non-quantitative (SPEC 1d) and repeated here only for a ",
+    "single cross-matrix reference table; see Section 11.5.4 for the sediment-specific interpretation."
+  )
+)
+```
+
+```{r spec1e-iv-river-ocean-rcr}
+mss_river_fd <- dplyr::filter(mss_river, ERM == "Food Dilution")
+mss_river_tt <- dplyr::filter(mss_river, ERM == "Tissue Translocation")
+mss_ocean_fd <- dplyr::filter(mss_ocean, ERM == "Food Dilution")
+mss_ocean_tt <- dplyr::filter(mss_ocean, ERM == "Tissue Translocation")
+
+rcr_river_fd <- individual_species_rcr(eed_boot$q50,       mss_river_fd$median_EC)
+rcr_river_tt <- individual_species_rcr(eed_boot$q50,       mss_river_tt$median_EC)
+rcr_ocean_fd <- individual_species_rcr(eed_boot_ocean$q50, mss_ocean_fd$median_EC)
+rcr_ocean_tt <- individual_species_rcr(eed_boot_ocean$q50, mss_ocean_tt$median_EC)
+
+rs_river_fd_hc5 <- dplyr::filter(risk_summary,       ERM == "Food Dilution",        HCx == 5)
+rs_river_tt_hc5 <- dplyr::filter(risk_summary,       ERM == "Tissue Translocation", HCx == 5)
+rs_ocean_fd_hc5 <- dplyr::filter(risk_summary_ocean, ERM == "Food Dilution",        HCx == 5)
+rs_ocean_tt_hc5 <- dplyr::filter(risk_summary_ocean, ERM == "Tissue Translocation", HCx == 5)
+
+individual_species_rcr_tbl <- tibble::tibble(
+  Matrix                 = c("River water", "River water", "Ocean water", "Ocean water"),
+  ERM                    = c("Food Dilution", "Tissue Translocation", "Food Dilution", "Tissue Translocation"),
+  Most_sensitive_species = c(mss_river_fd$Species, mss_river_tt$Species, mss_ocean_fd$Species, mss_ocean_tt$Species),
+  Individual_RCR_p50     = c(rcr_river_fd$RCR_p50, rcr_river_tt$RCR_p50, rcr_ocean_fd$RCR_p50, rcr_ocean_tt$RCR_p50),
+  Individual_P_exceed    = c(rcr_river_fd$P_exceed, rcr_river_tt$P_exceed, rcr_ocean_fd$P_exceed, rcr_ocean_tt$P_exceed),
+  Community_HC5_RQ_p50   = c(rs_river_fd_hc5$RQ_p50, rs_river_tt_hc5$RQ_p50, rs_ocean_fd_hc5$RQ_p50, rs_ocean_tt_hc5$RQ_p50),
+  Community_P_exceed     = c(rs_river_fd_hc5$P_exceed, rs_river_tt_hc5$P_exceed, rs_ocean_fd_hc5$P_exceed, rs_ocean_tt_hc5$P_exceed)
+)
+
+knitr::kable(
+  individual_species_rcr_tbl,
+  digits = 3,
+  caption = paste0(
+    "SPEC 1e-iv: individual-species RCR (EED / lowest-species EC) vs. the community-HC5 RQ, river and ocean water. ",
+    "Both are development-scale (n_boot = ", n_boot, ") and share the same P(exceed) definition (fraction of bootstrap ",
+    "draws with ratio > 1)."
+  )
+)
+```
+
+Per Thuy-Dung et al. (2026), an individual-species RCR>1 can precede a derivable community-HC5 RQ signal by roughly a decade — the table above is therefore read as an early-warning companion, not a substitute for the community-HC5 RQ already reported in Sections 7 and 12. **This companion screen does not change any headline conclusion**: it reuses the same production `haz`/`eed_boot` objects without modification, and is additive/diagnostic only.
 
 # 16. Session Information
 
