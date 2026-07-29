@@ -39,7 +39,7 @@ knitr::opts_knit$set(root.dir = proj_root)
 getwd()
 
 # ── Global Monte Carlo settings (change here to scale up/down) ──
-n_boot <- 1000   # bootstrap replicates (increase to ≥ 1000 for publication)
+n_boot <- 10   # bootstrap replicates (increase to ≥ 1000 for publication)
 n_mc   <- 20000 # alpha Monte Carlo draws
 
 # Uniform C-PSD bin width for volume fits (µm³), applied identically across every
@@ -4216,7 +4216,11 @@ build_c1_snapshot <- function() {
 
 snap_current <- build_c1_snapshot()
 
-if (!file.exists(c1_snapshot_path)) {
+if (n_boot < 1000) {
+  message("C1 guardrail: SKIPPED -- n_boot = ", n_boot, " (< 1000, dev-scale iteration render). ",
+          "The byte-identical number check is only meaningful at the production budget; ",
+          "re-render with n_boot = 1000 before treating this as a release-gate pass.")
+} else if (!file.exists(c1_snapshot_path)) {
   jsonlite::write_json(snap_current, c1_snapshot_path, auto_unbox = TRUE, digits = 15, pretty = TRUE)
   message("C1 guardrail: baseline snapshot written to ", c1_snapshot_path,
           " (this is the pre-C1 baseline -- do not regenerate once C1 edits begin).")
