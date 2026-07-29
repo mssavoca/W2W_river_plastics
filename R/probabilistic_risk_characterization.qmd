@@ -731,11 +731,11 @@ cpsd_loc_shape_vol <- lapply(setNames(locations, locations), function(loc) {
   sub <- raw_particles_river |> dplyr::filter(sample_location == loc)
   list(
     fragment = safe_cpsd(sub |> dplyr::filter(shape == "fragment") |> dplyr::pull(V_um3),
-                         bin_um = 1e3, fit_range_um = c(fragment_volume_lod_lower, fragment_volume_lod_upper)),
+                         bin_um = vol_bin_um, fit_range_um = vlb_river$fragment),
     fiber    = safe_cpsd(sub |> dplyr::filter(shape == "fiber")    |> dplyr::pull(V_um3),
-                         bin_um = 1e4, fit_range_um = c(fiber_volume_lod_lower, fiber_volume_lod_upper)),
+                         bin_um = vol_bin_um, fit_range_um = vlb_river$fiber),
     all      = safe_cpsd(sub |> dplyr::pull(V_um3),
-                         bin_um = 1e2, fit_range_um = c(1e7, 1e8))
+                         bin_um = vol_bin_um, fit_range_um = vlb_river$all)
   )
 })
 
@@ -825,74 +825,7 @@ cpsd_loc_points <- dplyr::bind_rows(
   dplyr::filter(!is.na(logN))
 ```
 
-```{r cpsd-by-river-faceted, fig.width=12, fig.height=8, echo=FALSE}
-# Subset palette to locations that are present in data
-loc_palette_used <- loc_palette[names(loc_palette) %in% as.character(unique(cpsd_loc_lines$location))]
-
-# Points subset: ensure levels match lines
-cpsd_loc_points2 <- cpsd_loc_points |>
-  dplyr::filter(location %in% names(loc_palette_used)) |>
-  dplyr::mutate(
-    metric   = factor(metric,   levels = factor_levels$metric),
-    shape    = factor(shape,    levels = factor_levels$slabel),
-    location = factor(location, levels = locations)
-  )
-
-cpsd_river_facet_plot <- ggplot2::ggplot() +
-  # --- Raw data points: outside LOD at low alpha ---
-  ggplot2::geom_point(
-    data = dplyr::filter(cpsd_loc_points2, !in_lod),
-    ggplot2::aes(x = log10(L_low), y = logN, color = location),
-    size = 0.7, alpha = 0.05, shape = 16
-  ) +
-  # --- Raw data points: inside LOD at full alpha ---
-  ggplot2::geom_point(
-    data = dplyr::filter(cpsd_loc_points2, in_lod),
-    ggplot2::aes(x = log10(L_low), y = logN, color = location),
-    size = 1.3, alpha = 0.75, shape = 16
-  ) +
-  # --- 95% CI ribbon (within LOD window) ---
-  ggplot2::geom_ribbon(
-    data = cpsd_loc_lines,
-    ggplot2::aes(x = log10(L_low), ymin = logN_lo, ymax = logN_hi, fill = location),
-    alpha = 0.12, color = NA
-  ) +
-  # --- Fitted regression line (within LOD window) ---
-  ggplot2::geom_line(
-    data = cpsd_loc_lines,
-    ggplot2::aes(x = log10(L_low), y = logN_fit, color = location),
-    linewidth = 0.9, alpha = 0.9
-  ) +
-  ggplot2::facet_grid(
-    shape ~ metric,
-    scales   = "free",
-    labeller = ggplot2::label_value
-  ) +
-  ggplot2::scale_color_manual(values = loc_palette_used, name = "River location") +
-  ggplot2::scale_fill_manual( values = loc_palette_used, name = "River location") +
-  ggplot2::guides(
-    color = ggplot2::guide_legend(override.aes = list(alpha = 1, size = 3)),
-    fill  = "none"
-  ) +
-  ggplot2::labs(
-    x        = expression(log[10] * "(size)"),
-    y        = expression(log[10] * (N("">=L))),
-    title    = "C-PSD power-law fits by river, shape, and size metric",
-    subtitle = "Solid lines + ribbon = fit ± 95% CI within Segur LOD window. Faded points = outside LOD.",
-    caption  = "Rows: shape. Columns: size metric. Fits per river via Segur (2026) LOD algorithm."
-  ) +
-  ggplot2::theme_minimal(base_size = 18) +
-  ggplot2::theme(
-    legend.position = "bottom",
-    panel.border    = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.4),
-    strip.text      = ggplot2::element_text(face = "bold", size = 10),
-    plot.caption    = ggplot2::element_text(size = 8, color = "gray50", hjust = 0)
-  )
-
-ggsave(cpsd_river_facet_plot, filename = "figures/cpsd_river_facet_plot.png",
-       width = 12, height = 8, dpi = 300)
-cpsd_river_facet_plot
-```
+The faceted comparison plot for these fits is deferred to Section 12.1 (after the ocean C-PSD fits complete), where river and ocean are shown together on shared axes.
 
 ### 4.2.5 Per-river power-law slopes across size metrics
 
@@ -2396,6 +2329,127 @@ ocean_volume_fits <- list(fragment = cpsd_fit_volume_ocean_frag, fiber = cpsd_fi
 ocean_volume_cpsd_plot <- plot_cpsd_multi(ocean_volume_fits, title = "Ocean water C-PSD fits by shape", attribute = "Volume")
 ggsave(ocean_volume_cpsd_plot, filename = "figures/ocean_volume_cpsd_plot.png", width = 8, height = 6, dpi = 300)
 ocean_volume_cpsd_plot
+```
+
+### 12.0.1 River + ocean C-PSD fits (length, surface area, volume — faceted)
+
+Combines the per-river-location fits (Section 4.2.4) with the pooled ocean fits above into one faceted comparison, now that both are available. Rows are shape, columns are size metric; y-axis (log~10~ cumulative count) is fixed across all panels so magnitudes are directly comparable, while the x-axis (log~10~ size) is left free per metric since length/area/volume span very different numeric ranges.
+
+```{r cpsd-river-ocean-faceted, fig.width=12, fig.height=8, echo=FALSE}
+# Wrap the already-computed pooled ocean fit objects to match safe_cpsd()'s
+# success-case structure (list(..., valid = TRUE)) so they drop into the same
+# extract_fit_lines()/extract_fit_points() helpers used for the per-river fits.
+ocean_as_location <- list(
+  Ocean = list(
+    length = list(
+      fragment = c(cpsd_fit_ocean_frag,        list(valid = TRUE)),
+      fiber    = c(cpsd_fit_ocean_fiber,        list(valid = TRUE)),
+      all      = c(cpsd_fit_ocean_all,          list(valid = TRUE))
+    ),
+    area = list(
+      fragment = c(cpsd_fit_area_ocean_frag,    list(valid = TRUE)),
+      fiber    = c(cpsd_fit_area_ocean_fiber,   list(valid = TRUE)),
+      all      = c(cpsd_fit_area_ocean,         list(valid = TRUE))
+    ),
+    volume = list(
+      fragment = c(cpsd_fit_volume_ocean_frag,  list(valid = TRUE)),
+      fiber    = c(cpsd_fit_volume_ocean_fiber, list(valid = TRUE)),
+      all      = c(cpsd_fit_volume_ocean,       list(valid = TRUE))
+    )
+  )
+)
+
+cpsd_loc_shape_length_ro <- c(cpsd_loc_shape_length, list(Ocean = ocean_as_location$Ocean$length))
+cpsd_loc_shape_area_ro   <- c(cpsd_loc_shape_area,   list(Ocean = ocean_as_location$Ocean$area))
+cpsd_loc_shape_vol_ro    <- c(cpsd_loc_shape_vol,    list(Ocean = ocean_as_location$Ocean$volume))
+
+locations_ro <- c(locations, "Ocean")
+loc_palette_ro <- c(loc_palette, "Ocean" = "#0072B2")
+
+cpsd_loc_lines_ro <- dplyr::bind_rows(
+  extract_fit_lines(cpsd_loc_shape_length_ro, "Length (µm)"),
+  extract_fit_lines(cpsd_loc_shape_area_ro,   "Surface Area (µm²)"),
+  extract_fit_lines(cpsd_loc_shape_vol_ro,    "Volume (µm³)")
+) |>
+  dplyr::mutate(
+    metric   = factor(metric, levels = factor_levels$metric),
+    shape    = factor(shape,  levels = factor_levels$shape, labels = factor_levels$slabel),
+    location = factor(location, levels = locations_ro)
+  ) |>
+  dplyr::filter(!is.na(logN_fit))
+
+cpsd_loc_points_ro <- dplyr::bind_rows(
+  extract_fit_points(cpsd_loc_shape_length_ro, "Length (µm)"),
+  extract_fit_points(cpsd_loc_shape_area_ro,   "Surface Area (µm²)"),
+  extract_fit_points(cpsd_loc_shape_vol_ro,    "Volume (µm³)")
+) |>
+  dplyr::mutate(
+    metric   = factor(metric, levels = factor_levels$metric),
+    shape    = factor(shape,  levels = factor_levels$shape, labels = factor_levels$slabel),
+    location = factor(location, levels = locations_ro)
+  ) |>
+  dplyr::filter(!is.na(logN))
+
+loc_palette_ro_used <- loc_palette_ro[names(loc_palette_ro) %in% as.character(unique(cpsd_loc_lines_ro$location))]
+
+# Fixed y-range (shared across all facets); x stays free per facet_grid below.
+y_range_ro <- range(c(cpsd_loc_lines_ro$logN_fit, cpsd_loc_points_ro$logN), na.rm = TRUE)
+
+int_breaks <- function(x) unique(round(scales::breaks_pretty()(x)))
+
+cpsd_river_ocean_facet_plot <- ggplot2::ggplot() +
+  ggplot2::geom_point(
+    data = dplyr::filter(cpsd_loc_points_ro, !in_lod),
+    ggplot2::aes(x = log10(L_low), y = logN, color = location),
+    size = 0.7, alpha = 0.05, shape = 16
+  ) +
+  ggplot2::geom_point(
+    data = dplyr::filter(cpsd_loc_points_ro, in_lod),
+    ggplot2::aes(x = log10(L_low), y = logN, color = location),
+    size = 1.3, alpha = 0.75, shape = 16
+  ) +
+  ggplot2::geom_ribbon(
+    data = cpsd_loc_lines_ro,
+    ggplot2::aes(x = log10(L_low), ymin = logN_lo, ymax = logN_hi, fill = location),
+    alpha = 0.12, color = NA
+  ) +
+  ggplot2::geom_line(
+    data = cpsd_loc_lines_ro,
+    ggplot2::aes(x = log10(L_low), y = logN_fit, color = location),
+    linewidth = 0.9, alpha = 0.9
+  ) +
+  ggplot2::facet_grid(
+    shape ~ metric,
+    scales   = "free_x",
+    labeller = ggplot2::label_value
+  ) +
+  ggplot2::coord_cartesian(ylim = y_range_ro) +
+  ggplot2::scale_x_continuous(breaks = int_breaks, labels = function(x) round(x)) +
+  ggplot2::scale_y_continuous(breaks = int_breaks, labels = function(x) round(x)) +
+  ggplot2::scale_color_manual(values = loc_palette_ro_used, name = "River location / matrix") +
+  ggplot2::scale_fill_manual( values = loc_palette_ro_used, name = "River location / matrix") +
+  ggplot2::guides(
+    color = ggplot2::guide_legend(override.aes = list(alpha = 1, size = 3)),
+    fill  = "none"
+  ) +
+  ggplot2::labs(
+    x        = expression(log[10] * "(size)"),
+    y        = expression(log[10] * (N("">=L))),
+    title    = "C-PSD power-law fits: river locations + ocean, by shape and size metric",
+    subtitle = "Solid lines + ribbon = fit ± 95% CI within Segur LOD window. Faded points = outside LOD. Y-axis fixed across panels; x-axis free per metric.",
+    caption  = "Rows: shape. Columns: size metric. River fits per location; ocean fit pooled. Segur (2026) LOD algorithm."
+  ) +
+  ggplot2::theme_minimal(base_size = 18) +
+  ggplot2::theme(
+    legend.position = "bottom",
+    panel.border    = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.4),
+    strip.text      = ggplot2::element_text(face = "bold", size = 10),
+    plot.caption    = ggplot2::element_text(size = 8, color = "gray50", hjust = 0)
+  )
+
+ggsave(cpsd_river_ocean_facet_plot, filename = "figures/cpsd_river_ocean_facet_plot.png",
+       width = 12, height = 8, dpi = 300)
+cpsd_river_ocean_facet_plot
 ```
 
 ## 12.1.1 All-matrix particle-length PSD comparison with MPSizeBase
@@ -4065,15 +4119,15 @@ sed_psd_shift_plot <- ggplot2::ggplot(
   ggplot2::geom_line(linewidth = 0.9) +
   ggplot2::geom_point(size = 3) +
   ggplot2::scale_y_log10() +
+  ggplot2::scale_color_manual(values = ERM_PALETTE, name = "ERM") +
   ggplot2::labs(
     x = "Added slope shift (illustrative progressive in-situ fragmentation)",
     y = "Derived HC5 (particles/kg dw, median)",
-    title = "SPEC 1e-ii: illustrative sediment HC5 response to a finer PSD",
+    title = "illustrative sediment HC5 response to a finer PSD",
     subtitle = paste0(
       "Non-quantitative / illustrative sensitivity -- gated on sediment_concentration_is_quantitative = ",
       sediment_concentration_is_quantitative
-    ),
-    color = "ERM"
+    )
   ) +
   ggplot2::theme_minimal(base_size = 14) +
   ggplot2::theme(plot.subtitle = ggplot2::element_text(color = "gray30", size = 10))
