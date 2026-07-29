@@ -966,6 +966,9 @@ cpsd_slopes_all_metrics_plot
 Following the probabilistic rescaling approach (e.g., Coffin et al. 2022), treat the **differential** PSD slope as uncertain and represent it by a truncated normal distribution. The Segur C-PSD fit estimates *a*~cpsd~ for N(≥L); the Koelmans et al. (2020), Kooi et al. (2021), and Coffin et al. (2022) correction-factor equation integrates dN/dL = k·L^*a*, so the slope passed to `correction_factor()` is *a*~psd~ = *a*~cpsd~ − 1. Hoffman et al. (2026) adds a model-based structural uncertainty concern: transport can produce apparent dual-slope PSDs whose exponents differ by about two, so `slope_structural_sd` = `r slope_structural_sd` is added as an explicit assumption beyond the fit SE.
 
 ```{r alpha-distribution}
+# Local seed (guardrail: order-independent of any later relocation/reordering of
+# other sections relative to this one -- see docs/CHANGELOG_hoffman_revisions.md).
+set.seed(8001)
 alpha_fit_only <- alpha_dist(mu = cpsd_fit_all$a_psd, sd = cpsd_fit_all$se_a_psd, n = n_mc, structural_sd = 0)
 alpha    <- alpha_dist(mu = cpsd_fit_all$a_psd, sd = cpsd_fit_all$se_a_psd, n = n_mc, structural_sd = slope_structural_sd)
 alpha_mu <- mean(alpha)
@@ -982,6 +985,7 @@ uncertainty into the PSSDplusplus particle alignment model.
 `bootstrap_aspect_ratio()` is sourced from `R/mp_risk_utils.R`.
 
 ```{r aspect-ratio-distribution}
+set.seed(9001)
 aspect_ratio_hist_plot <- raw_particles_river |>
   ggplot2::ggplot(ggplot2::aes(x = 1 / aspect_ratio, fill = shape)) +
   ggplot2::geom_histogram(bins = 40) +
@@ -1039,6 +1043,7 @@ The equivalent check is also encoded as an automated `testthat` guard in `tests/
 # correction, the power-law correction_factor() rescale, the Monte Carlo corrected-
 # concentration draws, and the EED bootstrap into one shared step used identically
 # across river/sediment/ocean.
+set.seed(9101)
 river_corr <- correct_and_bootstrap_eed(
   monitoring  = monitoring,
   conc_col    = "C_measured_pL",
@@ -1061,6 +1066,7 @@ eed_boot           <- river_corr$eed_boot
 
 quantile(combined_cf, c(0.05, 0.5, 0.95))
 
+set.seed(9201)
 legacy_cf_river <- correction_factor(
   a = alpha_dist(mu = cpsd_fit_all$a_cpsd, sd = cpsd_fit_all$se_a_cpsd, n = n_mc, structural_sd = 0),
   L_meas_min = L_meas_min_use,
@@ -1227,6 +1233,7 @@ param_values <- PSSDplusplus::param_default_values |>
 stopifnot(abs(param_values$a.v.freshwater - param_values$a.m.freshwater) < 0.3)
 
 # generate parameter matrix using bespoke environmental parameter values
+set.seed(7001)
 param_matrix <- matrix_function(
   n = n_boot, #size of matrix (10,000 is recommended)
   params = param_values, #parameter distribution values 
@@ -1354,6 +1361,7 @@ Below we compute four RQ distributions: [Food dilution, Tissue translocation] x 
 ```{r risk-quotient-1d}
 # draw_rq_mc1d() and summarize_rq() are sourced from R/mp_risk_utils.R.
 n_risk     <- 1000
+set.seed(9301)
 risk_draws <- draw_rq_mc1d(haz, eed_boot$q50, n_risk = n_risk)
 risk_summary <- summarize_rq(risk_draws)
 risk_summary
@@ -2094,6 +2102,7 @@ cpsd_fit_sed_frag  <- cpsd_fits_sed_length$fragment
 cpsd_fit_sed_fiber <- cpsd_fits_sed_length$fiber
 cpsd_fit_sed_all   <- cpsd_fits_sed_length$all
 
+set.seed(8002)
 alpha_sed <- alpha_dist(
   mu = cpsd_fit_sed_all$a_psd,
   sd = cpsd_fit_sed_all$se_a_psd,
@@ -2283,6 +2292,7 @@ monitoring_sed <- readRDS("data_input/Part_dets_summ.rds") |>
     Lmax_measured_um = 500
   )
 
+set.seed(9102)
 sed_corr <- correct_and_bootstrap_eed(
   monitoring  = monitoring_sed,
   conc_col    = "C_measured_pkg",
@@ -2335,6 +2345,7 @@ tox_data_sed <- tomex2 |>
 #### Parameter distributions
 
 ```{r sed-aspect-ratio}
+set.seed(9002)
 R.ave_sed_result <- bootstrap_aspect_ratio(raw_particles_sed$aspect_ratio, n_boot = n_boot)
 R.ave_sed_vals   <- R.ave_sed_result$vals
 R.ave_sed_mean   <- R.ave_sed_result$boot_mean
@@ -2389,6 +2400,7 @@ cat(sprintf(
 
 #### Build and Visualize Parameter distributions
 ```{r}
+set.seed(7002)
 param_matrix_sed <- matrix_function(
   n = n_boot,
   params = param_values_sed,
@@ -2491,6 +2503,7 @@ for (col in sed_dose_cols) {
 haz_sed <- build_haz_df(pSSDs_sed, "Freshwater Sediment")
 
 n_risk_sed <- 1000
+set.seed(9302)
 risk_draws_sed <- draw_rq_mc1d(haz_sed, eed_boot_sed$q50, n_risk = n_risk_sed)
 risk_summary_sed <- summarize_rq(risk_draws_sed)
 risk_summary_sed
@@ -2736,6 +2749,7 @@ cpsd_fit_ocean_frag  <- cpsd_fits_ocean_length$fragment
 cpsd_fit_ocean_fiber <- cpsd_fits_ocean_length$fiber
 cpsd_fit_ocean_all   <- cpsd_fits_ocean_length$all
 
+set.seed(8003)
 alpha_ocean    <- alpha_dist(mu = cpsd_fit_ocean_all$a_psd, sd = cpsd_fit_ocean_all$se_a_psd, n = n_mc, structural_sd = slope_structural_sd)
 alpha_ocean_mu <- mean(alpha_ocean)
 alpha_ocean_se <- sd(alpha_ocean)
@@ -3431,6 +3445,7 @@ monitoring_ocean <- readRDS("data_input/Part_dets_summ.rds") |>
 
 cat("Ocean monitoring samples:", nrow(monitoring_ocean), "\n")
 
+set.seed(9103)
 ocean_corr <- correct_and_bootstrap_eed(
   monitoring  = monitoring_ocean,
   conc_col    = "C_measured_pL",
@@ -3488,6 +3503,7 @@ cat("Marine tox endpoints:", nrow(tox_data_ocean), "records,",
 ### Parameter distributions
 
 ```{r ocean-aspect-ratio}
+set.seed(9003)
 R.ave_ocean_result <- bootstrap_aspect_ratio(raw_particles_ocean$aspect_ratio, n_boot = n_boot)
 R.ave_ocean_vals   <- R.ave_ocean_result$vals
 R.ave_ocean_mean   <- R.ave_ocean_result$boot_mean
@@ -3519,6 +3535,7 @@ stopifnot(abs(param_values_ocean$a.v.marine - param_values_ocean$a.m.marine) < 0
 ### Build and visualize parameter distributions
 
 ```{r ocean-param-matrix}
+set.seed(7003)
 param_matrix_ocean <- matrix_function(
   n    = n_boot,
   params = param_values_ocean,
@@ -3608,6 +3625,7 @@ ocean_hazard_threshold_plot
 # 1D Monte Carlo risk quotient — added for parity with river/sediment (both already have
 # this step); ocean previously had only the 2D MC2D characterization below.
 n_risk_ocean      <- 1000
+set.seed(9303)
 risk_draws_ocean  <- draw_rq_mc1d(haz_ocean, eed_boot_ocean$q50, n_risk = n_risk_ocean)
 risk_summary_ocean <- summarize_rq(risk_draws_ocean)
 risk_summary_ocean
@@ -3744,6 +3762,7 @@ param_values_legacy_ocean  <- legacy_cumulative_av_params(param_values_ocean,"ma
 ```
 
 ```{r spec1b-legacy-river-pipeline}
+set.seed(7004)
 param_matrix_legacy_river <- matrix_function(
   n = n_boot,
   params = param_values_legacy_river,
@@ -3768,11 +3787,13 @@ river_pssd_legacy <- run_pssd_pipeline(
   seed         = 5004
 )
 haz_legacy_river         <- build_haz_df(river_pssd_legacy$pSSDs, "Freshwater")
+set.seed(9304)
 risk_draws_legacy_river  <- draw_rq_mc1d(haz_legacy_river, eed_boot$q50, n_risk = n_risk)
 risk_summary_legacy_river <- summarize_rq(risk_draws_legacy_river)
 ```
 
 ```{r spec1b-legacy-sed-pipeline}
+set.seed(7005)
 param_matrix_legacy_sed <- matrix_function(
   n = n_boot,
   params = param_values_legacy_sed,
@@ -3801,11 +3822,13 @@ sed_pssd_legacy <- run_pssd_pipeline(
   seed         = 5005
 )
 haz_legacy_sed         <- build_haz_df(sed_pssd_legacy$pSSDs, "Freshwater Sediment")
+set.seed(9305)
 risk_draws_legacy_sed  <- draw_rq_mc1d(haz_legacy_sed, eed_boot_sed$q50, n_risk = n_risk_sed)
 risk_summary_legacy_sed <- summarize_rq(risk_draws_legacy_sed)
 ```
 
 ```{r spec1b-legacy-ocean-pipeline}
+set.seed(7006)
 param_matrix_legacy_ocean <- matrix_function(
   n = n_boot,
   params = param_values_legacy_ocean,
@@ -3834,6 +3857,7 @@ ocean_pssd_legacy <- run_pssd_pipeline(
   seed         = 5006
 )
 haz_legacy_ocean         <- build_haz_df(ocean_pssd_legacy$pSSDs, "Marine")
+set.seed(9306)
 risk_draws_legacy_ocean  <- draw_rq_mc1d(haz_legacy_ocean, eed_boot_ocean$q50, n_risk = n_risk_ocean)
 risk_summary_legacy_ocean <- summarize_rq(risk_draws_legacy_ocean)
 ```
@@ -3948,22 +3972,28 @@ pw_ocean <- piecewise_cf_row("Ocean water", dplyr::filter(critical_piecewise_tbl
 # piecewise CF point estimate to the raw per-sample measured concentrations,
 # then bootstrap the EED exactly as for the single-slope case. Hazard (haz*)
 # is unchanged, so any RQ shift below is attributable to the piecewise CF alone.
+set.seed(9401)
 eed_boot_piecewise_river <- if (is.finite(pw_river$cf_piecewise)) {
   bootstrap_eed(monitoring$C_measured_pL * pw_river$cf_piecewise, n_boot = n_boot, probs = c(0.5, 0.95))
 } else NULL
+set.seed(9402)
 eed_boot_piecewise_sed <- if (is.finite(pw_sed$cf_piecewise)) {
   bootstrap_eed(monitoring_sed$C_measured_pkg * pw_sed$cf_piecewise, n_boot = n_boot, probs = c(0.5, 0.95))
 } else NULL
+set.seed(9403)
 eed_boot_piecewise_ocean <- if (is.finite(pw_ocean$cf_piecewise)) {
   bootstrap_eed(monitoring_ocean$C_measured_pL * pw_ocean$cf_piecewise, n_boot = n_boot, probs = c(0.5, 0.95))
 } else NULL
 
+set.seed(9411)
 risk_summary_piecewise_river <- if (!is.null(eed_boot_piecewise_river)) {
   summarize_rq(draw_rq_mc1d(haz, eed_boot_piecewise_river$q50, n_risk = n_risk))
 } else NULL
+set.seed(9412)
 risk_summary_piecewise_sed <- if (!is.null(eed_boot_piecewise_sed)) {
   summarize_rq(draw_rq_mc1d(haz_sed, eed_boot_piecewise_sed$q50, n_risk = n_risk_sed))
 } else NULL
+set.seed(9413)
 risk_summary_piecewise_ocean <- if (!is.null(eed_boot_piecewise_ocean)) {
   summarize_rq(draw_rq_mc1d(haz_ocean, eed_boot_piecewise_ocean$q50, n_risk = n_risk_ocean))
 } else NULL
@@ -4088,6 +4118,7 @@ Two convention fixes, made at different times, both change the Food Dilution ris
 # hazard (haz) held at the fully corrected values. No pSSD rerun needed: this
 # only recomputes the corrected-concentration draws with the legacy CF vector
 # already computed in Section 5.1 (legacy_cf_river).
+set.seed(9202)
 C_legacycf_draws <- monitoring |>
   dplyr::mutate(idx = dplyr::row_number()) |>
   tidyr::crossing(draw = seq_len(3000)) |>
@@ -4099,6 +4130,7 @@ C_sample_median_legacycf <- C_legacycf_draws |>
   dplyr::group_by(sample_id) |>
   dplyr::summarise(C_corr_med = stats::median(C_corrected), .groups = "drop")
 eed_boot_legacycf_river <- bootstrap_eed(C_sample_median_legacycf$C_corr_med, n_boot = n_boot, probs = c(0.5, 0.95))
+set.seed(9307)
 risk_summary_legacycf_river <- summarize_rq(draw_rq_mc1d(haz, eed_boot_legacycf_river$q50, n_risk = n_risk))
 ```
 
@@ -4106,6 +4138,7 @@ risk_summary_legacycf_river <- summarize_rq(draw_rq_mc1d(haz, eed_boot_legacycf_
 # (ii) Hazard-side length-slope alignment reverted to legacy (cumulative-as-
 # differential); a.v/a.sa/a.m and exposure stay at their corrected values.
 # Requires one additional pSSD rerun (river only, for compute budget).
+set.seed(8004)
 alpha_legacy_draws  <- alpha_dist(mu = cpsd_fit_all$a_cpsd, sd = cpsd_fit_all$se_a_cpsd, n = n_mc, structural_sd = 0)
 alpha_legacy_mu     <- mean(alpha_legacy_draws)
 alpha_legacy_se     <- sd(alpha_legacy_draws)
@@ -4113,6 +4146,7 @@ alpha_legacy_se     <- sd(alpha_legacy_draws)
 param_values_legacy_alpha_river <- param_values |>
   dplyr::mutate(alpha.freshwater = -alpha_legacy_mu, alpha.freshwater.sd = alpha_legacy_se)
 
+set.seed(7007)
 param_matrix_legacy_alpha_river <- matrix_function(
   n = n_boot,
   params = param_values_legacy_alpha_river,
@@ -4137,6 +4171,7 @@ river_pssd_legacy_alpha <- run_pssd_pipeline(
   seed         = 5007
 )
 haz_legacy_alpha_river        <- build_haz_df(river_pssd_legacy_alpha$pSSDs, "Freshwater")
+set.seed(9308)
 risk_draws_legacy_alpha_river <- draw_rq_mc1d(haz_legacy_alpha_river, eed_boot$q50, n_risk = n_risk)
 risk_summary_legacy_alpha_river <- summarize_rq(risk_draws_legacy_alpha_river)
 ```
@@ -4152,6 +4187,7 @@ risk_summary_legacy_alpha_river <- summarize_rq(risk_draws_legacy_alpha_river)
 param_values_legacy_asa_river <- param_values |>
   dplyr::mutate(a.sa.freshwater = -cpsd_fit_area$a_cpsd, a.sa.freshwater.sd = cpsd_fit_area$se_a_cpsd)
 
+set.seed(7008)
 param_matrix_legacy_asa_river <- matrix_function(
   n = n_boot,
   params = param_values_legacy_asa_river,
@@ -4176,6 +4212,7 @@ river_pssd_legacy_asa <- run_pssd_pipeline(
   seed         = 5008
 )
 haz_legacy_asa_river        <- build_haz_df(river_pssd_legacy_asa$pSSDs, "Freshwater")
+set.seed(9309)
 risk_draws_legacy_asa_river <- draw_rq_mc1d(haz_legacy_asa_river, eed_boot$q50, n_risk = n_risk)
 risk_summary_legacy_asa_river <- summarize_rq(risk_draws_legacy_asa_river)
 ```
@@ -4415,6 +4452,101 @@ knitr::kable(
 ```
 
 Per Thuy-Dung et al. (2026), an individual-species RCR>1 can precede a derivable community-HC5 RQ signal by roughly a decade — the table above is therefore read as an early-warning companion, not a substitute for the community-HC5 RQ already reported in Sections 7 and 12. **This companion screen does not change any headline conclusion**: it reuses the same production `haz`/`eed_boot` objects without modification, and is additive/diagnostic only.
+
+# 15.5 C1 number-snapshot guardrail
+
+The C1 consolidation pass (structure/presentation only; see `docs/CHANGELOG_hoffman_revisions.md`) must not change any live number. This chunk captures every headline value the C1 spec designates as protected -- river/sediment/ocean CF medians + 90% CIs, river/ocean EED q50/q95, the canonical 9-row C-PSD slope table, the SPEC Q1 max|delta a_cpsd|, the slope-structural-SD sensitivity grid, and river/ocean 1D + MC2D risk summaries -- into `data_output/c1_number_snapshot.json` the first time it renders (file does not yet exist), and on every subsequent render re-derives the same values and asserts they still match that baseline within 1e-8 (exact equality for integers/n_bins). A failure here means a structural edit silently moved a number and must be treated as a stop-and-fix, not a value to update casually -- see `docs/CHANGELOG_hoffman_revisions.md` before touching the baseline file itself.
+
+```{r c1-number-snapshot}
+c1_snapshot_path <- file.path(proj_root, "data_output", "c1_number_snapshot.json")
+
+build_c1_snapshot <- function() {
+  slope_tbl <- this_study_length_alpha |>
+    dplyr::filter(Source == "This study matrix/shape") |>
+    dplyr::arrange(PSD_ID) |>
+    dplyr::transmute(
+      PSD_ID, Matrix, Shape,
+      a_cpsd = round(a_cpsd, 10), a_psd = round(a_psd, 10),
+      lod_low_um = round(lod_low_um, 6), lod_high_um = round(lod_high_um, 6),
+      n_bins = as.integer(n_bins)
+    )
+
+  rq_tbl <- function(x) x |> dplyr::arrange(ERM, HCx) |>
+    dplyr::transmute(ERM, HCx, P_exceed = round(P_exceed, 10),
+                      RQ_p50 = round(RQ_p50, 10), RQ_p95 = round(RQ_p95, 10))
+
+  mc2d_tbl <- function(x) x |> dplyr::arrange(ERM, HCx) |>
+    dplyr::transmute(ERM, HCx, P_exceed_med = round(P_exceed_med, 10),
+                      RQ_p50_med = round(RQ_p50_med, 10), RQ_p95_med = round(RQ_p95_med, 10))
+
+  list(
+    cf_river  = list(p50 = unname(round(median(combined_cf), 10)),
+                      p05 = unname(round(quantile(combined_cf, 0.05), 10)),
+                      p95 = unname(round(quantile(combined_cf, 0.95), 10))),
+    cf_sed    = list(p50 = unname(round(median(combined_cf_sed), 10)),
+                      p05 = unname(round(quantile(combined_cf_sed, 0.05), 10)),
+                      p95 = unname(round(quantile(combined_cf_sed, 0.95), 10))),
+    cf_ocean  = list(p50 = unname(round(median(combined_cf_ocean), 10)),
+                      p05 = unname(round(quantile(combined_cf_ocean, 0.05), 10)),
+                      p95 = unname(round(quantile(combined_cf_ocean, 0.95), 10))),
+    eed_river = list(q50 = unname(round(median(eed_boot$q50), 10)),
+                      q95 = unname(round(median(eed_boot$q95), 10))),
+    eed_ocean = list(q50 = unname(round(median(eed_boot_ocean$q50), 10)),
+                      q95 = unname(round(median(eed_boot_ocean$q95), 10))),
+    slope_table         = slope_tbl,
+    spec_q1_max_delta    = unname(round(q1_max_abs_delta_a_cpsd, 10)),
+    hoffman_sensitivity = hoffman_slope_sensitivity |>
+      dplyr::arrange(structural_sd, ERM) |>
+      dplyr::transmute(ERM, structural_sd, P_exceed_med = round(P_exceed_med, 10),
+                        RQ_p50_med = round(RQ_p50_med, 10), RQ_p95_med = round(RQ_p95_med, 10)),
+    rq_1d_river  = rq_tbl(risk_summary),
+    rq_1d_sed    = rq_tbl(risk_summary_sed),
+    rq_1d_ocean  = rq_tbl(risk_summary_ocean),
+    mc2d_river   = mc2d_tbl(mc2d_summary),
+    mc2d_ocean   = mc2d_tbl(mc2d_ocean_summary)
+  )
+}
+
+snap_current <- build_c1_snapshot()
+
+if (!file.exists(c1_snapshot_path)) {
+  jsonlite::write_json(snap_current, c1_snapshot_path, auto_unbox = TRUE, digits = 15, pretty = TRUE)
+  message("C1 guardrail: baseline snapshot written to ", c1_snapshot_path,
+          " (this is the pre-C1 baseline -- do not regenerate once C1 edits begin).")
+} else {
+  snap_baseline <- jsonlite::read_json(c1_snapshot_path, simplifyVector = TRUE)
+
+  compare_numeric <- function(cur, base, path = "") {
+    if (is.list(cur) && !is.data.frame(cur)) {
+      nm <- names(cur)
+      unlist(lapply(nm, function(n) compare_numeric(cur[[n]], base[[n]], paste0(path, "$", n))))
+    } else if (is.data.frame(cur)) {
+      base_df <- as.data.frame(base)
+      stopifnot2 <- vapply(setdiff(names(cur), c("PSD_ID","Matrix","Shape","ERM","HCx")), function(col) {
+        max(abs(cur[[col]] - base_df[[col]]), na.rm = TRUE)
+      }, numeric(1))
+      setNames(stopifnot2, paste0(path, "$", names(stopifnot2)))
+    } else {
+      setNames(abs(as.numeric(cur) - as.numeric(base)), path)
+    }
+  }
+
+  diffs <- unlist(compare_numeric(snap_current, snap_baseline))
+  tol <- 1e-8
+  bad <- diffs[!is.na(diffs) & diffs >= tol]
+
+  if (length(bad) > 0) {
+    print(sort(bad, decreasing = TRUE))
+  }
+  message("C1 guardrail: max|delta| across ", length(diffs), " tracked values = ",
+          format(max(diffs, na.rm = TRUE), scientific = TRUE))
+  stopifnot(
+    "C1 guardrail FAILED: a structural edit changed a protected number -- see printed diagnostic above" =
+      length(bad) == 0
+  )
+  message("C1 guardrail: all tracked values match the pre-C1 baseline within ", tol, ".")
+}
+```
 
 # 16. Session Information
 
