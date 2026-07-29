@@ -396,19 +396,19 @@ correction_factor <- function(a, L_meas_min, L_meas_max, L_tar_min, L_tar_max,
 polymer_density_lookup <- function() {
   tibble::tribble(
     ~pattern, ~polymer_group, ~density_g_cm3, ~source_note,
-    "poly\\(ethylene\\)|polyethylene", "polyethylene", 0.94, "TODO(cite): polymer density handbook/default table",
-    "poly\\(propylene\\)|polypropylene", "polypropylene", 0.90, "TODO(cite): polymer density handbook/default table",
-    "polystyrene|styrene", "styrenic polymers", 1.05, "TODO(cite): polymer density handbook/default table",
-    "poly\\(tetrafluoroethylene\\)|ptfe", "PTFE", 2.20, "TODO(cite): polymer density handbook/default table",
-    "poly\\(esters|terephthalate|polyester", "polyester/PET", 1.38, "TODO(cite): polymer density handbook/default table",
-    "polycarbonates", "polycarbonate", 1.20, "TODO(cite): polymer density handbook/default table",
-    "polyurethanes", "polyurethane", 1.20, "TODO(cite): polymer density handbook/default table",
-    "polyamides|poly\\(acrylamide", "polyamide/acrylamide", 1.14, "TODO(cite): polymer density handbook/default table",
-    "polyacryl|polymethacryl", "acrylic polymers", 1.18, "TODO(cite): polymer density handbook/default table",
-    "polyvinylalcohol|polyvinyl", "vinyl polymers", 1.25, "TODO(cite): polymer density handbook/default table",
-    "polyhaloolefins|vinylhalides", "halogenated vinyl polymers", 1.35, "TODO(cite): polymer density handbook/default table",
-    "polysiloxanes", "silicone polymers", 1.05, "TODO(cite): polymer density handbook/default table",
-    "cellulose", "cellulose derivatives", 1.50, "TODO(cite): polymer density handbook/default table"
+    "poly\\(ethylene\\)|polyethylene", "polyethylene", 0.94, "Hidalgo-Ruz et al. (2012) Table 2, doi:10.1021/es2031505",
+    "poly\\(propylene\\)|polypropylene", "polypropylene", 0.90, "Hidalgo-Ruz et al. (2012) Table 2, doi:10.1021/es2031505",
+    "polystyrene|styrene", "styrenic polymers", 1.05, "Hidalgo-Ruz et al. (2012) Table 2, doi:10.1021/es2031505",
+    "poly\\(tetrafluoroethylene\\)|ptfe", "PTFE", 2.20, "Hidalgo-Ruz et al. (2012) Table 2, doi:10.1021/es2031505",
+    "poly\\(esters|terephthalate|polyester", "polyester/PET", 1.38, "Hidalgo-Ruz et al. (2012) Table 2, doi:10.1021/es2031505",
+    "polycarbonates", "polycarbonate", 1.20, "Hidalgo-Ruz et al. (2012) Table 2, doi:10.1021/es2031505",
+    "polyurethanes", "polyurethane", 1.20, "Hidalgo-Ruz et al. (2012) Table 2, doi:10.1021/es2031505",
+    "polyamides|poly\\(acrylamide", "polyamide/acrylamide", 1.14, "Hidalgo-Ruz et al. (2012) Table 2, doi:10.1021/es2031505",
+    "polyacryl|polymethacryl", "acrylic polymers", 1.18, "Hidalgo-Ruz et al. (2012) Table 2, doi:10.1021/es2031505",
+    "polyvinylalcohol|polyvinyl", "vinyl polymers", 1.25, "Hidalgo-Ruz et al. (2012) Table 2, doi:10.1021/es2031505",
+    "polyhaloolefins|vinylhalides", "halogenated vinyl polymers", 1.35, "Hidalgo-Ruz et al. (2012) Table 2, doi:10.1021/es2031505",
+    "polysiloxanes", "silicone polymers", 1.05, "Hidalgo-Ruz et al. (2012) Table 2, doi:10.1021/es2031505",
+    "cellulose", "cellulose derivatives", 1.50, "Hidalgo-Ruz et al. (2012) Table 2, doi:10.1021/es2031505"
   )
 }
 

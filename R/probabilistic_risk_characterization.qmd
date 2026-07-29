@@ -225,13 +225,13 @@ raw_particles_river |>
   )
 ```
 
-Hoffman et al. (2026) identify 3-D geometry and density as higher-priority uncertainty sources than fine differences among settling-velocity equations. Particle density is therefore resolved by broad FTIR polymer class where possible (measured polymer class; model-based density lookup; TODO(cite) density table), while the legacy fixed 1.1 g/cm^3 case is retained as a sensitivity column. The buoyant/settling flag is an inferred transport category relative to freshwater or seawater density and is used only in the diagnostic Hoffman sections below.
+Hoffman et al. (2026) identify 3-D geometry and density as higher-priority uncertainty sources than fine differences among settling-velocity equations. Particle density is therefore resolved by broad FTIR polymer class where possible (measured polymer class; density lookup from [Hidalgo-Ruz et al. 2012](https://doi.org/10.1021/es2031505), Table 2), while the legacy fixed 1.1 g/cm^3 case is retained as a sensitivity column. The buoyant/settling flag is an inferred transport category relative to freshwater or seawater density and is used only in the diagnostic Sensitivity section below.
 
 ```{r polymer-density-table}
 knitr::kable(
   polymer_density_tbl |>
     dplyr::select(polymer_group, density_g_cm3, source_note),
-  caption = "Polymer density lookup used for Hoffman et al. (2026) transport diagnostics. Source details are placeholders until a canonical density table is selected."
+  caption = "Polymer density lookup (Hidalgo-Ruz et al. 2012, Table 2) used for the Hoffman et al. (2026) transport diagnostics."
 )
 
 raw_particles_river |>
