@@ -2727,6 +2727,22 @@ source_levels_bottom_to_top <- c(
   "This study — River (freshwater)"
 )
 
+# Y-axis labels (post coord_flip): "Study - Location" only -- Matrix is
+# already encoded by point/box color, so it's dropped from the parenthetical
+# here; N is appended where one representative sample size applies to the
+# whole row (rows with multiple different per-point N's, e.g. "This study",
+# are left without one and rely on the per-point metadata table below instead).
+source_labels_clean <- c(
+  "Zhao et al. 2026 — global surface water (mixed F+M, unclassified)" = "Zhao et al. 2026 - Global surface water (N=45 studies)",
+  "Kooi et al. 2021 — marine default"                                 = "Kooi et al. 2021 - Marine default",
+  "Segur et al. 2026 — ocean reference (marine, C-PSD)"               = "Segur et al. 2026 - Ocean reference",
+  "Literature ocean (MPSizeBase compilation, marine)"                 = paste0("Literature ocean (MPSizeBase) (N=", nrow(literature_ocean_only), ")"),
+  "This study — Ocean (marine)"                                       = "This study - Ocean",
+  "Kooi et al. 2021 — freshwater default"                             = "Kooi et al. 2021 - Freshwater default",
+  "Wang et al. 2026 — Rhine/Meuse rivers (freshwater, µFTIR)"         = "Wang et al. 2026 - Rhine/Meuse rivers (N=6 samples)",
+  "This study — River (freshwater)"                                   = "This study - River"
+)
+
 alpha_forest_df <- dplyr::bind_rows(
   this_study_river_shape, this_study_river_sites, this_study_ocean_shape,
   wang_df, segur_ocean_ref_df, kooi_df, literature_ocean_df, zhao_df
@@ -2775,16 +2791,18 @@ alpha_comparison_plot <- ggplot2::ggplot(
     size = 3.2, alpha = 0.95
   ) +
   ggrepel::geom_text_repel(
-    data = alpha_forest_df |> dplyr::filter(is_this_study, !is.na(point_label)),
+    data = alpha_forest_df |> dplyr::filter(!is.na(point_label)),
     ggplot2::aes(label = point_label),
-    size = 3.0, max.overlaps = Inf, show.legend = FALSE
+    size = 3.0, max.overlaps = Inf, show.legend = FALSE,
+    box.padding = 0.4, point.padding = 0.2, force = 2, force_pull = 0.5,
+    min.segment.length = 0, segment.size = 0.3, segment.alpha = 0.5, seed = 1
   ) +
   ggplot2::scale_color_manual(values = matrix_pal_forest, drop = FALSE, name = "Matrix") +
   ggplot2::scale_fill_manual(values = matrix_pal_forest, drop = FALSE, guide = "none") +
   ggplot2::scale_shape_manual(values = shape_pal_forest, name = "Shape", drop = FALSE) +
   ggplot2::scale_x_continuous(
     breaks = seq_along(source_levels_bottom_to_top),
-    labels = stringr::str_wrap(source_levels_bottom_to_top, width = 40),
+    labels = stringr::str_wrap(unname(source_labels_clean[source_levels_bottom_to_top]), width = 40),
     expand = ggplot2::expansion(add = 0.6)
   ) +
   ggplot2::coord_flip() +
@@ -3513,6 +3531,25 @@ fd_now       <- dplyr::filter(risk_summary, ERM == "Food Dilution", HCx == 5)
 fd_legacy_av <- dplyr::filter(risk_summary_legacy_river, ERM == "Food Dilution", HCx == 5)
 ```
 
+
+## River + ocean exposure/hazard ECDF comparison
+
+`ecdf_overlap_plot` (river) and `ocean_ecdf_overlap_plot` (ocean) were built independently above (Sections 8.1, 12.4); arranged side by side here with a shared legend for direct visual comparison of exposure/hazard overlap between the two quantitative matrices.
+
+```{r river-ocean-ecdf-combined, fig.width=16, fig.height=7}
+river_ocean_ecdf_combined <- ggpubr::ggarrange(
+  ecdf_overlap_plot + ggplot2::labs(subtitle = "River water"),
+  ocean_ecdf_overlap_plot + ggplot2::labs(subtitle = "Ocean water"),
+  ncol = 2, common.legend = TRUE, legend = "bottom"
+)
+river_ocean_ecdf_combined <- ggpubr::annotate_figure(
+  river_ocean_ecdf_combined,
+  top = ggpubr::text_grob("Exposure/hazard ECDF overlap: river vs. ocean water", face = "bold", size = 16)
+)
+
+ggsave(river_ocean_ecdf_combined, filename = "figures/river_ocean_ecdf_combined.png", width = 16, height = 7, dpi = 300)
+river_ocean_ecdf_combined
+```
 
 # 15. Key Findings Summary
 
