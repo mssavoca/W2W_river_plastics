@@ -39,7 +39,7 @@ knitr::opts_knit$set(root.dir = proj_root)
 getwd()
 
 # ── Global Monte Carlo settings (change here to scale up/down) ──
-n_boot <- 10   # bootstrap replicates (increase to ≥ 1000 for publication)
+n_boot <- 1000   # bootstrap replicates (increase to ≥ 1000 for publication)
 n_mc   <- 20000 # alpha Monte Carlo draws
 
 # C1.10: whether this render is at the production Monte Carlo budget (>= 1000
