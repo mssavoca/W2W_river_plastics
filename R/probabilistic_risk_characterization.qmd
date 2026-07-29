@@ -1082,13 +1082,9 @@ Coffin et al. (2022) describe two additional multiplicative correction terms tha
 The fiber slope ($a_\text{psd}$ = `r round(cpsd_fit_fiber$a_cpsd - 1, 2)`) is shallower than the fragment slope (`r round(cpsd_fit_frag$a_cpsd - 1, 2)`), which may reflect residual under-retention of the finest fibers through nominal 50 µm filter pores, but this cannot be corrected without fiber-specific filter efficiency data. See Section 4.2.1.2 for the literature comparison.
 
 ```{r combined-cf}
-# Optional multiplicative factors — not applied for this µFTIR membrane-filter dataset.
-# Retain code for reference and potential future use with mesh-sampled datasets.
-fiber_cf   <- rlnorm(n_mc, meanlog = log(2.0), sdlog = 0.5)    # illustrative; not applied
-plastic_pf <- pmin(rbeta(n_mc, shape1 = 20, shape2 = 3), 1.0)  # illustrative; not applied
-
 # combined_cf was already computed above (Section 5.1, via correct_and_bootstrap_eed());
-# fiber_cf and plastic_pf are not multiplied in — see rationale above.
+# the optional fiber/plastic-proportion factors described above are not multiplied in
+# (neither is applicable to this µFTIR membrane-filter dataset -- see rationale above).
 quantile(combined_cf, c(0.05, 0.5, 0.95))
 ```
 
@@ -4248,6 +4244,20 @@ if (!file.exists(c1_snapshot_path)) {
 
   if (length(bad) > 0) {
     print(sort(bad, decreasing = TRUE))
+    # Diagnostic print() output can be lost if the render halts before the
+    # chunk's buffer flushes; also write it to a plain file so a failure is
+    # debuggable from the last render alone.
+    writeLines(
+      c(paste0("C1 guardrail FAILURE -- ", length(bad), " value(s) exceeded tol = ", tol),
+        capture.output(print(sort(bad, decreasing = TRUE))),
+        "",
+        "-- current --",
+        capture.output(str(snap_current, max.level = 2)),
+        "",
+        "-- baseline --",
+        capture.output(str(snap_baseline, max.level = 2))),
+      file.path(proj_root, "data_output", "c1_guardrail_failure_diagnostic.txt")
+    )
   }
   message("C1 guardrail: max|delta| across ", length(diffs), " tracked values = ",
           format(max(diffs, na.rm = TRUE), scientific = TRUE))
