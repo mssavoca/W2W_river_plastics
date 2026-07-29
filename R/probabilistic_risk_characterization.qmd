@@ -3393,7 +3393,29 @@ knitr::kable(
   cf_bounding_tbl, digits = 3,
   caption = "SPEC 2b: single-slope (production) vs. piecewise (bounding sensitivity) correction factor and EED, by matrix"
 )
+```
 
+```{r spec2b-cf-bounding-plot, fig.width=9, fig.height=5}
+cf_bounding_plot <- cf_bounding_tbl |>
+  dplyr::select(Matrix, `Single-slope (production)` = CF_single_slope_p50, `Piecewise (bounding)` = CF_piecewise) |>
+  tidyr::pivot_longer(-Matrix, names_to = "Case", values_to = "CF") |>
+  ggplot2::ggplot(ggplot2::aes(x = Matrix, y = CF, color = Case, group = Case)) +
+  ggplot2::geom_point(size = 3.5, position = ggplot2::position_dodge(width = 0.3)) +
+  ggplot2::geom_line(ggplot2::aes(group = Matrix), color = "gray70", linewidth = 0.6) +
+  ggplot2::scale_y_log10(labels = scales::label_number()) +
+  ggplot2::scale_color_manual(values = c("Single-slope (production)" = "#009E73", "Piecewise (bounding)" = "#D55E00"), name = NULL) +
+  ggplot2::labs(
+    x = NULL, y = "Correction factor (median) [log10 scale]",
+    title = "Single-slope (production) vs. piecewise (bounding) correction factor, by matrix"
+  ) +
+  ggplot2::theme_minimal(base_size = 15) +
+  ggplot2::theme(legend.position = "bottom", panel.border = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.4))
+
+ggsave(cf_bounding_plot, filename = "figures/cf_bounding_plot.png", width = 9, height = 5, dpi = 300)
+cf_bounding_plot
+```
+
+```{r spec2b-rq-bounding-table}
 rq_bounding_tbl <- dplyr::bind_rows(
   dplyr::mutate(risk_summary,                                     Matrix = "River water", Case = "Single-slope (production)"),
   if (!is.null(risk_summary_piecewise_river)) dplyr::mutate(risk_summary_piecewise_river, Matrix = "River water", Case = "Piecewise (bounding)"),
@@ -3410,6 +3432,26 @@ knitr::kable(
   rq_bounding_tbl, digits = 3,
   caption = "SPEC 2b: Food Dilution / Tissue Translocation HC5 RQ bounding range, single-slope (production) vs. piecewise (bounding sensitivity)"
 )
+```
+
+```{r spec2b-rq-bounding-plot, fig.width=11, fig.height=6}
+rq_bounding_plot <- rq_bounding_tbl |>
+  ggplot2::ggplot(ggplot2::aes(x = Matrix, y = RQ_p50, color = ERM, shape = Case)) +
+  ggplot2::geom_hline(yintercept = 1, linetype = "dashed", color = "gray40") +
+  ggplot2::geom_point(size = 3.5, position = ggplot2::position_dodge(width = 0.5)) +
+  ggplot2::scale_y_log10(labels = scales::label_number()) +
+  ggplot2::scale_color_manual(values = ERM_PALETTE, name = "ERM") +
+  ggplot2::scale_shape_manual(values = c("Single-slope (production)" = 16, "Piecewise (bounding)" = 17), name = NULL) +
+  ggplot2::labs(
+    x = NULL, y = "HC5 median RQ [log10 scale]",
+    title = "Food Dilution / Tissue Translocation HC5 RQ: single-slope vs. piecewise bounding sensitivity",
+    subtitle = "Dashed line = RQ = 1. Sediment is illustrative only (SPEC 1d)."
+  ) +
+  ggplot2::theme_minimal(base_size = 15) +
+  ggplot2::theme(legend.position = "bottom", panel.border = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.4))
+
+ggsave(rq_bounding_plot, filename = "figures/rq_bounding_plot.png", width = 11, height = 6, dpi = 300)
+rq_bounding_plot
 ```
 
 **Bounding range interpretation.** The table above states, per matrix, the single-slope production RQ alongside the piecewise-sensitivity RQ; whichever is larger sets the upper bound of the sensitivity range and whichever is smaller sets the lower bound. Because the fine-size (sub-break) slope from the §13.2 diagnostic is shallower than the coarse-size slope for the matrices where the two-segment model is favored, the piecewise CF is expected to sit *below* the single-slope CF (less extrapolated mass assigned to the unconstrained 1 um-LOD_low zone) — i.e., the piecewise bound is expected to **narrow** the exposure (and therefore RQ) estimate relative to the single-slope production value, not widen it, for this dataset. This is stated as an expectation to be read against the rendered numbers above, not assumed; if a matrix's piecewise CF instead exceeds the single-slope CF, that reversal is itself informative about how sensitive the conclusion is to the extrapolation model and should be flagged rather than averaged away. Regardless of direction, the single-slope CF remains the production default per the guardrails in the corrective-revision spec; the piecewise result is reported here strictly as a labeled sensitivity bound. **Sediment caveat (SPEC 1d):** the Sediment column/row above is illustrative only, for the same reason noted in Section 13.1/11.3.0 — its exposure concentration is not a genuine particles/kg-dry-weight value.
@@ -3924,6 +3966,39 @@ knitr::kable(
   rq_decomp_river, digits = 3,
   caption = "SPEC 3b/3c: River-water Food Dilution and Tissue Translocation HC5 RQ decomposition -- one-at-a-time reversion of each convention fix, relative to the fully corrected baseline (per ERM)"
 )
+```
+
+```{r spec3b-decomposition-plot, fig.width=11, fig.height=6}
+rq_decomp_plot <- rq_decomp_river |>
+  dplyr::mutate(
+    Contribution_reverted = stringr::str_wrap(Contribution_reverted, width = 42),
+    Contribution_reverted = factor(Contribution_reverted, levels = rev(unique(Contribution_reverted)))
+  ) |>
+  ggplot2::ggplot(ggplot2::aes(x = Contribution_reverted, y = RQ_p50, color = ERM)) +
+  ggplot2::geom_hline(yintercept = 1, linetype = "dashed", color = "gray40") +
+  ggplot2::geom_pointrange(
+    ggplot2::aes(ymin = RQ_p50, ymax = RQ_p95),
+    position = ggplot2::position_dodge(width = 0.5), size = 0.6, fatten = 2.5
+  ) +
+  ggplot2::scale_y_log10(labels = scales::label_number()) +
+  ggplot2::scale_color_manual(values = ERM_PALETTE, name = "ERM") +
+  ggplot2::coord_flip() +
+  ggplot2::labs(
+    x = NULL,
+    y = "HC5 median RQ (point), with p95 as the upper whisker [log10 scale]",
+    title = "River-water RQ decomposition: one-at-a-time convention reversion",
+    subtitle = "Dashed line = RQ = 1. Each row reverts exactly one convention fix, holding the others corrected.",
+    caption = "Same data as the table above (rq_decomp_river)."
+  ) +
+  ggplot2::theme_minimal(base_size = 15) +
+  ggplot2::theme(
+    legend.position = "bottom",
+    panel.border    = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.4),
+    plot.caption    = ggplot2::element_text(size = 8, color = "gray50", hjust = 0)
+  )
+
+ggsave(rq_decomp_plot, filename = "figures/rq_decomp_plot.png", width = 11, height = 6, dpi = 300)
+rq_decomp_plot
 ```
 
 Reading the table: the `ratio_vs_corrected` column is how much larger (or smaller) each ERM's HC5 median RQ becomes if *only* that one convention error were reintroduced, relative to that same ERM's own fully-corrected baseline. Because this is a `r n_boot`-replicate development-scale run (production budgets are ≥1000 per the deliverables checklist), the exact ratios should be treated as directionally informative rather than final, and re-checked at full budget before external release.
