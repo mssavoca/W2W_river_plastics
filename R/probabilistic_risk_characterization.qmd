@@ -39,7 +39,7 @@ knitr::opts_knit$set(root.dir = proj_root)
 getwd()
 
 # ── Global Monte Carlo settings (change here to scale up/down) ──
-n_boot <- 1000   # bootstrap replicates (increase to ≥ 1000 for publication)
+n_boot <- 10   # bootstrap replicates (increase to ≥ 1000 for publication)
 n_mc   <- 20000 # alpha Monte Carlo draws
 
 # Uniform C-PSD bin width for volume fits (µm³), applied identically across every
@@ -3727,6 +3727,39 @@ knitr::kable(
 )
 ```
 
+River-only version of the same check (Section 5.1), computed here so `legacy_cf_river` is available for the SPEC 3b decomposition below (A.3):
+
+```{r spec1-river-cf-before-after}
+set.seed(9201)
+legacy_cf_river <- correction_factor(
+  a = alpha_dist(mu = cpsd_fit_all$a_cpsd, sd = cpsd_fit_all$se_a_cpsd, n = n_mc, structural_sd = 0),
+  L_meas_min = L_meas_min_use,
+  L_meas_max = L_meas_max_use,
+  L_tar_min = 1,
+  L_tar_max = 5000,
+  slope_convention = "differential"
+)
+fit_only_cf_river <- correction_factor(
+  a = alpha_fit_only,
+  L_meas_min = L_meas_min_use,
+  L_meas_max = L_meas_max_use,
+  L_tar_min = 1,
+  L_tar_max = 5000,
+  slope_convention = "differential"
+)
+cf_before_after_river <- tibble::tibble(
+  Matrix = "River water",
+  Case = c("Legacy cumulative slope passed as differential", "Corrected differential slope, fit SE only", "Corrected differential slope plus structural SD"),
+  slope_median = c(median(legacy_cf_river * 0 + alpha_dist(mu = cpsd_fit_all$a_cpsd, sd = cpsd_fit_all$se_a_cpsd, n = n_mc, structural_sd = 0)),
+                   median(alpha_fit_only),
+                   median(alpha)),
+  CF_p05 = c(quantile(legacy_cf_river, 0.05), quantile(fit_only_cf_river, 0.05), quantile(combined_cf, 0.05)),
+  CF_p50 = c(median(legacy_cf_river), median(fit_only_cf_river), median(combined_cf)),
+  CF_p95 = c(quantile(legacy_cf_river, 0.95), quantile(fit_only_cf_river, 0.95), quantile(combined_cf, 0.95))
+)
+knitr::kable(cf_before_after_river, digits = 3, caption = "SPEC 1 before/after river correction factor convention check")
+```
+
 ## A.2 SPEC 1b: Food Dilution RQ decomposition (legacy cumulative vs. corrected differential a.v/a.sa)
 
 The Section 13 table above (SPEC 1, from the prior revision) shows that the **length**-slope convention fix changes the exposure correction factor. The volume/area-slope fix in this revision (SPEC 1b) is a separate, **hazard-side-only** effect: it does not touch `correction_factor()` or the EED at all, only the particle-trait alignment used inside pSSD++ (`a.v.*`, `a.sa.*`, `a.m.*`). To make that effect auditable, this section re-runs the pSSD++ hazard alignment and 1D risk characterization for each matrix with a "legacy" parameter set in which **only** `a.v`/`a.sa`/`a.m` are reverted to the pre-fix cumulative-slope values (`legacy_cumulative_av_params()`, `R/mp_risk_utils.R`) — holding the length slope, R.ave, exposure (EED), and everything else fixed — so the entire before/after RQ change in this table is attributable to the volume/area-slope convention alone.
@@ -3773,7 +3806,7 @@ Two convention fixes, made at different times, both change the Food Dilution ris
 # (i) Exposure correction factor reverted to legacy (cumulative-as-differential),
 # hazard (haz) held at the fully corrected values. No pSSD rerun needed: this
 # only recomputes the corrected-concentration draws with the legacy CF vector
-# already computed in Section 5.1 (legacy_cf_river).
+# already computed above (A.1, legacy_cf_river).
 set.seed(9202)
 C_legacycf_draws <- monitoring |>
   dplyr::mutate(idx = dplyr::row_number()) |>
