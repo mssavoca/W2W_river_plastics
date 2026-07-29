@@ -1275,7 +1275,8 @@ river_pssd <- run_pssd_pipeline(
   num_cores    = parallel::detectCores() - 2,
   sim          = 30,
   cv_uf        = 0.5,
-  rmore_method = "lognormal"
+  rmore_method = "lognormal",
+  seed         = 5001
 )
 MC_sim_df    <- river_pssd$MC_sim_df
 erm_registry <- river_pssd$erm_registry
@@ -2437,7 +2438,8 @@ sed_pssd <- run_pssd_pipeline(
   num_cores    = parallel::detectCores() - 2,
   sim          = 30,
   cv_uf        = 0.5,
-  rmore_method = "lognormal"
+  rmore_method = "lognormal",
+  seed         = 5002
 )
 MC_sim_df_sed    <- sed_pssd$MC_sim_df
 erm_registry_sed <- sed_pssd$erm_registry
@@ -3565,7 +3567,8 @@ ocean_pssd <- run_pssd_pipeline(
   num_cores    = parallel::detectCores() - 2,
   sim          = 30,
   cv_uf        = 0.5,
-  rmore_method = "lognormal"
+  rmore_method = "lognormal",
+  seed         = 5003
 )
 MC_sim_df_ocean    <- ocean_pssd$MC_sim_df
 erm_registry_ocean <- ocean_pssd$erm_registry
@@ -3761,7 +3764,8 @@ river_pssd_legacy <- run_pssd_pipeline(
   num_cores    = parallel::detectCores() - 2,
   sim          = 30,
   cv_uf        = 0.5,
-  rmore_method = "lognormal"
+  rmore_method = "lognormal",
+  seed         = 5004
 )
 haz_legacy_river         <- build_haz_df(river_pssd_legacy$pSSDs, "Freshwater")
 risk_draws_legacy_river  <- draw_rq_mc1d(haz_legacy_river, eed_boot$q50, n_risk = n_risk)
@@ -3793,7 +3797,8 @@ sed_pssd_legacy <- run_pssd_pipeline(
   num_cores    = parallel::detectCores() - 2,
   sim          = 30,
   cv_uf        = 0.5,
-  rmore_method = "lognormal"
+  rmore_method = "lognormal",
+  seed         = 5005
 )
 haz_legacy_sed         <- build_haz_df(sed_pssd_legacy$pSSDs, "Freshwater Sediment")
 risk_draws_legacy_sed  <- draw_rq_mc1d(haz_legacy_sed, eed_boot_sed$q50, n_risk = n_risk_sed)
@@ -3825,7 +3830,8 @@ ocean_pssd_legacy <- run_pssd_pipeline(
   num_cores    = parallel::detectCores() - 2,
   sim          = 30,
   cv_uf        = 0.5,
-  rmore_method = "lognormal"
+  rmore_method = "lognormal",
+  seed         = 5006
 )
 haz_legacy_ocean         <- build_haz_df(ocean_pssd_legacy$pSSDs, "Marine")
 risk_draws_legacy_ocean  <- draw_rq_mc1d(haz_legacy_ocean, eed_boot_ocean$q50, n_risk = n_risk_ocean)
@@ -4127,7 +4133,8 @@ river_pssd_legacy_alpha <- run_pssd_pipeline(
   num_cores    = parallel::detectCores() - 2,
   sim          = 30,
   cv_uf        = 0.5,
-  rmore_method = "lognormal"
+  rmore_method = "lognormal",
+  seed         = 5007
 )
 haz_legacy_alpha_river        <- build_haz_df(river_pssd_legacy_alpha$pSSDs, "Freshwater")
 risk_draws_legacy_alpha_river <- draw_rq_mc1d(haz_legacy_alpha_river, eed_boot$q50, n_risk = n_risk)
@@ -4165,7 +4172,8 @@ river_pssd_legacy_asa <- run_pssd_pipeline(
   num_cores    = parallel::detectCores() - 2,
   sim          = 30,
   cv_uf        = 0.5,
-  rmore_method = "lognormal"
+  rmore_method = "lognormal",
+  seed         = 5008
 )
 haz_legacy_asa_river        <- build_haz_df(river_pssd_legacy_asa$pSSDs, "Freshwater")
 risk_draws_legacy_asa_river <- draw_rq_mc1d(haz_legacy_asa_river, eed_boot$q50, n_risk = n_risk)

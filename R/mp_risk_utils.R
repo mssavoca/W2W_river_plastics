@@ -849,19 +849,31 @@ correct_and_bootstrap_eed <- function(monitoring, conc_col, cpsd_fit, alpha_draw
 #'   subdirectory names, to keep matrices' caches separate.
 #' @param dose_unit "L" (particles/L; river, ocean) or "kg" (particles/kg; sediment).
 #' @param n_sim Size of param_matrix / MC_sim_align_parallel's n_sim.
-#' @param num_cores Worker count (default parallel::detectCores() - 2).
+#' @param num_cores Worker count (default parallel::detectCores() - 2). Ignored
+#'   internally as of the C1 reproducibility fix (see `seed`) -- execution is
+#'   forced sequential (num_cores = 1 / make_all_pSSDs(parallel = FALSE)) so the
+#'   run is bit-reproducible under `seed`. PSSDplusplus::MC_sim_align_parallel()'s
+#'   `%dopar%` path spins up its own PSOCK cluster with no clusterSetRNGStream(),
+#'   so unseeded parallel workers produce non-reproducible hazard draws (HC5,
+#'   HC10, and everything downstream) across separate renders; the sequential
+#'   `lapply()` path inside MC_sim_align_parallel() (and make_all_pSSDs()) draws
+#'   from R's ordinary global RNG stream instead, which `seed` controls exactly.
 #' @param sim,cv_uf,rmore_method Passed through to make_all_pSSDs().
 #' @param base_tempdir Base directory for cache/output subfolders (default tempdir()).
+#' @param seed If not NULL, set.seed(seed) immediately before the Monte Carlo
+#'   alignment + pSSD fit, for reproducibility independent of call order.
 #' @return List: MC_sim_df, erm_registry, pSSDs.
 run_pssd_pipeline <- function(tox_data, param_matrix, environments, cache_suffix,
                                dose_unit = c("L", "kg"),
                                n_sim, num_cores = parallel::detectCores() - 2,
                                sim = 30, cv_uf = 0.5, rmore_method = "lognormal",
-                               base_tempdir = tempdir()) {
+                               base_tempdir = tempdir(), seed = NULL) {
   dose_unit <- match.arg(dose_unit)
   food_col   <- paste0("particles_", dose_unit, "_food_dilution")
   tissue_col <- paste0("particles_", dose_unit, "_ox_stress")
   dose_col   <- paste0("dose_new_particles_", dose_unit)
+
+  if (!is.null(seed)) set.seed(seed)
 
   MC_sim_df <- PSSDplusplus::MC_sim_align_parallel(
     tox_data     = tox_data,
@@ -869,7 +881,7 @@ run_pssd_pipeline <- function(tox_data, param_matrix, environments, cache_suffix
     n_sim        = n_sim,
     x1D_set      = 1,
     x2D_set      = 5000,
-    num_cores    = num_cores
+    num_cores    = 1L
   )
 
   results_df_food <- dplyr::filter(
@@ -907,8 +919,8 @@ run_pssd_pipeline <- function(tox_data, param_matrix, environments, cache_suffix
     sim              = sim,
     cv_uf            = cv_uf,
     rmore_method     = rmore_method,
-    parallel         = TRUE,
-    workers          = num_cores,
+    parallel         = FALSE,
+    workers          = 1L,
     base_cache_dir   = file.path(base_tempdir, paste0("pssd_cache_",   cache_suffix)),
     base_output_path = file.path(base_tempdir, paste0("pssd_figures_", cache_suffix)),
     overwrite_cache  = TRUE
@@ -1085,9 +1097,11 @@ sediment_psd_shift_sensitivity <- function(param_values_base, slope_shift_grid,
                                             tox_data_sed, n_boot, cv_uf = 0.5,
                                             rmore_method = "lognormal", sim = 30,
                                             num_cores = parallel::detectCores() - 2,
-                                            quantitative_flag = FALSE) {
+                                            quantitative_flag = FALSE,
+                                            seed_base = 6000) {
   rows <- lapply(seq_along(slope_shift_grid), function(i) {
     delta <- slope_shift_grid[i]
+    set.seed(seed_base + i)
 
     pv <- param_values_base
     pv$alpha.sediment.freshwater <- pv$alpha.sediment.freshwater + delta
