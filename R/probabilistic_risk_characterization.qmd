@@ -39,13 +39,13 @@ knitr::opts_knit$set(root.dir = proj_root)
 getwd()
 
 # ── Global Monte Carlo settings (change here to scale up/down) ──
-n_boot <- 10   # bootstrap replicates (increase to ≥ 1000 for publication)
+n_boot <- 1000   # bootstrap replicates (increase to ≥ 1000 for publication)
 n_mc   <- 20000 # alpha Monte Carlo draws
 
 # Production toggle: Morris global sensitivity analysis is computationally
 # expensive and can destabilize routine report renders. Keep FALSE for normal
 # development renders; set TRUE for a full production sensitivity run.
-run_morris_sensitivity <- FALSE
+run_morris_sensitivity <- TRUE
 
 # Uniform C-PSD bin width for volume fits (µm³), applied identically across every
 # matrix and shape (river/sediment/ocean; fragment/fiber/all) — the same convention
@@ -77,7 +77,6 @@ if (!requireNamespace("ggrepel", quietly = TRUE)) install.packages("ggrepel")
 if (!requireNamespace("scales",  quietly = TRUE)) install.packages("scales")
 library(ggrepel)
 library(scales)
-
 ```
 
 # 1. Overview
@@ -1775,8 +1774,8 @@ if (!morris_enabled) {
   }
 
   # Small Morris budget for beta test
-  morris_levels <- 3
-  morris_r      <- 3
+  morris_levels <- 10
+  morris_r      <- 10
 
   morris_design <- sensitivity::morris(
     model  = NULL,
@@ -3141,6 +3140,7 @@ matrix_pal_forest <- c(
 )
 shape_pal_forest <- c(fragment = 16, fiber = 17, all = 15, "all-site" = 1)
 
+
 alpha_comparison_plot <- ggplot2::ggplot(
   alpha_forest_df,
   ggplot2::aes(x = x_pos, y = alpha_abs)
@@ -3175,7 +3175,7 @@ alpha_comparison_plot <- ggplot2::ggplot(
   ggplot2::scale_shape_manual(values = shape_pal_forest, name = "Shape", drop = FALSE) +
   ggplot2::scale_x_continuous(
     breaks = seq_along(source_levels_bottom_to_top),
-    labels = source_levels_bottom_to_top,
+    labels = stringr::str_wrap(source_levels_bottom_to_top, width = 40),
     expand = ggplot2::expansion(add = 0.6)
   ) +
   ggplot2::coord_flip() +
@@ -3200,13 +3200,14 @@ alpha_comparison_plot <- ggplot2::ggplot(
   ) +
   ggplot2::theme_minimal(base_size = 16) +
   ggplot2::theme(
-    axis.text.y = ggplot2::element_text(size = 11),
+    axis.text.y = ggplot2::element_text(size = 14, face = "bold"),
     legend.position = "right",
     panel.border = ggplot2::element_rect(color = "gray82", fill = NA, linewidth = 0.4),
     plot.title = ggplot2::element_text(size = 15),
     plot.subtitle = ggplot2::element_text(size = 10.5, color = "gray30"),
     plot.caption = ggplot2::element_text(size = 8, color = "gray45", hjust = 0)
   )
+
 
 ggsave(alpha_comparison_plot, filename = "figures/alpha_comparison_plot.png", width = 14, height = 8, dpi = 300)
 alpha_comparison_plot
