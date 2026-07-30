@@ -39,7 +39,7 @@ knitr::opts_knit$set(root.dir = proj_root)
 getwd()
 
 # ── Global Monte Carlo settings (change here to scale up/down) ──
-n_boot <- 1000   # bootstrap replicates (increase to ≥ 1000 for publication)
+n_boot <- 10   # bootstrap replicates (increase to ≥ 1000 for publication)
 n_mc   <- 20000 # alpha Monte Carlo draws
 
 # C1.10: whether this render is at the production Monte Carlo budget (>= 1000
@@ -79,10 +79,12 @@ hoffman_K_m2_s      <- 1e-5
 polymer_density_tbl <- polymer_density_lookup()
 
 # ── Additional packages used in plots ──
-if (!requireNamespace("ggrepel", quietly = TRUE)) install.packages("ggrepel")
-if (!requireNamespace("scales",  quietly = TRUE)) install.packages("scales")
+if (!requireNamespace("ggrepel",  quietly = TRUE)) install.packages("ggrepel")
+if (!requireNamespace("scales",   quietly = TRUE)) install.packages("scales")
+if (!requireNamespace("poweRlaw", quietly = TRUE)) install.packages("poweRlaw")
 library(ggrepel)
 library(scales)
+library(poweRlaw)
 ```
 
 # 1. Overview
@@ -296,6 +298,8 @@ in pure R in `R/mp_risk_utils.R` as `fit_cpsd_segur_r()`.
 3. Exhaustively test all contiguous sub-windows ≥ 3 bins; accept windows with R² ≥ 0.90.
 4. Select the **longest** accepted window (ties broken by R²) as the fitting range.
 5. OLS on log₁₀ N(≥L) ~ log₁₀ L_low; BN-PSD slope a = a_cpsd − 1.
+
+**Method choice: C-PSD is the preferred, robust power-law fitting approach and is not re-litigated in this document.** [Segur et al. (2026)](https://doi.org/10.1186/s43591-026-00205-5) show that the classic bin-normalized (BN-PSD) method alone is insufficient to correct binning bias, whereas the cumulative C-PSD approach used throughout removes it and returns accuracy comparable to maximum-likelihood estimation (MLE). Our implementation is independently validated: Appendix B confirms it is bit-identical to Segur et al.'s own reference `PSD_fit.py` code across all nine matrix × shape particle-length PSDs. Segur et al. also note two caveats that motivate the methods-robustness analyses in Section 12.5: the C-PSD right tail slumps where large particles are undercounted, and the method necessarily extrapolates below the measured range, which requires careful fitting-window selection. This section does not fit MLE to justify the C-PSD method choice — that comparison is unnecessary here because Segur et al. (2026) already established C-PSD ≈ MLE in accuracy. A separate, distinct question — how much the *risk result* (not the method choice) depends on the sub-floor extrapolation model — is tested directly in Section 12.5.2's model-selection robustness check, which does fit MLE and a tapered/lognormal alternative for that purpose.
 
 ## 4.2 Fit C-PSD to the raw particle data
 
@@ -3592,6 +3596,448 @@ river_ocean_ecdf_combined <- ggpubr::annotate_figure(
 ggsave(river_ocean_ecdf_combined, filename = "figures/river_ocean_ecdf_combined.png", width = 16, height = 7, dpi = 300)
 river_ocean_ecdf_combined
 ```
+
+# 12.5 Methods-robustness and source-attribution analyses (surface water only)
+
+Three additive analyses testing whether the risk conclusion is robust to specific methodological choices (the sub-floor extrapolation, the extrapolation model itself), and whether the river-vs-ocean slope difference has independent support from polymer composition. River and ocean only — sediment is not touched. None of these change the production headline (single-slope C-PSD, `L_tar_min = 1` µm); each is a clearly-labeled sensitivity/robustness addition that reuses the already-computed production hazard/exposure objects wherever possible rather than recomputing them.
+
+## 12.5.1 RQ sensitivity to the extrapolation floor L_tar_min (food dilution)
+
+The production correction factor extrapolates the measured particle count down to `L_tar_min = 1` µm. Food Dilution is volume-weighted, so a power-law explosion of sub-floor particle *number* adds little particle *volume* — the RQ may be far less sensitive to `L_tar_min` than the raw number-based CF implies. This test is only valid if exposure and hazard are evaluated on the same lower size bound, so for each floor the toxicity dataset is filtered to match: a ToMEx record is excluded from a given floor if its own characteristic tested size (`size.length.um.used.for.conversions` for monodisperse records, or the tested range via `size.length.max.um.used.for.conversions` for polydisperse records — the same field `PSSDplusplus::align_data()` itself uses to size-align doses) falls entirely below that floor. Records with a missing characteristic size are excluded rather than imputed. `filter_tox_by_size_floor()` (`R/mp_risk_utils.R`) implements this rule.
+
+At each floor, three things move together: (1) the exposure-side correction factor and EED are recomputed over `[L_tar_min, 5000]` µm; (2) the pSSD++ integration floor (`x1M_set` in `matrix_function()`, `x1D_set` in `run_pssd_pipeline()`) is set to the same `L_tar_min`; and (3) the Food Dilution toxicity records are filtered as above before the hazard alignment is re-derived. The `L_tar_min = 1` µm row reuses the already-computed production CF/EED/hazard objects rather than recomputing an identical result under a new seed (relocate-don't-recompute).
+
+```{r m12-floor-sensitivity, message=FALSE, warning=FALSE}
+m12_floors <- c(1, 20, 50, 100)
+
+m12_run_one_floor <- function(L_tar_min, matrix_label, monitoring_df, cpsd_fit, alpha_draws,
+                               tox_data_base, param_values_base, environments,
+                               matrix_extra_args, rave_override_fn, seed_base,
+                               prod_cf = NULL, prod_eed = NULL, prod_haz = NULL) {
+
+  tox_data_i  <- filter_tox_by_size_floor(tox_data_base, L_tar_min)
+  n_tox_i     <- nrow(tox_data_i)
+  n_species_i <- dplyr::n_distinct(tox_data_i$Species)
+
+  na_row <- function(note) {
+    tibble::tibble(
+      Matrix = matrix_label, L_tar_min = L_tar_min,
+      CF_p50 = NA_real_, EED_q50 = NA_real_,
+      n_tox_records = n_tox_i, n_species = n_species_i, HC5_median = NA_real_,
+      RQ_p50_1D = NA_real_, P_exceed_1D = NA_real_,
+      RQ_p50_MC2D = NA_real_, P_exceed_MC2D = NA_real_, note = note
+    )
+  }
+
+  if (isTRUE(L_tar_min == 1) && !is.null(prod_cf)) {
+    combined_cf_i <- prod_cf
+    eed_boot_i    <- prod_eed
+    haz_i         <- prod_haz
+  } else {
+    set.seed(seed_base)
+    corr_i <- correct_and_bootstrap_eed(
+      monitoring = monitoring_df, conc_col = "C_measured_pL", cpsd_fit = cpsd_fit,
+      alpha_draws = alpha_draws, L_tar_min = L_tar_min, L_tar_max = 5000,
+      n_draws = 3000, n_boot = n_boot, probs = c(0.5, 0.95), slope_convention = "differential"
+    )
+    combined_cf_i <- corr_i$combined_cf
+    eed_boot_i    <- corr_i$eed_boot
+
+    set.seed(seed_base + 1)
+    # matrix_function_safe() (R/mp_risk_utils.R): a local patched copy of
+    # PSSDplusplus::matrix_function() -- the installed package's oversample-
+    # then-slice logic for upper.tissue.trans.size.um silently under-fills
+    # when x1M_set narrows the acceptance window (confirmed failing at
+    # x1M_set >= 20 with this analysis's real river parameters); the patch
+    # replaces only that block with a draw-until-quota-met loop using the
+    # identical rnorm() parameters and filter conditions. See the function's
+    # own roxygen comment for the full diagnosis. Installed PSSDplusplus is
+    # never modified.
+    param_matrix_i <- do.call(
+      matrix_function_safe,
+      c(list(n_sobol = n_boot, params = param_values_base, upper.tissue.truncation.limit = 500,
+             x1M_set = L_tar_min, x2D_set = 5000), matrix_extra_args)
+    ) |> rave_override_fn()
+
+    # A high L_tar_min can leave too few (or zero) Food-Dilution-alignable
+    # records after PSSDplusplus's own ingestible/size-gating logic runs
+    # inside MC_sim_align_parallel(), even when the raw filtered tox_data_i
+    # row count looks adequate -- build_haz_df() then has nothing to
+    # summarise for that ERM. Caught here rather than crashing the render,
+    # per the spec's own guardrail: flag as indicative-only (NA row with a
+    # note) rather than treat as a production result.
+    pssd_haz <- tryCatch({
+      pssd_i <- run_pssd_pipeline(
+        tox_data = tox_data_i, param_matrix = param_matrix_i, environments = environments,
+        cache_suffix = paste0("m12_", matrix_label, "_", L_tar_min),
+        dose_unit = "L", n_sim = n_boot, num_cores = parallel::detectCores() - 2,
+        sim = 30, cv_uf = 0.5, rmore_method = "lognormal",
+        seed = seed_base + 2, x1D_set = L_tar_min
+      )
+      haz_try <- build_haz_df(pssd_i$pSSDs, environments[1])
+      if (is.null(haz_try) || nrow(haz_try) == 0 ||
+          !any(haz_try$ERM == "Food Dilution" & haz_try$HCx == 5)) {
+        list(ok = FALSE, note = "pSSD fit returned no Food Dilution HC5 at this floor")
+      } else {
+        list(ok = TRUE, haz = haz_try)
+      }
+    }, error = function(e) {
+      list(ok = FALSE, note = paste0("pSSD/hazard fit failed: ", conditionMessage(e)))
+    })
+
+    if (!pssd_haz$ok) {
+      return(na_row(pssd_haz$note))
+    }
+    haz_i <- pssd_haz$haz
+  }
+
+  set.seed(seed_base + 3)
+  risk_draws_1d <- draw_rq_mc1d(haz_i, eed_boot_i$q50, n_risk = 1000)
+  rs_1d <- summarize_rq(risk_draws_1d) |> dplyr::filter(ERM == "Food Dilution", HCx == 5)
+
+  mc2d_i <- mc2d_risk(monitoring_df = monitoring_df, combined_cf = combined_cf_i, haz_df = haz_i,
+                       n_uncertainty = 100, n_variability = 500, seed = seed_base + 4)
+  rs_mc2d <- mc2d_i |> dplyr::filter(ERM == "Food Dilution", HCx == 5) |>
+    dplyr::summarise(P_exceed_med = median(P_exceed), RQ_p50_med = median(RQ_p50))
+
+  hc5_i <- haz_i |> dplyr::filter(ERM == "Food Dilution", HCx == 5) |> dplyr::pull(PNEC) |> stats::median()
+
+  tibble::tibble(
+    Matrix = matrix_label, L_tar_min = L_tar_min,
+    CF_p50 = stats::median(combined_cf_i), EED_q50 = stats::median(eed_boot_i$q50),
+    n_tox_records = n_tox_i, n_species = n_species_i, HC5_median = hc5_i,
+    RQ_p50_1D = rs_1d$RQ_p50, P_exceed_1D = rs_1d$P_exceed,
+    RQ_p50_MC2D = rs_mc2d$RQ_p50_med, P_exceed_MC2D = rs_mc2d$P_exceed_med, note = NA_character_
+  )
+}
+
+rave_override_river <- function(pm) {
+  pm |> dplyr::mutate(
+    R.ave.water.freshwater = sample(R.ave_vals, size = dplyr::n(), replace = TRUE),
+    H_W_ratio.freshwater   = sample(R.ave_vals, size = dplyr::n(), replace = TRUE)
+  )
+}
+rave_override_ocean <- function(pm) {
+  pm |> dplyr::mutate(
+    R.ave.water.marine     = sample(R.ave_ocean_vals, size = dplyr::n(), replace = TRUE),
+    H_W_ratio.water.marine = sample(R.ave_ocean_vals, size = dplyr::n(), replace = TRUE)
+  )
+}
+
+m12_river_results <- dplyr::bind_rows(lapply(m12_floors, function(L) {
+  m12_run_one_floor(
+    L_tar_min = L, matrix_label = "River water", monitoring_df = monitoring,
+    cpsd_fit = cpsd_fit_all, alpha_draws = alpha, tox_data_base = tox_data,
+    param_values_base = param_values, environments = c("Freshwater"),
+    matrix_extra_args = list(), rave_override_fn = rave_override_river,
+    seed_base = 61000 + L, prod_cf = combined_cf, prod_eed = eed_boot, prod_haz = haz
+  )
+}))
+
+m12_ocean_results <- dplyr::bind_rows(lapply(m12_floors, function(L) {
+  m12_run_one_floor(
+    L_tar_min = L, matrix_label = "Ocean water", monitoring_df = monitoring_ocean,
+    cpsd_fit = cpsd_fit_ocean_all, alpha_draws = alpha_ocean, tox_data_base = tox_data_ocean,
+    param_values_base = param_values_ocean, environments = c("Marine"),
+    matrix_extra_args = list(include_marine_surface_water = TRUE, include_freshwater_surface_water = FALSE,
+                              include_marine_sediment = FALSE, include_freshwater_sediment = FALSE),
+    rave_override_fn = rave_override_ocean,
+    seed_base = 62000 + L, prod_cf = combined_cf_ocean, prod_eed = eed_boot_ocean, prod_haz = haz_ocean
+  )
+}))
+
+m12_results <- dplyr::bind_rows(m12_river_results, m12_ocean_results)
+
+knitr::kable(
+  m12_results, digits = 3,
+  caption = paste0(
+    "M1.2: Food Dilution RQ sensitivity to the extrapolation floor L_tar_min, river and ocean, ",
+    "with exposure/hazard/tox-record size basis matched at every floor. NA rows (see Note) mean ",
+    "the floor left too few Food-Dilution-alignable records for a pSSD++ fit -- indicative only, ",
+    "not a production result."
+  ),
+  col.names = c("Matrix", "L_tar_min (µm)", "CF p50", "EED q50", "n tox records", "n species",
+                "HC5 median", "RQ p50 (1D)", "P(RQ>1) (1D)", "RQ p50 (MC2D)", "P(RQ>1) (MC2D)", "Note")
+)
+```
+
+```{r m12-floor-sensitivity-plot, fig.width=10, fig.height=5}
+m12_plot <- m12_results |>
+  ggplot2::ggplot(ggplot2::aes(x = L_tar_min, y = RQ_p50_1D, color = Matrix)) +
+  ggplot2::geom_hline(yintercept = 1, linetype = "dashed", color = "gray40") +
+  ggplot2::geom_line(linewidth = 0.9) +
+  ggplot2::geom_point(size = 3) +
+  ggplot2::scale_y_log10(labels = scales::label_number()) +
+  ggplot2::scale_color_manual(values = c("River water" = "#0072B2", "Ocean water" = "#009E73"), name = NULL) +
+  ggplot2::labs(
+    x = expression(L[tar-min]~"(µm)"),
+    y = "Food Dilution HC5 median RQ (1D) [log10 scale]",
+    title = "Food Dilution RQ sensitivity to the extrapolation floor",
+    subtitle = "Exposure, pSSD++ integration floor, and tox-record size filter all moved together at each L_tar_min. Dashed line = RQ = 1."
+  ) +
+  ggplot2::theme_minimal(base_size = 15) +
+  ggplot2::theme(legend.position = "bottom", panel.border = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.4))
+
+ggsave(m12_plot, filename = "figures/m12_floor_sensitivity_plot.png", width = 10, height = 5, dpi = 300)
+m12_plot
+```
+
+**Guardrails and interpretation.** The `L_tar_min = 1` µm row is the production headline and is unchanged by this analysis (reused, not recomputed). Any floor where `n_species` falls below the pSSD++ practical minimum is indicative only — read `n_species` in the table above before interpreting that row's RQ. If the Food Dilution median RQ and P(RQ>1) stay well above 1 across all four floors, the sub-floor extrapolation is not driving the exceedance conclusion (expected, since Food Dilution's volume-weighted dose model damps the sub-floor particle-*number* explosion); if the exceedance instead collapses at a higher floor, the conclusion is sensitive to the 1 µm extrapolation and that dependency should be stated plainly rather than averaged away.
+
+## 12.5.2 Model-selection robustness: MLE and a tapered/lognormal small-end model
+
+Distinct from Section 4.1's method-choice statement: this section does not ask whether C-PSD is the right method (it is; Segur et al. 2026 already established C-PSD ≈ MLE in accuracy). It asks how much the *risk result* depends on the sub-floor extrapolation model, given Segur et al.'s own caveat that C-PSD extrapolates below the measured range, and marine-surface literature suggesting the true small-end particle-size distribution may roll off (fewer small particles than a single power law implies) rather than continue as one power law to 1 µm.
+
+Three models are fit to each matrix's pooled ("all" shapes) particle-length data: (a) the production C-PSD OLS fit (carried through for comparison, not refit here); (b) an MLE power law (`poweRlaw::conpl`), with `xmin` chosen by minimizing the Kolmogorov–Smirnov statistic and a goodness-of-fit bootstrap p-value ([Clauset, Shalizi & Newman 2009](https://doi.org/10.1137/070710111); power law rejected if p < 0.1); and (c) a lognormal small-end alternative (`poweRlaw::conlnorm`) fit at the *same* `xmin` as the MLE power law, compared to it via a Vuong likelihood-ratio test (`compare_distributions()`). Ocean fiber (5 populated C-PSD bins; Section 12.1.1) is excluded from MLE fitting as too sparse for a stable tail fit.
+
+```{r m13-model-fits, message=FALSE, warning=FALSE}
+m13_fit_one_matrix <- function(length_vec, matrix_label, seed) {
+  length_vec <- length_vec[is.finite(length_vec) & length_vec > 0]
+
+  m_pl <- poweRlaw::conpl$new(length_vec)
+  est  <- poweRlaw::estimate_xmin(m_pl)
+  m_pl$setXmin(est)
+
+  set.seed(seed)
+  bp <- poweRlaw::bootstrap_p(m_pl, no_of_sims = 100, threads = 1, seed = seed)
+
+  m_ln <- poweRlaw::conlnorm$new(length_vec)
+  m_ln$setXmin(m_pl$getXmin())
+  m_ln$setPars(poweRlaw::estimate_pars(m_ln))
+
+  comp <- poweRlaw::compare_distributions(m_pl, m_ln)
+
+  list(
+    matrix_label = matrix_label,
+    n_total = length(length_vec),
+    xmin = est$xmin, ntail = est$ntail, alpha_mle = m_pl$pars,
+    KS_D = est$gof, bootstrap_p = bp$p,
+    meanlog = m_ln$pars[1], sdlog = m_ln$pars[2],
+    vuong_stat = comp$test_statistic, vuong_p = comp$p_two_sided
+  )
+}
+
+m13_river_fit <- m13_fit_one_matrix(raw_particles_river$length_um, "River water", seed = 71001)
+m13_ocean_fit <- m13_fit_one_matrix(raw_particles_ocean$length_um, "Ocean water", seed = 71002)
+
+m13_fit_summary <- dplyr::bind_rows(lapply(list(m13_river_fit, m13_ocean_fit), function(f) {
+  tibble::tibble(
+    Matrix = f$matrix_label, n_total = f$n_total, xmin_um = round(f$xmin, 1), n_tail = f$ntail,
+    alpha_MLE = round(f$alpha_mle, 3), KS_D = round(f$KS_D, 4), bootstrap_p = round(f$bootstrap_p, 3),
+    power_law_rejected = f$bootstrap_p < 0.1,
+    vuong_stat = round(f$vuong_stat, 3), vuong_p = round(f$vuong_p, 3),
+    lognormal_meanlog = round(f$meanlog, 3), lognormal_sdlog = round(f$sdlog, 3)
+  )
+}))
+
+knitr::kable(
+  m13_fit_summary,
+  caption = "M1.3: MLE power-law fit (poweRlaw::conpl) and lognormal comparator (poweRlaw::conlnorm) at the same xmin, river and ocean pooled particle-length PSDs"
+)
+```
+
+```{r m13-rq-propagation, message=FALSE, warning=FALSE}
+# Convert each model to an equivalent correction factor over the SAME measured
+# window already used for the production C-PSD correction factor
+# (L_meas_min_use/L_meas_max_use), so only the extrapolation MODEL differs,
+# not the physical measurement window -- then recompute the RQ for both ERMs
+# against the already-computed production hazard (haz/haz_ocean; hazard is
+# not re-derived here, only the exposure-side extrapolation model changes).
+m13_propagate_one <- function(fit, L_meas_min, L_meas_max, monitoring_df, conc_col,
+                               haz_df, n_risk, cpsd_a_psd, combined_cf_prod, seed_base) {
+
+  cf_mle <- correction_factor(
+    a = -fit$alpha_mle, L_meas_min = L_meas_min, L_meas_max = L_meas_max,
+    L_tar_min = 1, L_tar_max = 5000, slope_convention = "differential"
+  )
+  cf_lognormal <- (stats::plnorm(5000, fit$meanlog, fit$sdlog) - stats::plnorm(1, fit$meanlog, fit$sdlog)) /
+    (stats::plnorm(L_meas_max, fit$meanlog, fit$sdlog) - stats::plnorm(L_meas_min, fit$meanlog, fit$sdlog))
+
+  rq_for_cf <- function(cf_val, seed) {
+    set.seed(seed)
+    eed_i <- bootstrap_eed(monitoring_df[[conc_col]] * cf_val, n_boot = n_boot, probs = c(0.5, 0.95))
+    set.seed(seed + 1)
+    summarize_rq(draw_rq_mc1d(haz_df, eed_i$q50, n_risk = n_risk)) |>
+      dplyr::filter(ERM %in% c("Food Dilution", "Tissue Translocation"), HCx == 5) |>
+      dplyr::select(ERM, RQ_p50, P_exceed)
+  }
+
+  dplyr::bind_rows(
+    rq_for_cf(median(combined_cf_prod), seed_base)     |> dplyr::mutate(Model = "C-PSD (production)", CF = median(combined_cf_prod)),
+    rq_for_cf(cf_mle, seed_base + 10)                   |> dplyr::mutate(Model = "MLE power law", CF = cf_mle),
+    rq_for_cf(cf_lognormal, seed_base + 20)              |> dplyr::mutate(Model = "Lognormal (tapered small-end)", CF = cf_lognormal)
+  ) |> dplyr::mutate(Matrix = fit$matrix_label)
+}
+
+m13_river_rq <- m13_propagate_one(
+  m13_river_fit, L_meas_min_use, L_meas_max_use, monitoring, "C_measured_pL",
+  haz, n_risk, cpsd_fit_all$a_psd, combined_cf, seed_base = 72001
+)
+m13_ocean_rq <- m13_propagate_one(
+  m13_ocean_fit, L_meas_min_ocean, L_meas_max_ocean, monitoring_ocean, "C_measured_pL",
+  haz_ocean, n_risk_ocean, cpsd_fit_ocean_all$a_psd, combined_cf_ocean, seed_base = 72002
+)
+
+m13_rq_results <- dplyr::bind_rows(m13_river_rq, m13_ocean_rq) |>
+  dplyr::relocate(Matrix, Model, ERM, CF, RQ_p50, P_exceed)
+
+knitr::kable(
+  m13_rq_results, digits = 3,
+  caption = "M1.3: Food Dilution and Tissue Translocation HC5 RQ under each extrapolation model, holding hazard fixed at the production values"
+)
+```
+
+```{r m13-rq-plot, fig.width=11, fig.height=6}
+m13_rq_plot <- m13_rq_results |>
+  ggplot2::ggplot(ggplot2::aes(x = Model, y = RQ_p50, color = ERM, shape = Matrix)) +
+  ggplot2::geom_hline(yintercept = 1, linetype = "dashed", color = "gray40") +
+  ggplot2::geom_point(size = 3.5, position = ggplot2::position_dodge(width = 0.5)) +
+  ggplot2::scale_y_log10(labels = scales::label_number()) +
+  ggplot2::scale_color_manual(values = ERM_PALETTE, name = "ERM") +
+  ggplot2::coord_flip() +
+  ggplot2::labs(
+    x = NULL, y = "HC5 median RQ [log10 scale]",
+    title = "RQ under each extrapolation model: C-PSD vs. MLE power law vs. lognormal small-end",
+    subtitle = "Dashed line = RQ = 1. Hazard held at production values; only the exposure-side extrapolation model varies."
+  ) +
+  ggplot2::theme_minimal(base_size = 14) +
+  ggplot2::theme(legend.position = "bottom", panel.border = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.4))
+
+ggsave(m13_rq_plot, filename = "figures/m13_rq_plot.png", width = 11, height = 6, dpi = 300)
+m13_rq_plot
+```
+
+**Guardrails and interpretation.** The C-PSD single-slope fit remains the production default; MLE and lognormal are labeled comparators only, and hazard is never re-derived in this section (only the exposure-side extrapolation model changes, holding `haz`/`haz_ocean` fixed at their production values). Report GoF failures honestly: `r if (m13_fit_summary$power_law_rejected[m13_fit_summary$Matrix == "River water"]) "the power law IS rejected for river water (bootstrap p < 0.1)" else "the power law is NOT rejected for river water"`, and `r if (m13_fit_summary$power_law_rejected[m13_fit_summary$Matrix == "Ocean water"]) "IS rejected for ocean water" else "is NOT rejected for ocean water"` (bootstrap p = `r round(m13_fit_summary$bootstrap_p[m13_fit_summary$Matrix=="River water"],3)` river, `r round(m13_fit_summary$bootstrap_p[m13_fit_summary$Matrix=="Ocean water"],3)` ocean). The Vuong test indicates whether the power law and lognormal are statistically distinguishable at each matrix's shared `xmin` (p < 0.05 favors one model over the other; a non-significant result means the data cannot discriminate between them at this sample size). If the Food Dilution exceedance conclusion holds across all three models, the risk result is robust to the extrapolation-model choice; if it flips under the lognormal small-end model, that sensitivity should be stated plainly.
+
+## 12.5.3 River vs ocean polymer composition: test for buoyant-polymer enrichment
+
+A shift in polymer mix at the sea surface — specifically enrichment of buoyant polymers (PP, PE) relative to rivers — would independently support a surface-retention/transport interpretation of the shallower ocean particle-length PSD slope (Section 12.1.1), rather than a source/residence or fitting-window explanation. `buoyancy_freshwater`/`buoyancy_marine` are already assigned per particle by `assign_polymer_density()` (Section 3.1.1), relative to freshwater (1.00 g/cm³) and seawater (1.025 g/cm³) respectively, so no new density-assignment code is needed here — only the statistical test.
+
+```{r m14-polymer-composition, message=FALSE, warning=FALSE}
+m14_particles <- dplyr::bind_rows(
+  raw_particles_river |> dplyr::mutate(Matrix = "River water"),
+  raw_particles_ocean |> dplyr::mutate(Matrix = "Ocean water")
+)
+
+m14_contingency <- table(m14_particles$polymer_density_group, m14_particles$Matrix)
+
+knitr::kable(
+  as.data.frame.matrix(m14_contingency),
+  caption = paste0(
+    "River (n = ", sum(m14_particles$Matrix == "River water"), ") vs ocean (n = ",
+    sum(m14_particles$Matrix == "Ocean water"), ") polymer-group contingency table."
+  )
+)
+
+# Fisher's exact if any expected cell count is small (chi-square approximation
+# becomes unreliable below ~5 expected per cell); chi-square otherwise.
+m14_expected_min <- suppressWarnings(min(chisq.test(m14_contingency)$expected))
+m14_full_test <- if (m14_expected_min < 5) {
+  fisher.test(m14_contingency, simulate.p.value = TRUE, B = 10000)
+} else {
+  chisq.test(m14_contingency)
+}
+cat(
+  "Full polymer x matrix test:", m14_full_test$method,
+  "-- statistic =", if (!is.null(m14_full_test$statistic)) signif(m14_full_test$statistic, 4) else NA,
+  ", p =", signif(m14_full_test$p.value, 4),
+  "(min expected cell count =", round(m14_expected_min, 2), ")\n"
+)
+```
+
+```{r m14-buoyant-2x2, message=FALSE, warning=FALSE}
+# Focused 2x2 test: buoyant (PP + PE) vs non-buoyant, river vs ocean. PP and PE
+# are the only two polymer groups classified "buoyant" under both
+# buoyancy_freshwater and buoyancy_marine in this dataset (verified below),
+# so "buoyant" here is defined directly by polymer identity rather than by
+# picking one of the two medium-specific buoyancy columns.
+m14_particles <- m14_particles |>
+  dplyr::mutate(is_buoyant = polymer_density_group %in% c("polyethylene", "polypropylene"))
+
+m14_buoyancy_agreement <- mean(m14_particles$buoyancy_freshwater == m14_particles$buoyancy_marine)
+
+m14_2x2 <- table(m14_particles$is_buoyant, m14_particles$Matrix)
+m14_2x2_test <- if (min(suppressWarnings(chisq.test(m14_2x2)$expected)) < 5) {
+  fisher.test(m14_2x2)
+} else {
+  chisq.test(m14_2x2, correct = TRUE)
+}
+
+m14_buoyant_fraction <- m14_particles |>
+  dplyr::group_by(Matrix) |>
+  dplyr::summarise(
+    n = dplyr::n(),
+    n_buoyant = sum(is_buoyant),
+    fraction_buoyant = n_buoyant / n,
+    .groups = "drop"
+  ) |>
+  dplyr::rowwise() |>
+  dplyr::mutate(
+    ci = list(stats::binom.test(n_buoyant, n)$conf.int),
+    ci_low  = ci[1],
+    ci_high = ci[2]
+  ) |>
+  dplyr::ungroup() |>
+  dplyr::select(-ci)
+
+knitr::kable(
+  m14_buoyant_fraction, digits = 3,
+  caption = "Buoyant-polymer (PP + PE) fraction by matrix, with binomial 95% CIs",
+  col.names = c("Matrix", "n", "n buoyant", "Fraction buoyant", "95% CI low", "95% CI high")
+)
+
+cat(
+  "Buoyant (PP+PE) vs non-buoyant x river/ocean:", m14_2x2_test$method,
+  "-- p =", signif(m14_2x2_test$p.value, 4), "\n"
+)
+cat(
+  "buoyancy_freshwater and buoyancy_marine agree for", scales::percent(m14_buoyancy_agreement, accuracy = 0.1),
+  "of particles in this dataset -- i.e. essentially no polymer group in the current density lookup ",
+  "(Hidalgo-Ruz et al. 2012) falls in the narrow density band (1.00-1.025 g/cm3) that would flip ",
+  "classification between freshwater and seawater reference density.\n"
+)
+```
+
+```{r m14-composition-plot, fig.width=11, fig.height=6}
+m14_composition_plot <- m14_particles |>
+  dplyr::count(Matrix, polymer_density_group) |>
+  dplyr::group_by(Matrix) |>
+  dplyr::mutate(fraction = n / sum(n)) |>
+  dplyr::ungroup() |>
+  ggplot2::ggplot(ggplot2::aes(x = polymer_density_group, y = fraction, fill = Matrix)) +
+  ggplot2::geom_col(position = ggplot2::position_dodge(width = 0.75), width = 0.7) +
+  ggplot2::scale_y_continuous(labels = scales::label_percent()) +
+  ggplot2::scale_fill_manual(values = c("River water" = "#0072B2", "Ocean water" = "#009E73"), name = NULL) +
+  ggplot2::coord_flip() +
+  ggplot2::labs(
+    x = NULL, y = "Fraction of particles",
+    title = "River vs ocean polymer composition",
+    subtitle = "PP (polypropylene) and PE (polyethylene) are the buoyant classes tested in the 2x2 comparison below"
+  ) +
+  ggplot2::theme_minimal(base_size = 14) +
+  ggplot2::theme(legend.position = "bottom", panel.border = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.4))
+
+ggsave(m14_composition_plot, filename = "figures/m14_composition_plot.png", width = 11, height = 6, dpi = 300)
+m14_composition_plot
+
+m14_buoyant_plot <- m14_buoyant_fraction |>
+  ggplot2::ggplot(ggplot2::aes(x = Matrix, y = fraction_buoyant, color = Matrix)) +
+  ggplot2::geom_pointrange(ggplot2::aes(ymin = ci_low, ymax = ci_high), size = 0.8, linewidth = 1) +
+  ggplot2::scale_color_manual(values = c("River water" = "#0072B2", "Ocean water" = "#009E73"), guide = "none") +
+  ggplot2::scale_y_continuous(labels = scales::label_percent(), limits = c(0, NA)) +
+  ggplot2::labs(
+    x = NULL, y = "Buoyant (PP + PE) fraction, with binomial 95% CI",
+    title = "Buoyant-polymer fraction: river vs ocean"
+  ) +
+  ggplot2::theme_minimal(base_size = 14) +
+  ggplot2::theme(panel.border = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.4))
+
+ggsave(m14_buoyant_plot, filename = "figures/m14_buoyant_plot.png", width = 7, height = 5, dpi = 300)
+m14_buoyant_plot
+```
+
+**Interpretation.** A significant enrichment of PP/PE in ocean surface water relative to river water (`r scales::percent(m14_buoyant_fraction$fraction_buoyant[m14_buoyant_fraction$Matrix == "Ocean water"], accuracy=0.1)` vs `r scales::percent(m14_buoyant_fraction$fraction_buoyant[m14_buoyant_fraction$Matrix == "River water"], accuracy=0.1)`, 2×2 test p = `r signif(m14_2x2_test$p.value, 3)`) would support the transport/retention reading of the river-vs-ocean slope difference; a null result points instead toward a source/residence or fitting-window explanation. **Caveats.** Composition is count-based over each matrix's own measured detection window (the same LOD/window caveats that apply to the slope fits themselves), and ocean n = `r sum(m14_particles$Matrix == "Ocean water")` limits statistical power relative to river n = `r sum(m14_particles$Matrix == "River water")`. This polymer-composition test is an independent line of evidence that does *not* depend on the fitting window — but the river-vs-ocean **slope** difference itself (Section 12.1.1) is separately confounded by different fitting windows (river `r round(cpsd_fit_all$lower_lod_used_um)`–`r round(cpsd_fit_all$upper_lod_um)` µm vs ocean `r round(cpsd_fit_ocean_all$lower_lod_used_um)`–`r round(cpsd_fit_ocean_all$upper_lod_um)` µm) and should be re-tested over a common overlapping window before that slope difference alone is attributed to source or transport.
+
 
 # 15. Key Findings Summary
 
