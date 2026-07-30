@@ -862,12 +862,18 @@ correct_and_bootstrap_eed <- function(monitoring, conc_col, cpsd_fit, alpha_draw
 #' @param base_tempdir Base directory for cache/output subfolders (default tempdir()).
 #' @param seed If not NULL, set.seed(seed) immediately before the Monte Carlo
 #'   alignment + pSSD fit, for reproducibility independent of call order.
+#' @param x1D_set Lower size-integration bound (um) passed to
+#'   MC_sim_align_parallel(). Default 1 preserves prior behavior for every
+#'   existing call site; M1.2 passes L_tar_min here to match the exposure-side
+#'   extrapolation floor tested in that sensitivity (must be moved together
+#'   with the exposure CF's L_tar_min and the tox-record size filter, or
+#'   exposure and hazard are no longer on the same size basis).
 #' @return List: MC_sim_df, erm_registry, pSSDs.
 run_pssd_pipeline <- function(tox_data, param_matrix, environments, cache_suffix,
                                dose_unit = c("L", "kg"),
                                n_sim, num_cores = parallel::detectCores() - 2,
                                sim = 30, cv_uf = 0.5, rmore_method = "lognormal",
-                               base_tempdir = tempdir(), seed = NULL) {
+                               base_tempdir = tempdir(), seed = NULL, x1D_set = 1) {
   dose_unit <- match.arg(dose_unit)
   food_col   <- paste0("particles_", dose_unit, "_food_dilution")
   tissue_col <- paste0("particles_", dose_unit, "_ox_stress")
@@ -879,7 +885,7 @@ run_pssd_pipeline <- function(tox_data, param_matrix, environments, cache_suffix
     tox_data     = tox_data,
     param_matrix = param_matrix,
     n_sim        = n_sim,
-    x1D_set      = 1,
+    x1D_set      = x1D_set,
     x2D_set      = 5000,
     num_cores    = 1L
   )
@@ -1148,4 +1154,128 @@ sediment_psd_shift_sensitivity <- function(param_values_base, slope_shift_grid,
 
   dplyr::bind_rows(rows) |>
     dplyr::relocate(slope_shift, alpha_sediment_freshwater, ERM, HCx, HC_value_particles_kg, is_quantitative)
+}
+
+#' Filter ToMEx toxicity records to match an exposure-side size floor (M1.2)
+#'
+#' PSSDplusplus::align_data() (called inside MC_sim_align_parallel()) sizes-
+#' aligns each dose using `size.length.um.used.for.conversions` for
+#' monodisperse records, or the min/max pair for polydisperse records --
+#' confirmed by inspecting align_data()'s source. This filter uses the same
+#' field so a record is excluded from a given L_tar_min floor exactly when
+#' its own tested size basis would fall below that floor, keeping exposure
+#' (the CF's L_tar_min) and hazard (this filter + x1M_set/x1D_set) on a
+#' consistent size basis at every floor -- the entire point of M1.2.
+#'
+#' Filtering rule (documented assumption, per M1.2's spec): monodisperse
+#' records are excluded if their single characteristic size is below the
+#' floor; polydisperse records are excluded only if their ENTIRE tested range
+#' (up to size.length.max.um.used.for.conversions) falls below the floor --
+#' i.e. kept if the tested range overlaps or exceeds the floor. Records with
+#' a missing/NA characteristic size are excluded (flagged, not imputed).
+#'
+#' @param tox_data Toxicity data frame (must have polydispersity,
+#'   size.length.um.used.for.conversions, size.length.max.um.used.for.conversions).
+#' @param L_tar_min Lower size floor (um) to filter to.
+#' @return Filtered tox_data (same columns, fewer rows).
+filter_tox_by_size_floor <- function(tox_data, L_tar_min) {
+  stopifnot(all(c("polydispersity", "size.length.um.used.for.conversions",
+                   "size.length.max.um.used.for.conversions") %in% names(tox_data)))
+  tox_data |>
+    dplyr::mutate(
+      .char_size_um = dplyr::case_when(
+        polydispersity == "polydisperse" & !is.na(size.length.max.um.used.for.conversions) ~
+          size.length.max.um.used.for.conversions,
+        polydispersity == "monodisperse" & !is.na(size.length.um.used.for.conversions) ~
+          size.length.um.used.for.conversions,
+        TRUE ~ NA_real_
+      )
+    ) |>
+    dplyr::filter(!is.na(.char_size_um), .char_size_um >= L_tar_min) |>
+    dplyr::select(-.char_size_um)
+}
+
+#' Locally patched PSSDplusplus::matrix_function() (M1.2 workaround)
+#'
+#' PSSDplusplus::matrix_function() draws `nrow(mat) * 1.4` candidate values
+#' for `upper.tissue.trans.size.um` (via sim_X50 = -sim_beta_0/sim_beta_1),
+#' filters to those within (x1M_set, min(x2D_set, upper.tissue.truncation.limit)),
+#' and takes the first nrow(mat) survivors with dplyr::slice() -- with no
+#' check that enough survived. Production always calls it with x1M_set = 1,
+#' where the 1.4x oversample comfortably covers the quota. M1.2 varies
+#' x1M_set up to 100 um, which narrows the acceptance window enough that
+#' fewer than nrow(mat) values survive; slice() silently returns a short
+#' vector, and the subsequent `mat[, upper.tissue.trans.size.um := ...]`
+#' errors with a length mismatch ("Supplied N items to be assigned to M
+#' items"). Confirmed by direct inspection of matrix_function()'s body
+#' (deparse(body(PSSDplusplus::matrix_function))) and by reproducing the
+#' failure in isolation at x1M_set = 20-100 with both package defaults and
+#' this analysis's real river parameters.
+#'
+#' Root cause: the 1.4x multiplier is a fixed ratio of nrow(mat), which
+#' itself scales with n_sobol * n_params -- so increasing n_sobol does not
+#' change the accept/reject *ratio* at all (numerator and denominator scale
+#' together). No caller-supplied argument can fix this from the outside.
+#'
+#' Local-only workaround per user direction (do not modify the installed
+#' PSSDplusplus package or its GitHub repo): this function is a full COPY of
+#' matrix_function()'s body (via deparse/parse of the installed function,
+#' captured once at first call) with only the fixed-oversample block
+#' replaced by an iterative draw-until-quota-met loop using the exact same
+#' rnorm() parameters and filter conditions -- same statistical model, just
+#' guaranteed enough valid draws. The original PSSDplusplus::matrix_function
+#' is never altered; this is an independent function object.
+#'
+#' @param ... Passed through with the same names/semantics as
+#'   PSSDplusplus::matrix_function() (n_sobol, params, upper.tissue.truncation.limit,
+#'   x1M_set, x2D_set, include_marine_surface_water, include_freshwater_surface_water,
+#'   include_marine_sediment, include_freshwater_sediment).
+#' @return Same structure as PSSDplusplus::matrix_function()'s output.
+.matrix_function_patched_cache <- NULL
+
+matrix_function_safe <- function(...) {
+  if (is.null(.matrix_function_patched_cache)) {
+    orig_text <- deparse(body(PSSDplusplus::matrix_function))
+
+    broken_start <- grep("sim_beta_0 <- stats::rnorm\\(nrow\\(mat\\) \\* 1\\.4", orig_text)
+    broken_end   <- grep("upper\\.tissue\\.trans\\.size\\.um_samples <- as\\.numeric", orig_text)
+    stopifnot(
+      "matrix_function_safe(): could not locate the expected broken block in PSSDplusplus::matrix_function() -- the package source may have changed; re-inspect deparse(body(PSSDplusplus::matrix_function)) before trusting this patch" =
+        length(broken_start) == 1 && length(broken_end) == 1 && broken_end > broken_start
+    )
+
+    patched_block <- c(
+      "    .mf_target_n <- nrow(mat)",
+      "    .mf_samples <- numeric(0)",
+      "    .mf_mult <- 1.4",
+      "    .mf_attempts <- 0",
+      "    while (length(.mf_samples) < .mf_target_n && .mf_attempts < 25) {",
+      "      .mf_attempts <- .mf_attempts + 1",
+      "      .mf_draw_n <- ceiling(max(.mf_target_n, (.mf_target_n - length(.mf_samples))) * .mf_mult)",
+      "      .mf_b0 <- stats::rnorm(.mf_draw_n, mean = params$beta_0, sd = params$se_beta_0)",
+      "      .mf_b1 <- stats::rnorm(.mf_draw_n, mean = params$beta_1, sd = params$se_beta_1)",
+      "      .mf_x50 <- -.mf_b0 / .mf_b1",
+      "      .mf_valid <- .mf_x50[.mf_x50 > x1M_set & .mf_x50 < x2D_set & .mf_x50 < upper.tissue.truncation.limit]",
+      "      .mf_samples <- c(.mf_samples, .mf_valid)",
+      "      .mf_mult <- .mf_mult * 3",
+      "    }",
+      "    if (length(.mf_samples) < .mf_target_n) {",
+      "      stop(\"matrix_function_safe(): could not draw enough valid upper.tissue.trans.size.um samples after 25 attempts (got \", length(.mf_samples), \" of \", .mf_target_n, \" needed) -- x1M_set may be too close to upper.tissue.truncation.limit for this parameter set.\")",
+      "    }",
+      "    upper.tissue.trans.size.um_samples <- .mf_samples[seq_len(.mf_target_n)]"
+    )
+
+    new_text <- c(orig_text[seq_len(broken_start - 1)], patched_block, orig_text[(broken_end + 1):length(orig_text)])
+
+    new_fn <- eval(parse(text = c("function(n_sobol = 10, params = PSSDplusplus::param_default_values,",
+                                   "upper.tissue.truncation.limit = 500, x1M_set = 1, x2D_set = 5000,",
+                                   "include_marine_surface_water = TRUE, include_freshwater_surface_water = TRUE,",
+                                   "include_marine_sediment = TRUE, include_freshwater_sediment = TRUE)",
+                                   new_text)))
+    environment(new_fn) <- asNamespace("PSSDplusplus")
+    .matrix_function_patched_cache <<- new_fn
+    message("matrix_function_safe(): local patched copy of PSSDplusplus::matrix_function() built ",
+            "(installed package untouched); see R/mp_risk_utils.R for the diff.")
+  }
+  .matrix_function_patched_cache(...)
 }
