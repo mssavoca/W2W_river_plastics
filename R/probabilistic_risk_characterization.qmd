@@ -1533,6 +1533,83 @@ knitr::kable(
 
 Surface and subsurface strata are both large enough to fit C-PSD slopes and bootstrap monitoring observations. The headline assessment remains pooled because this is a screening ERA and the transport correction is not yet mechanistic; the stratified rows are retained as a sensitivity that can identify whether boundary-enriched samples materially alter EED or RQ.
 
+## 10.0.1 By-river risk characterization (not pooled)
+
+The headline river assessment pools particle and monitoring data across all four sampling locations (Carmel, Pajaro, Salinas, San Lorenzo) into a single C-PSD fit and a single exposure distribution. This section instead runs the full workflow -- C-PSD fit, differential-slope draws, correction factor, EED bootstrap, and Food Dilution/Tissue Translocation risk characterization -- **independently for each river**, reusing each location's C-PSD fit already computed in Section 4.2.1 (`cpsd_fits_by_loc`) and each river's own monitoring replicates, but the same production hazard distribution (`haz`) throughout, since species toxicity does not depend on which river was sampled. This tests whether the pooled result masks location-specific differences in exposure (driven by each river's own particle-size slope and measured concentrations) rather than assuming one river is representative of all four.
+
+```{r river-stratified-risk, message=FALSE, warning=FALSE}
+river_hc5_risk <- dplyr::bind_rows(lapply(locations, function(loc) {
+  fit_i     <- cpsd_fits_by_loc[[loc]]
+  seed_base <- 41000 + match(loc, locations) * 10
+
+  set.seed(seed_base)
+  alpha_i <- alpha_dist(mu = fit_i$a_psd, sd = fit_i$se_a_psd, n = 3000, structural_sd = slope_structural_sd)
+
+  mon_i <- monitoring |> dplyr::filter(river == loc)
+
+  set.seed(seed_base + 1)
+  corr_i <- correct_and_bootstrap_eed(
+    monitoring = mon_i, conc_col = "C_measured_pL", cpsd_fit = fit_i, alpha_draws = alpha_i,
+    L_tar_min = 1, L_tar_max = 5000, n_draws = 3000, n_boot = n_boot,
+    probs = c(0.5, 0.95), slope_convention = "differential"
+  )
+
+  set.seed(seed_base + 2)
+  risk_draws_i <- draw_rq_mc1d(haz, corr_i$eed_boot$q50, n_risk = 1000) |>
+    dplyr::filter(HCx == 5)
+
+  risk_draws_i |>
+    dplyr::group_by(ERM, HCx) |>
+    dplyr::summarise(
+      RQ_p5    = stats::quantile(RQ, 0.05, na.rm = TRUE),
+      RQ_p50   = stats::quantile(RQ, 0.50, na.rm = TRUE),
+      RQ_p95   = stats::quantile(RQ, 0.95, na.rm = TRUE),
+      P_exceed = mean(RQ > 1, na.rm = TRUE),
+      .groups  = "drop"
+    ) |>
+    dplyr::mutate(
+      river        = loc,
+      n_monitoring = nrow(mon_i),
+      n_particles  = sum(raw_particles_river$sample_location == loc),
+      a_psd        = fit_i$a_psd,
+      CF_p50       = stats::median(corr_i$combined_cf)
+    )
+}))
+
+knitr::kable(
+  river_hc5_risk |>
+    dplyr::select(river, ERM, n_particles, n_monitoring, a_psd, CF_p50, RQ_p5, RQ_p50, RQ_p95, P_exceed),
+  digits = 3,
+  caption = "By-river (not pooled) Food Dilution / Tissue Translocation HC5 risk quotient, p5/p50/p95 across the 1D Monte Carlo risk draws."
+)
+```
+
+```{r river-stratified-risk-plot, fig.width=10, fig.height=6, message=FALSE, warning=FALSE}
+river_risk_dodge <- ggplot2::position_dodge(width = 0.5)
+
+river_risk_plot <- river_hc5_risk |>
+  ggplot2::ggplot(ggplot2::aes(x = river, y = RQ_p50, color = ERM)) +
+  ggplot2::geom_hline(yintercept = 1, linetype = "dashed", color = "red") +
+  ggplot2::geom_pointrange(
+    ggplot2::aes(ymin = RQ_p5, ymax = RQ_p95),
+    position = river_risk_dodge, size = 0.7, linewidth = 1
+  ) +
+  ggplot2::scale_y_log10(labels = scales::label_number()) +
+  ggplot2::scale_color_manual(values = ERM_PALETTE, name = "ERM") +
+  ggplot2::labs(
+    x = "River", y = "HC5 Risk Quotient (p5-p50-p95) [log10 scale]",
+    title = "By-river Food Dilution / Tissue Translocation risk quotient",
+    subtitle = "Point = median RQ; bars = p5-p95 across the 1D Monte Carlo risk draws. Dashed line = RQ = 1."
+  ) +
+  ggplot2::theme_minimal(base_size = 18) +
+  ggplot2::theme(legend.position = "top", panel.border = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.4))
+
+ggsave(river_risk_plot, filename = "figures/river_stratified_risk_plot.png", width = 10, height = 6, dpi = 300)
+river_risk_plot
+```
+
+**Interpretation.** All four rivers have adequate independent support for this analysis (`r paste(river_hc5_risk$n_particles[match(locations, river_hc5_risk$river)], collapse=", ")` particles and `r paste(river_hc5_risk$n_monitoring[match(locations, river_hc5_risk$river)], collapse=", ")` monitoring replicates for Carmel/Pajaro/Salinas/San Lorenzo respectively), so no river is flagged as data-insufficient here (contrast Section 12.5.1.2's marine floor-sensitivity case, where the underlying tox data itself became too sparse). The pooled headline result (Section 5) remains the primary conclusion for this screening assessment; this by-river breakdown is a sensitivity showing whether any single location drives that pooled result, or whether the Food Dilution vs. Tissue Translocation risk ranking is consistent across all four independently.
+
 ## 10.1 Morris global sensitivity analysis (future work)
 
 A Morris elementary-effects screen (global sensitivity ranking of RQ uncertainty drivers) is deferred to a dedicated compute pass: it repeatedly rebuilds small pSSD++ hazard models and, at a budget large enough to produce a stable ranking, is too slow for a routine report render. It did not run in this render.
@@ -3608,7 +3685,7 @@ The production correction factor extrapolates the measured particle count down t
 At each floor, three things move together: (1) the exposure-side correction factor and EED are recomputed over `[L_tar_min, 5000]` µm; (2) the pSSD++ integration floor (`x1M_set` in `matrix_function()`, `x1D_set` in `run_pssd_pipeline()`) is set to the same `L_tar_min`; and (3) the Food Dilution toxicity records are filtered as above before the hazard alignment is re-derived. The `L_tar_min = 1` µm row reuses the already-computed production CF/EED/hazard objects rather than recomputing an identical result under a new seed (relocate-don't-recompute).
 
 ```{r m12-floor-sensitivity, message=FALSE, warning=FALSE}
-m12_floors <- c(1, 20, 50, 100)
+m12_floors <- c(1, 2.5, 5, 7.5, 10, 20)
 
 m12_run_one_floor <- function(L_tar_min, matrix_label, monitoring_df, cpsd_fit, alpha_draws,
                                tox_data_base, param_values_base, environments,
@@ -3624,8 +3701,9 @@ m12_run_one_floor <- function(L_tar_min, matrix_label, monitoring_df, cpsd_fit, 
       Matrix = matrix_label, L_tar_min = L_tar_min,
       CF_p50 = NA_real_, EED_q50 = NA_real_,
       n_tox_records = n_tox_i, n_species = n_species_i, HC5_median = NA_real_,
-      RQ_p50_1D = NA_real_, P_exceed_1D = NA_real_,
-      RQ_p50_MC2D = NA_real_, P_exceed_MC2D = NA_real_, note = note
+      RQ_p50_1D = NA_real_, RQ_p025_1D = NA_real_, RQ_p975_1D = NA_real_, P_exceed_1D = NA_real_,
+      RQ_p50_MC2D = NA_real_, P_exceed_MC2D = NA_real_,
+      CF_RSD_pct = NA_real_, RQ_p50_RSD_pct = NA_real_, note = note
     )
   }
 
@@ -3694,20 +3772,35 @@ m12_run_one_floor <- function(L_tar_min, matrix_label, monitoring_df, cpsd_fit, 
   set.seed(seed_base + 3)
   risk_draws_1d <- draw_rq_mc1d(haz_i, eed_boot_i$q50, n_risk = 1000)
   rs_1d <- summarize_rq(risk_draws_1d) |> dplyr::filter(ERM == "Food Dilution", HCx == 5)
+  rs_1d_ci <- risk_draws_1d |> dplyr::filter(ERM == "Food Dilution", HCx == 5) |>
+    dplyr::summarise(RQ_p025 = stats::quantile(RQ, 0.025, na.rm = TRUE),
+                      RQ_p975 = stats::quantile(RQ, 0.975, na.rm = TRUE))
 
   mc2d_i <- mc2d_risk(monitoring_df = monitoring_df, combined_cf = combined_cf_i, haz_df = haz_i,
                        n_uncertainty = 100, n_variability = 500, seed = seed_base + 4)
-  rs_mc2d <- mc2d_i |> dplyr::filter(ERM == "Food Dilution", HCx == 5) |>
+  mc2d_food_hc5_i <- mc2d_i |> dplyr::filter(ERM == "Food Dilution", HCx == 5)
+  rs_mc2d <- mc2d_food_hc5_i |>
     dplyr::summarise(P_exceed_med = median(P_exceed), RQ_p50_med = median(RQ_p50))
 
   hc5_i <- haz_i |> dplyr::filter(ERM == "Food Dilution", HCx == 5) |> dplyr::pull(PNEC) |> stats::median()
+
+  # Uncertainty (not variability) at this floor: %RSD of the exposure-side CF
+  # draws (correction_factor() output, one value per alpha_draws realization)
+  # and %RSD of the outer-loop (uncertainty) RQ_p50 across mc2d_risk()'s
+  # n_uncertainty = 100 CF+PNEC draws. Both are dispersion-of-the-estimate
+  # measures, not the exposure variability captured by the inner loop --
+  # answers "how much does our estimate of the risk move if we re-ran the
+  # uncertain inputs," at each L_tar_min.
+  cf_rsd_pct     <- 100 * stats::sd(combined_cf_i) / mean(combined_cf_i)
+  rq_p50_rsd_pct <- 100 * stats::sd(mc2d_food_hc5_i$RQ_p50) / mean(mc2d_food_hc5_i$RQ_p50)
 
   tibble::tibble(
     Matrix = matrix_label, L_tar_min = L_tar_min,
     CF_p50 = stats::median(combined_cf_i), EED_q50 = stats::median(eed_boot_i$q50),
     n_tox_records = n_tox_i, n_species = n_species_i, HC5_median = hc5_i,
-    RQ_p50_1D = rs_1d$RQ_p50, P_exceed_1D = rs_1d$P_exceed,
-    RQ_p50_MC2D = rs_mc2d$RQ_p50_med, P_exceed_MC2D = rs_mc2d$P_exceed_med, note = NA_character_
+    RQ_p50_1D = rs_1d$RQ_p50, RQ_p025_1D = rs_1d_ci$RQ_p025, RQ_p975_1D = rs_1d_ci$RQ_p975, P_exceed_1D = rs_1d$P_exceed,
+    RQ_p50_MC2D = rs_mc2d$RQ_p50_med, P_exceed_MC2D = rs_mc2d$P_exceed_med,
+    CF_RSD_pct = cf_rsd_pct, RQ_p50_RSD_pct = rq_p50_rsd_pct, note = NA_character_
   )
 }
 
@@ -3730,7 +3823,7 @@ m12_river_results <- dplyr::bind_rows(lapply(m12_floors, function(L) {
     cpsd_fit = cpsd_fit_all, alpha_draws = alpha, tox_data_base = tox_data,
     param_values_base = param_values, environments = c("Freshwater"),
     matrix_extra_args = list(), rave_override_fn = rave_override_river,
-    seed_base = 61000 + L, prod_cf = combined_cf, prod_eed = eed_boot, prod_haz = haz
+    seed_base = 61000 + round(L * 10), prod_cf = combined_cf, prod_eed = eed_boot, prod_haz = haz
   )
 }))
 
@@ -3742,19 +3835,21 @@ m12_ocean_results <- dplyr::bind_rows(lapply(m12_floors, function(L) {
     matrix_extra_args = list(include_marine_surface_water = TRUE, include_freshwater_surface_water = FALSE,
                               include_marine_sediment = FALSE, include_freshwater_sediment = FALSE),
     rave_override_fn = rave_override_ocean,
-    seed_base = 62000 + L, prod_cf = combined_cf_ocean, prod_eed = eed_boot_ocean, prod_haz = haz_ocean
+    seed_base = 62000 + round(L * 10), prod_cf = combined_cf_ocean, prod_eed = eed_boot_ocean, prod_haz = haz_ocean
   )
 }))
 
 m12_results <- dplyr::bind_rows(m12_river_results, m12_ocean_results)
 
 knitr::kable(
-  m12_results, digits = 3,
+  m12_results |> dplyr::select(Matrix, L_tar_min, CF_p50, EED_q50, n_tox_records, n_species,
+                                HC5_median, RQ_p50_1D, P_exceed_1D, RQ_p50_MC2D, P_exceed_MC2D, note),
+  digits = 3,
   caption = paste0(
     "M1.2: Food Dilution RQ sensitivity to the extrapolation floor L_tar_min, river and ocean, ",
     "with exposure/hazard/tox-record size basis matched at every floor. NA rows (see Note) mean ",
     "the floor left too few Food-Dilution-alignable records for a pSSD++ fit -- indicative only, ",
-    "not a production result."
+    "not a production result. CF and RQ %RSD by floor are reported separately in Section 12.5.1.1."
   ),
   col.names = c("Matrix", "L_tar_min (µm)", "CF p50", "EED q50", "n tox records", "n species",
                 "HC5 median", "RQ p50 (1D)", "P(RQ>1) (1D)", "RQ p50 (MC2D)", "P(RQ>1) (MC2D)", "Note")
@@ -3762,18 +3857,23 @@ knitr::kable(
 ```
 
 ```{r m12-floor-sensitivity-plot, fig.width=10, fig.height=5}
+m12_dodge <- ggplot2::position_dodge(width = 0.5)
+
 m12_plot <- m12_results |>
   ggplot2::ggplot(ggplot2::aes(x = L_tar_min, y = RQ_p50_1D, color = Matrix)) +
   ggplot2::geom_hline(yintercept = 1, linetype = "dashed", color = "gray40") +
-  ggplot2::geom_line(linewidth = 0.9) +
-  ggplot2::geom_point(size = 3) +
+  ggplot2::geom_line(linewidth = 0.9, position = m12_dodge, na.rm = TRUE) +
+  ggplot2::geom_errorbar(ggplot2::aes(ymin = RQ_p025_1D, ymax = RQ_p975_1D),
+                          width = 0.6, linewidth = 0.6, position = m12_dodge, na.rm = TRUE) +
+  ggplot2::geom_point(size = 3, position = m12_dodge, na.rm = TRUE) +
   ggplot2::scale_y_log10(labels = scales::label_number()) +
+  ggplot2::scale_x_continuous(breaks = m12_floors) +
   ggplot2::scale_color_manual(values = c("River water" = "#0072B2", "Ocean water" = "#009E73"), name = NULL) +
   ggplot2::labs(
     x = expression(L[tar-min]~"(µm)"),
     y = "Food Dilution HC5 median RQ (1D) [log10 scale]",
     title = "Food Dilution RQ sensitivity to the extrapolation floor",
-    subtitle = "Exposure, pSSD++ integration floor, and tox-record size filter all moved together at each L_tar_min. Dashed line = RQ = 1."
+    subtitle = "Points = median RQ (1D); bars = 95% CI (2.5th-97.5th pctile of the 1D risk draws). Dashed line = RQ = 1."
   ) +
   ggplot2::theme_minimal(base_size = 15) +
   ggplot2::theme(legend.position = "bottom", panel.border = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.4))
@@ -3783,6 +3883,114 @@ m12_plot
 ```
 
 **Guardrails and interpretation.** The `L_tar_min = 1` µm row is the production headline and is unchanged by this analysis (reused, not recomputed). Any floor where `n_species` falls below the pSSD++ practical minimum is indicative only — read `n_species` in the table above before interpreting that row's RQ. If the Food Dilution median RQ and P(RQ>1) stay well above 1 across all four floors, the sub-floor extrapolation is not driving the exceedance conclusion (expected, since Food Dilution's volume-weighted dose model damps the sub-floor particle-*number* explosion); if the exceedance instead collapses at a higher floor, the conclusion is sensitive to the 1 µm extrapolation and that dependency should be stated plainly rather than averaged away.
+
+### 12.5.1.1 Does restricting the analysis to sizes closer to the measured range reduce uncertainty?
+
+`L_tar_min = 1` µm is the largest extrapolation below the measured detection window (`r round(cpsd_fit_all$lower_lod_used_um)`–`r round(cpsd_fit_all$upper_lod_um)` µm river, `r round(cpsd_fit_ocean_all$lower_lod_used_um)`–`r round(cpsd_fit_ocean_all$upper_lod_um)` µm ocean); raising the floor shortens that extrapolation. Two dispersion metrics separate this from the *magnitude* sensitivity shown above: (1) `CF_RSD_pct`, the relative standard deviation (%RSD = 100 x SD / mean) of the correction-factor draws themselves (`combined_cf_i`, one value per `alpha_draws` realization) -- a pure exposure-side uncertainty measure; and (2) `RQ_p50_RSD_pct`, the %RSD of the median RQ across `mc2d_risk()`'s `n_uncertainty` = 100 outer-loop draws (each redrawing one CF and one PNEC) -- i.e., how much our *estimate* of the median RQ itself moves if the uncertain inputs were redrawn, isolated from the inner-loop exposure *variability* that `RQ_p50_MC2D` above already integrates over.
+
+```{r m12-uncertainty-vs-floor, message=FALSE, warning=FALSE}
+m12_rsd_table <- m12_results |>
+  dplyr::select(Matrix, L_tar_min, CF_RSD_pct, RQ_p50_RSD_pct, n_species, note)
+
+knitr::kable(
+  m12_rsd_table, digits = 1,
+  caption = paste0(
+    "Exposure (CF) and risk-estimate (RQ p50, MC2D outer/uncertainty loop) %RSD by extrapolation floor. ",
+    "Lower %RSD = less relative dispersion in the estimate. NA rows are the same data-insufficient floors flagged above."
+  ),
+  col.names = c("Matrix", "L_tar_min (µm)", "CF %RSD", "RQ p50 %RSD", "n species", "Note")
+)
+```
+
+```{r m12-uncertainty-vs-floor-plot, fig.width=10, fig.height=5, message=FALSE, warning=FALSE}
+# CF %RSD and RQ p50 %RSD live on very different scales, so RQ %RSD is drawn
+# against a secondary axis. ggplot2 has no native second y-scale: the
+# standard workaround is to rescale the secondary series onto the primary
+# series' numeric range by a single ratio, plot it on the primary axis, then
+# add a sec_axis() that applies the inverse transform purely for the axis
+# labels -- the data themselves are only ever plotted once, in primary units.
+m12_rsd_max_cf <- max(m12_results$CF_RSD_pct, na.rm = TRUE)
+m12_rsd_max_rq <- max(m12_results$RQ_p50_RSD_pct, na.rm = TRUE)
+m12_rsd_ratio  <- m12_rsd_max_cf / m12_rsd_max_rq
+
+m12_rsd_plot_df <- m12_results |>
+  dplyr::select(Matrix, L_tar_min, CF_RSD_pct, RQ_p50_RSD_pct) |>
+  dplyr::mutate(RQ_p50_RSD_pct_scaled = RQ_p50_RSD_pct * m12_rsd_ratio)
+
+# linetype is mapped to a fixed per-layer string (not a pivoted column) so
+# each layer gets its own unambiguous legend key -- a shared/pivoted linetype
+# aes previously produced two legend entries that both rendered as solid
+# lines because geom_point() (no linetype of its own) was merged into the
+# same guide as geom_line().
+m12_rsd_plot <- ggplot2::ggplot(m12_rsd_plot_df, ggplot2::aes(x = L_tar_min, color = Matrix)) +
+  ggplot2::geom_line(ggplot2::aes(y = CF_RSD_pct, linetype = "CF (exposure), left axis"),
+                      linewidth = 0.9, na.rm = TRUE) +
+  ggplot2::geom_point(ggplot2::aes(y = CF_RSD_pct), size = 2.5, na.rm = TRUE) +
+  ggplot2::geom_line(ggplot2::aes(y = RQ_p50_RSD_pct_scaled, linetype = "RQ p50 (uncertainty), right axis"),
+                      linewidth = 0.9, na.rm = TRUE) +
+  ggplot2::geom_point(ggplot2::aes(y = RQ_p50_RSD_pct_scaled), size = 2.5, na.rm = TRUE) +
+  ggplot2::scale_color_manual(values = c("River water" = "#0072B2", "Ocean water" = "#009E73"), name = NULL) +
+  ggplot2::scale_linetype_manual(
+    values = c("CF (exposure), left axis" = "solid", "RQ p50 (uncertainty), right axis" = "dashed"),
+    name = NULL,
+    guide = ggplot2::guide_legend(override.aes = list(linewidth = 1.1))
+  ) +
+  ggplot2::scale_y_continuous(
+    name = "CF %RSD (left axis)",
+    sec.axis = ggplot2::sec_axis(~ . / m12_rsd_ratio, name = "RQ p50 %RSD (right axis)")
+  ) +
+  ggplot2::labs(
+    x = expression(L[tar-min]~"(µm)"),
+    title = "Does a higher extrapolation floor reduce estimate uncertainty?",
+    subtitle = "Solid = exposure-side CF %RSD (left axis); dashed = Food Dilution HC5 median-RQ %RSD, MC2D uncertainty (outer) loop (right axis)"
+  ) +
+  ggplot2::theme_minimal(base_size = 15) +
+  ggplot2::theme(
+    legend.position = "bottom",
+    legend.key.width = grid::unit(1.8, "cm"),
+    panel.border = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.4)
+  )
+
+ggsave(m12_rsd_plot, filename = "figures/m12_uncertainty_vs_floor_plot.png", width = 10, height = 5, dpi = 300)
+m12_rsd_plot
+
+m12_rsd_river <- m12_results |> dplyr::filter(Matrix == "River water") |> dplyr::arrange(L_tar_min)
+m12_rsd_ocean <- m12_results |> dplyr::filter(Matrix == "Ocean water", !is.na(CF_RSD_pct)) |> dplyr::arrange(L_tar_min)
+```
+
+**Interpretation.** For river water, CF %RSD moves from `r round(m12_rsd_river$CF_RSD_pct[1], 1)`% at `L_tar_min` = `r m12_rsd_river$L_tar_min[1]` µm to `r round(m12_rsd_river$CF_RSD_pct[nrow(m12_rsd_river)], 1)`% at `r m12_rsd_river$L_tar_min[nrow(m12_rsd_river)]` µm, and RQ p50 %RSD moves from `r round(m12_rsd_river$RQ_p50_RSD_pct[1], 1)`% to `r round(m12_rsd_river$RQ_p50_RSD_pct[nrow(m12_rsd_river)], 1)`% over the same range. For ocean water (valid floors only, `r paste(m12_rsd_ocean$L_tar_min, collapse=", ")` µm), CF %RSD moves from `r round(m12_rsd_ocean$CF_RSD_pct[1], 1)`% to `r round(m12_rsd_ocean$CF_RSD_pct[nrow(m12_rsd_ocean)], 1)`%, and RQ p50 %RSD from `r round(m12_rsd_ocean$RQ_p50_RSD_pct[1], 1)`% to `r round(m12_rsd_ocean$RQ_p50_RSD_pct[nrow(m12_rsd_ocean)], 1)`%. `r if (m12_rsd_river$CF_RSD_pct[nrow(m12_rsd_river)] < m12_rsd_river$CF_RSD_pct[1]) "Restricting the correction factor to sizes closer to the measured window does reduce exposure-side dispersion for river water, consistent with a shorter power-law extrapolation carrying less compounded uncertainty." else "Exposure-side dispersion does not monotonically shrink for river water as the floor is raised, so a shorter extrapolation window is not, by itself, guaranteed to reduce CF uncertainty here -- the alpha draw distribution and its interaction with the floor matter more than extrapolation length alone."` This is a **CF/RQ-estimate dispersion** result, not a data-availability result: it does not by itself justify raising the production floor above `L_tar_min` = 1 µm, because (a) the RQ *magnitude* sensitivity above already shows Food Dilution risk is not being driven by the sub-floor extrapolation, and (b) a higher floor discards real tox and monitoring size range along with the extrapolation, at the species-count cost quantified in Section 12.5.1.2 below and in the `n_species` column here.
+
+### 12.5.1.2 Why does the ocean Food Dilution fit fail above L_tar_min = 10 µm?
+
+```{r m12-ocean-floor-diagnostic, message=FALSE, warning=FALSE}
+# Why ocean, not river, loses its Food Dilution fit above L_tar_min = 1 um --
+# diagnostic only (not part of the m12_results pipeline above). Answers: is
+# this a code bug, or a real property of the marine ToMEx subset? Computed
+# from the same tox_data / tox_data_ocean / filter_tox_by_size_floor() the
+# m12 pipeline itself uses, so the numbers below stay live.
+m12_char_size <- function(d) {
+  dplyr::case_when(
+    d$polydispersity == "polydisperse" & !is.na(d$size.length.max.um.used.for.conversions) ~
+      d$size.length.max.um.used.for.conversions,
+    d$polydispersity == "monodisperse" & !is.na(d$size.length.um.used.for.conversions) ~
+      d$size.length.um.used.for.conversions,
+    TRUE ~ NA_real_
+  )
+}
+
+m12_diag <- list(
+  river_sp1   = dplyr::n_distinct(filter_tox_by_size_floor(tox_data, 1)$Species),
+  river_sp20  = dplyr::n_distinct(filter_tox_by_size_floor(tox_data, 20)$Species),
+  ocean_sp1   = dplyr::n_distinct(filter_tox_by_size_floor(tox_data_ocean, 1)$Species),
+  ocean_sp20  = dplyr::n_distinct(filter_tox_by_size_floor(tox_data_ocean, 20)$Species),
+  ocean_fish1  = sum(filter_tox_by_size_floor(tox_data_ocean, 1)$Group  == "Fish"),
+  ocean_fish20 = sum(filter_tox_by_size_floor(tox_data_ocean, 20)$Group == "Fish"),
+  river_med_size = stats::median(m12_char_size(tox_data), na.rm = TRUE),
+  ocean_med_size = stats::median(m12_char_size(tox_data_ocean), na.rm = TRUE)
+)
+```
+
+Ocean's larger raw species pool is real (`r dplyr::n_distinct(tox_data_ocean$Species)` marine vs `r dplyr::n_distinct(tox_data$Species)` freshwater species pass the same QC filters before any size floor is applied) but it is concentrated at much smaller tested particle sizes: the marine subset's median characteristic tested size is `r round(m12_diag$ocean_med_size, 1)` µm against `r round(m12_diag$river_med_size, 1)` µm for freshwater, and `r round(100 * mean(tox_data_ocean$polydispersity == "monodisperse"), 0)`% of marine records are monodisperse (small, uniform test beads) versus `r round(100 * mean(tox_data$polydispersity == "monodisperse"), 0)`% for freshwater. Raising the floor to 20 µm therefore removes marine records disproportionately: usable species fall from `r m12_diag$ocean_sp1` to `r m12_diag$ocean_sp20` for ocean (a `r scales::percent(1 - m12_diag$ocean_sp20/m12_diag$ocean_sp1, accuracy = 1)` drop) versus `r m12_diag$river_sp1` to `r m12_diag$river_sp20` for river (`r scales::percent(1 - m12_diag$river_sp20/m12_diag$river_sp1, accuracy = 1)`). Fish records, the single largest marine Food-Dilution-relevant group at 1 µm, collapse from `r m12_diag$ocean_fish1` to `r m12_diag$ocean_fish20` -- almost all marine fish-feeding studies in this ToMEx subset used particles smaller than 20 µm. Once `run_pssd_pipeline()`'s own ingestibility/dose-positive/non-Algae gating runs on top of that, too few marine species remain for `PSSDplusplus` to construct a Food Dilution SSD at all at `L_tar_min` = 20 µm, so `pSSDs[["Tier3_Marine_Food Dilution"]]` is `NULL` and the row is flagged NA rather than fabricated -- this is a genuine data-sparsity limit of the current marine ToMEx subset at larger size floors, not a pipeline defect. The two finer intermediate floors (5, 10 µm) added below still resolve, confirming the failure is specific to the 20 µm floor rather than a broad breakdown of the marine pipeline.
 
 ## 12.5.2 Model-selection robustness: MLE and a tapered/lognormal small-end model
 
@@ -3914,10 +4122,24 @@ m13_rq_plot
 A shift in polymer mix at the sea surface — specifically enrichment of buoyant polymers (PP, PE) relative to rivers — would independently support a surface-retention/transport interpretation of the shallower ocean particle-length PSD slope (Section 12.1.1), rather than a source/residence or fitting-window explanation. `buoyancy_freshwater`/`buoyancy_marine` are already assigned per particle by `assign_polymer_density()` (Section 3.1.1), relative to freshwater (1.00 g/cm³) and seawater (1.025 g/cm³) respectively, so no new density-assignment code is needed here — only the statistical test.
 
 ```{r m14-polymer-composition, message=FALSE, warning=FALSE}
+# sample_depth_general is entirely NA for every ocean-water particle in this
+# study (all 6 ocean sample IDs; confirmed below) -- these µFTIR runs simply
+# did not record a depth stratum for ocean grabs, unlike river water, which
+# has both strata. Ocean is therefore its own "depth not recorded" level
+# rather than being assumed to be "surface" -- no depth label is fabricated
+# for data that was not collected with one.
 m14_particles <- dplyr::bind_rows(
   raw_particles_river |> dplyr::mutate(Matrix = "River water"),
   raw_particles_ocean |> dplyr::mutate(Matrix = "Ocean water")
-)
+) |>
+  dplyr::mutate(
+    Depth = dplyr::case_when(
+      Matrix == "Ocean water" ~ "depth not recorded",
+      TRUE ~ as.character(sample_depth_general)
+    )
+  )
+
+m14_ocean_depth_recorded <- sum(!is.na(raw_particles_ocean$sample_depth_general))
 
 m14_contingency <- table(m14_particles$polymer_density_group, m14_particles$Matrix)
 
@@ -4037,6 +4259,59 @@ m14_buoyant_plot
 ```
 
 **Interpretation.** A significant enrichment of PP/PE in ocean surface water relative to river water (`r scales::percent(m14_buoyant_fraction$fraction_buoyant[m14_buoyant_fraction$Matrix == "Ocean water"], accuracy=0.1)` vs `r scales::percent(m14_buoyant_fraction$fraction_buoyant[m14_buoyant_fraction$Matrix == "River water"], accuracy=0.1)`, 2×2 test p = `r signif(m14_2x2_test$p.value, 3)`) would support the transport/retention reading of the river-vs-ocean slope difference; a null result points instead toward a source/residence or fitting-window explanation. **Caveats.** Composition is count-based over each matrix's own measured detection window (the same LOD/window caveats that apply to the slope fits themselves), and ocean n = `r sum(m14_particles$Matrix == "Ocean water")` limits statistical power relative to river n = `r sum(m14_particles$Matrix == "River water")`. This polymer-composition test is an independent line of evidence that does *not* depend on the fitting window — but the river-vs-ocean **slope** difference itself (Section 12.1.1) is separately confounded by different fitting windows (river `r round(cpsd_fit_all$lower_lod_used_um)`–`r round(cpsd_fit_all$upper_lod_um)` µm vs ocean `r round(cpsd_fit_ocean_all$lower_lod_used_um)`–`r round(cpsd_fit_ocean_all$upper_lod_um)` µm) and should be re-tested over a common overlapping window before that slope difference alone is attributed to source or transport.
+
+### 12.5.3.1 Depth-stratified polymer composition (river surface/subsurface vs ocean)
+
+River water has both `sample_depth_general` strata (`r sum(raw_particles_river$sample_depth_general == "surface", na.rm=TRUE)` surface, `r sum(raw_particles_river$sample_depth_general == "subsurface", na.rm=TRUE)` subsurface particles). Ocean water does not: `sample_depth_general` is unrecorded for all `r nrow(raw_particles_ocean)` ocean-water particles in this study (`r m14_ocean_depth_recorded` with a recorded stratum), so an ocean depth split is not possible from this dataset -- ocean is shown below as its own "depth not recorded" panel rather than assumed to be surface-only. The top-5 polymers by pooled river+ocean particle count set a common comparison basis across panels; every other polymer group is collapsed to "Other" so rare groups do not fragment the comparison.
+
+```{r m14-depth-composition-plot, fig.width=11, fig.height=6, message=FALSE, warning=FALSE}
+m14_top5_polymers <- m14_particles |>
+  dplyr::count(polymer_density_group, sort = TRUE) |>
+  dplyr::slice_head(n = 5) |>
+  dplyr::pull(polymer_density_group)
+
+m14_depth_panel_levels <- c("River water - surface", "River water - subsurface", "Ocean water - depth not recorded")
+
+m14_depth_composition <- m14_particles |>
+  dplyr::mutate(
+    polymer_top5 = ifelse(polymer_density_group %in% m14_top5_polymers,
+                           as.character(polymer_density_group), "Other"),
+    polymer_top5 = factor(polymer_top5, levels = c(m14_top5_polymers, "Other")),
+    panel = factor(paste(Matrix, Depth, sep = " - "), levels = m14_depth_panel_levels)
+  ) |>
+  dplyr::filter(!is.na(panel)) |>
+  dplyr::count(panel, polymer_top5) |>
+  dplyr::group_by(panel) |>
+  dplyr::mutate(fraction = n / sum(n), n_panel = sum(n)) |>
+  dplyr::ungroup()
+
+m14_depth_composition_plot <- m14_depth_composition |>
+  ggplot2::ggplot(ggplot2::aes(x = polymer_top5, y = fraction, fill = polymer_top5)) +
+  ggplot2::geom_col(width = 0.7) +
+  ggplot2::geom_text(ggplot2::aes(label = n), vjust = -0.4, size = 3.2) +
+  ggplot2::facet_wrap(~panel, ncol = 3,
+                       labeller = ggplot2::as_labeller(function(x) paste0(x, "\n(n = ",
+                         m14_depth_composition$n_panel[match(x, m14_depth_composition$panel)], ")"))) +
+  ggplot2::scale_y_continuous(labels = scales::label_percent(), expand = ggplot2::expansion(mult = c(0, 0.15))) +
+  ggplot2::scale_fill_brewer(palette = "Set2", name = NULL) +
+  ggplot2::labs(
+    x = NULL, y = "Fraction of particles",
+    title = "Top-5 polymer composition by matrix and sampling depth",
+    subtitle = "Ocean has no recorded depth stratum in this dataset (see text) -- shown as a single panel, not assumed to be surface"
+  ) +
+  ggplot2::theme_minimal(base_size = 13) +
+  ggplot2::theme(
+    legend.position = "none",
+    axis.text.x = ggplot2::element_text(angle = 40, hjust = 1),
+    panel.border = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.4),
+    strip.text = ggplot2::element_text(face = "bold")
+  )
+
+ggsave(m14_depth_composition_plot, filename = "figures/m14_depth_composition_plot.png", width = 11, height = 6, dpi = 300)
+m14_depth_composition_plot
+```
+
+**Interpretation.** Comparing the two river panels isolates a within-matrix depth effect (same sampling program, same µFTIR workflow, same LOD window); comparing either river panel to the ocean panel still mixes a matrix effect with the unrecorded-depth limitation above. `r scales::percent(m14_buoyant_fraction$fraction_buoyant[m14_buoyant_fraction$Matrix == "Ocean water"], accuracy=0.1)` buoyant fraction in ocean vs river's surface/subsurface split (Section 12.5.3 table) is the more decision-relevant comparison than the full multi-polymer breakdown shown here, which is provided as a descriptive, hypothesis-generating cross-tabulation rather than an additional formal test.
 
 
 # 15. Key Findings Summary
