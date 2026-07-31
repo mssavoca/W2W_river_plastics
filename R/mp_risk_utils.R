@@ -881,14 +881,25 @@ run_pssd_pipeline <- function(tox_data, param_matrix, environments, cache_suffix
 
   if (!is.null(seed)) set.seed(seed)
 
-  MC_sim_df <- PSSDplusplus::MC_sim_align_parallel(
-    tox_data     = tox_data,
-    param_matrix = param_matrix,
-    n_sim        = n_sim,
-    x1D_set      = x1D_set,
-    x2D_set      = 5000,
-    num_cores    = 1L
-  )
+  # PSSDplusplus::MC_sim_align_parallel() writes per-step status via cat()
+  # (not message(), so message=FALSE chunk options don't suppress it) --
+  # capture.output(..., type="output") swallows that; suppressMessages()
+  # covers its separate message()-based lines. The expression is evaluated
+  # in this function's own frame (capture.output()'s default behavior), so
+  # the assignment below is unaffected.
+  invisible(utils::capture.output(
+    suppressMessages({
+      MC_sim_df <- PSSDplusplus::MC_sim_align_parallel(
+        tox_data     = tox_data,
+        param_matrix = param_matrix,
+        n_sim        = n_sim,
+        x1D_set      = x1D_set,
+        x2D_set      = 5000,
+        num_cores    = 1L
+      )
+    }),
+    type = "output"
+  ))
 
   results_df_food <- dplyr::filter(
     MC_sim_df,
@@ -918,19 +929,29 @@ run_pssd_pipeline <- function(tox_data, param_matrix, environments, cache_suffix
     "Tissue Translocation" = list(base = results_df_tissue, t3_t4 = results_df_tissue_t3_t4)
   )
 
-  pSSDs <- PSSDplusplus::make_all_pSSDs(
-    MC_sim_df        = MC_sim_df,
-    environments     = environments,
-    erm_registry     = erm_registry,
-    sim              = sim,
-    cv_uf            = cv_uf,
-    rmore_method     = rmore_method,
-    parallel         = FALSE,
-    workers          = 1L,
-    base_cache_dir   = file.path(base_tempdir, paste0("pssd_cache_",   cache_suffix)),
-    base_output_path = file.path(base_tempdir, paste0("pssd_figures_", cache_suffix)),
-    overwrite_cache  = TRUE
-  )
+  # Same rationale as MC_sim_align_parallel() above: make_all_pSSDs() prints
+  # one cat() line per matrix x ERM x HCx combination (Skipping/Completed/
+  # ERROR status, a per-combination progress stream) regardless of
+  # `progress` (that argument only controls an optional progressr bar on
+  # top of this, not this base status stream).
+  invisible(utils::capture.output(
+    suppressMessages({
+      pSSDs <- PSSDplusplus::make_all_pSSDs(
+        MC_sim_df        = MC_sim_df,
+        environments     = environments,
+        erm_registry     = erm_registry,
+        sim              = sim,
+        cv_uf            = cv_uf,
+        rmore_method     = rmore_method,
+        parallel         = FALSE,
+        workers          = 1L,
+        base_cache_dir   = file.path(base_tempdir, paste0("pssd_cache_",   cache_suffix)),
+        base_output_path = file.path(base_tempdir, paste0("pssd_figures_", cache_suffix)),
+        overwrite_cache  = TRUE
+      )
+    }),
+    type = "output"
+  ))
 
   list(MC_sim_df = MC_sim_df, erm_registry = erm_registry, pSSDs = pSSDs)
 }

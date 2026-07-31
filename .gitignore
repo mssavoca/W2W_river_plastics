@@ -2,3 +2,7 @@
 .Rhistory
 .RData
 .Ruserdata
+
+# Quarto knitr-engine intermediate file (regenerated every render; normally
+# auto-deleted on a clean render, but lingers if a render is interrupted)
+*.rmarkdown

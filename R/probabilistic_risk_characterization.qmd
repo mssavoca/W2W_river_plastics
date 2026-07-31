@@ -2,7 +2,21 @@
 title: "Probabilistic Microplastics Risk Characterization: Central California Rivers"
 author: "Scott Coffin, Ph.D. — California Office of Environmental Health Hazard Assessment (OEHHA)"
 date: "`r format(Sys.Date(), '%B %d, %Y')`"
-format: html
+format:
+  html:
+    code-fold: true
+    code-summary: "Show the code"
+    code-tools: true
+    theme: sandstone
+    lightbox: auto
+    toc: true
+    toc-depth: 5
+    toc-expand: 2
+    toc-location: left
+    code-links:
+      - text: Risk Utilities Code
+        icon: file-code
+        href: mp_risk_utils.R
 ---
 
 ```{r setup, include=FALSE}
@@ -63,6 +77,13 @@ is_production_budget <- n_boot >= 1000
 # size — see the volume-lod-bounds chunks below for why the window is fixed via
 # length/width-consistent bounds rather than left to auto-detection for volume.
 vol_bin_um <- 2e4
+
+# Cache-invalidation key for the C-PSD fitting chunks below (cache=TRUE): any
+# change to the underlying raw particle-measurement file bumps this value,
+# which is included in each cached chunk's cache.extra, so every cached
+# C-PSD fit is invalidated together on a real data change without needing
+# per-chunk dependson wiring across river/sediment/ocean/per-location fits.
+raw_data_cache_key <- file.info(file.path(proj_root, "data_input", "Part_dets_comb.rds"))$mtime
 
 # ── Utility functions (sourced from companion scripts in R/) ──
 # mp_risk_utils.R – C-PSD fitting, exposure/hazard/risk functions
@@ -305,7 +326,7 @@ in pure R in `R/mp_risk_utils.R` as `fit_cpsd_segur_r()`.
 
 ### 4.2.1 Particle Length
 
-```{r cpsd-fits-by-shape}
+```{r cpsd-fits-by-shape, cache=TRUE, cache.extra=raw_data_cache_key}
 # Pooled C-PSD fits across all river locations, bin_um = 5 µm
 cpsd_fits_river_length <- fit_cpsd_by_shape(
   raw_particles_river, value_col = "length_um",
@@ -322,7 +343,7 @@ cpsd_fit_all   <- cpsd_fits_river_length$all
 
 The Segur et al. (2026) algorithm fitted power-law slopes of α_CPSD = `r round(cpsd_fit_frag$a_cpsd, 2)` ± `r round(cpsd_fit_frag$se_a_cpsd, 2)` for fragments (LOD `r round(cpsd_fit_frag$lower_lod_used_um)` – `r round(cpsd_fit_frag$upper_lod_um)` µm), α_CPSD = `r round(cpsd_fit_fiber$a_cpsd, 2)` ± `r round(cpsd_fit_fiber$se_a_cpsd, 2)` for fibers (LOD `r round(cpsd_fit_fiber$lower_lod_used_um)` – `r round(cpsd_fit_fiber$upper_lod_um)` µm), and α_CPSD = `r round(cpsd_fit_all$a_cpsd, 2)` ± `r round(cpsd_fit_all$se_a_cpsd, 2)` for all particles pooled (LOD `r round(cpsd_fit_all$lower_lod_used_um)` – `r round(cpsd_fit_all$upper_lod_um)` µm, R² = `r round(cpsd_fit_all$r2, 3)`). The corresponding differential BN-PSD slopes (a = α_CPSD − 1) are `r round(cpsd_fit_frag$a_psd, 2)` (fragment), `r round(cpsd_fit_fiber$a_psd, 2)` (fiber), and `r round(cpsd_fit_all$a_psd, 2)` (all). For comparison, [Segur et al. (2026)](https://doi.org/10.1186/s43591-026-00205-5) report a mean BN-PSD slope of −2.66 ± 0.68 for fragments across ocean and atmosphere samples.
 
-```{r cpsd-fits-by-location}
+```{r cpsd-fits-by-location, cache=TRUE, cache.extra=raw_data_cache_key}
 # Per-location fits (Carmel, Pajaro, Salinas, San Lorenzo) — all particles pooled by site
 locations <- sort(unique(raw_particles_river$sample_location))
 
@@ -581,7 +602,7 @@ alpha_comparison_plot
 
 ### 4.2.2 Fit C-PSD model to Particle Surface Area
 
-```{r cpsd-fits-surface-area}
+```{r cpsd-fits-surface-area, cache=TRUE, cache.extra=raw_data_cache_key}
 cpsd_fits_river_area <- fit_cpsd_by_shape(
   raw_particles_river, value_col = "area_um2",
   config = list(
@@ -663,7 +684,7 @@ cat("All      volume LOD: [", signif(vlb_river$all[1],      2), ",", signif(vlb_
 ```
 
 
-```{r cpsd-fits-volume}
+```{r cpsd-fits-volume, cache=TRUE, cache.extra=list(raw_data_cache_key, vlb_river)}
 cpsd_fits_river_volume <- fit_cpsd_by_shape(
   raw_particles_river, value_col = "V_um3",
   config = list(
@@ -699,7 +720,7 @@ volume_cpsd_plot
 
 ### 4.2.4 Per-river C-PSD fits (length, surface area, and volume — faceted)
 
-```{r cpsd-per-river-fits, message=FALSE, warning=FALSE, cache=FALSE}
+```{r cpsd-per-river-fits, message=FALSE, warning=FALSE, cache=TRUE, cache.extra=list(raw_data_cache_key, vlb_river)}
 # Fit C-PSD per river × shape for all three metrics.
 # Uses tryCatch to handle sparse data combinations gracefully.
 safe_cpsd <- function(data, ...) {
@@ -829,24 +850,81 @@ cpsd_loc_points <- dplyr::bind_rows(
   dplyr::filter(!is.na(logN))
 ```
 
-The faceted comparison plot for these fits is deferred to Section 12.1 (after the ocean C-PSD fits complete), where river and ocean are shown together on shared axes.
+The three-metric (length/area/volume) x shape x location faceted comparison, combined with ocean, is deferred to Section 12.0.1 (after the ocean C-PSD fits complete), where river and ocean are shown together on shared axes. A river-only length facet is shown here, since the length fits (`cpsd_loc_shape_length`) are already available at this point in the document.
+
+```{r cpsd-per-river-length-facet-plot, fig.width=10, fig.height=7, echo=FALSE}
+cpsd_loc_lines_length  <- dplyr::filter(cpsd_loc_lines,  metric == "Length (µm)")
+cpsd_loc_points_length <- dplyr::filter(cpsd_loc_points, metric == "Length (µm)")
+
+# Shape as color (not a facet row) so the three shape fits are directly
+# comparable within each river's own panel.
+shape_palette <- c("Fragment" = "#0072B2", "Fiber" = "#D55E00", "All shapes" = "#009E73")
+
+cpsd_river_length_facet_plot <- ggplot2::ggplot() +
+  ggplot2::geom_point(
+    data = dplyr::filter(cpsd_loc_points_length, !in_lod),
+    ggplot2::aes(x = log10(L_low), y = logN, color = shape),
+    size = 0.7, alpha = 0.08, shape = 16
+  ) +
+  ggplot2::geom_point(
+    data = dplyr::filter(cpsd_loc_points_length, in_lod),
+    ggplot2::aes(x = log10(L_low), y = logN, color = shape),
+    size = 1.3, alpha = 0.75, shape = 16
+  ) +
+  ggplot2::geom_ribbon(
+    data = cpsd_loc_lines_length,
+    ggplot2::aes(x = log10(L_low), ymin = logN_lo, ymax = logN_hi, fill = shape),
+    alpha = 0.15
+  ) +
+  ggplot2::geom_line(
+    data = cpsd_loc_lines_length,
+    ggplot2::aes(x = log10(L_low), y = logN_fit, color = shape),
+    linewidth = 0.9
+  ) +
+  ggplot2::facet_wrap(~location, nrow = 1) +
+  ggplot2::scale_color_manual(values = shape_palette, name = NULL) +
+  ggplot2::scale_fill_manual(values = shape_palette, guide = "none") +
+  ggplot2::guides(color = ggplot2::guide_legend(override.aes = list(alpha = 1, size = 3))) +
+  ggplot2::labs(
+    x        = expression(log[10] * "(Length, µm)"),
+    y        = expression(log[10] * (N("">=L))),
+    title    = "C-PSD particle-length fits by shape and river location",
+    subtitle = "Solid line + ribbon = fit ± 95% CI within Segur LOD window. Faded points = outside LOD.",
+    caption  = "Columns: river location; color: shape. River-only; see Section 12.0.1 for the combined river + ocean, all-metric version."
+  ) +
+  ggplot2::theme_minimal(base_size = 16) +
+  ggplot2::theme(
+    legend.position = "bottom",
+    panel.border = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.4),
+    strip.text   = ggplot2::element_text(face = "bold", size = 10),
+    plot.caption = ggplot2::element_text(size = 8, color = "gray50", hjust = 0)
+  )
+
+ggsave(cpsd_river_length_facet_plot, filename = "figures/cpsd_river_length_facet_plot.png",
+       width = 10, height = 7, dpi = 300)
+cpsd_river_length_facet_plot
+```
 
 ### 4.2.5 Per-river power-law slopes across size metrics
 
-The per-location C-PSD fits from Section 4.2.4 yield a BN-PSD slope *a*~psd~ for each combination of river location and size metric (length, surface area, volume). Comparing these slopes across metrics shows how the shape of the size distribution changes with the geometric measure used, and whether location-to-location variation is consistent across metrics.
+The per-location C-PSD fits from Section 4.2.4 yield a C-PSD slope *a*~cpsd~ for each combination of river location and size metric (length, surface area, volume) -- the preferred, robust convention (Section 4.1), not the inferior BN-PSD/differential convention. Comparing these slopes across metrics shows how the shape of the size distribution changes with the geometric measure used, and whether location-to-location variation is consistent across metrics.
 
 ```{r cpsd-slopes-all-metrics, fig.width=10, fig.height=4.5}
-# Extract per-location a_psd for surface area and volume from the per-river fits
+# Extract per-location a_cpsd (C-PSD, the preferred/robust convention -- Section
+# 4.1) for surface area and volume from the per-river fits. Previously plotted
+# a_psd (the differential, BN-PSD-equivalent slope); BN-PSD alone is
+# insufficient to correct binning bias (Segur et al. 2026), so this comparison
+# now uses the C-PSD slope directly rather than its BN-PSD-convention shift.
 extract_loc_slopes <- function(fits_by_loc, metric_name) {
   dplyr::bind_rows(lapply(names(fits_by_loc), function(loc) {
     fo <- fits_by_loc[[loc]][["all"]]
     if (!isTRUE(fo$valid) || is.null(fo$fit)) return(NULL)
-    tibble::tibble(location = loc, a_psd = fo$a_psd, se_a_cpsd = fo$se_a_cpsd, metric = metric_name)
+    tibble::tibble(location = loc, a_cpsd = fo$a_cpsd, se_a_cpsd = fo$se_a_cpsd, metric = metric_name)
   }))
 }
 
 loc_slopes_all <- dplyr::bind_rows(
-  dplyr::transmute(loc_summary, location, a_psd, se_a_cpsd, metric = "Length (µm)"),
+  dplyr::transmute(loc_summary, location, a_cpsd, se_a_cpsd, metric = "Length (µm)"),
   extract_loc_slopes(cpsd_loc_shape_area, "Surface Area (µm²)"),
   extract_loc_slopes(cpsd_loc_shape_vol,  "Volume (µm³)")
 ) |>
@@ -855,15 +933,17 @@ loc_slopes_all <- dplyr::bind_rows(
     location = factor(location, levels = locations)
   )
 
-# Reference slopes (Segur 2026 ocean mean, length metric)
+# Reference slope (Segur 2026 ocean fragment mean, length metric), converted
+# from the BN-PSD/differential convention Segur et al. report (-2.66) to the
+# C-PSD/cumulative convention plotted here (a_cpsd = a_psd + 1).
 ref_slopes <- data.frame(
   metric    = factor("Length (µm)", levels = levels(loc_slopes_all$metric)),
-  ref_slope = -2.66,
-  ref_label = "Segur 2026\nfragment mean"
+  ref_slope = -2.66 + 1,
+  ref_label = "Segur 2026\nfragment mean (C-PSD)"
 )
 
 cpsd_slopes_all_metrics_plot <- ggplot2::ggplot(loc_slopes_all,
-    ggplot2::aes(x = location, y = a_psd, color = location)) +
+    ggplot2::aes(x = location, y = a_cpsd, color = location)) +
   ggplot2::geom_hline(
     data = ref_slopes,
     ggplot2::aes(yintercept = ref_slope),
@@ -871,16 +951,16 @@ cpsd_slopes_all_metrics_plot <- ggplot2::ggplot(loc_slopes_all,
   ) +
   ggplot2::geom_point(size = 4) +
   ggplot2::geom_errorbar(
-    ggplot2::aes(ymin = a_psd - se_a_cpsd, ymax = a_psd + se_a_cpsd),
+    ggplot2::aes(ymin = a_cpsd - se_a_cpsd, ymax = a_cpsd + se_a_cpsd),
     width = 0.2, linewidth = 0.8
   ) +
   ggplot2::facet_wrap(~ metric, nrow = 1, scales = "free_y") +
   ggplot2::scale_color_manual(values = loc_palette, guide = "none") +
   ggplot2::labs(
     x        = "River location",
-    y        = expression(italic(a)[psd]),
-    title    = "BN-PSD slope by river location and size metric",
-    subtitle = "Error bars = ±1 SE  |  Dashed = Segur 2026 fragment reference (length only)"
+    y        = expression(italic(a)[cpsd]),
+    title    = "C-PSD slope by river location and size metric",
+    subtitle = "Error bars = ±1 SE  |  Dashed = Segur 2026 fragment reference, converted to C-PSD convention (length only)"
   ) +
   ggplot2::theme_minimal(base_size = 20) +
   ggplot2::theme(
@@ -1167,7 +1247,7 @@ alpha_combined_plot_river
 
 The output `MC_sim_df` is a long data frame with one row per toxicological endpoint per Monte Carlo replicate, with columns for the aligned dose (`particles_L_food_dilution`, `particles_L_ox_stress`), bioaccessibility group (`ingestible`, `translocatable`), and quality tier (`risk.13`, `bio_f`). It is then split by ERM and filtered to the relevant endpoints before SSD fitting in Section 7.4.
 
-```{r run-pssd-pipeline}
+```{r run-pssd-pipeline, cache=TRUE, cache.extra=n_boot}
 # run_pssd_pipeline() (sourced from R/mp_risk_utils.R) bundles MC_sim_align_parallel(),
 # the ERM-specific results_df filtering, erm_registry construction, and make_all_pSSDs()
 # into one step used identically across river/sediment/ocean.
@@ -1219,7 +1299,15 @@ PNEC_plot_05_river
 # Re-printing a ggrepel layer multiple times in one session can hit a "Viewport has zero
 # dimension(s)" grid bug, so we save once via ggsave() and display the rendered PNG rather
 # than re-drawing the live ggplot object a second time.
-pSSD_plot_river <- pSSDs$`Tier3_Freshwater_Food Dilution`$pSSD_plot + theme_minimal(base_size = 20)
+if (!requireNamespace("ggtext", quietly = TRUE)) install.packages("ggtext")
+
+# PSSDplusplus's own pSSD_plot builds legend labels as literal HTML <span
+# style="color:..."> markup (colored species names). theme_minimal() alone
+# doesn't interpret that markup -- legend.text needs ggtext::element_markdown()
+# or it renders as raw "<span style=...>" text instead of colored labels.
+pSSD_plot_river <- pSSDs$`Tier3_Freshwater_Food Dilution`$pSSD_plot +
+  theme_minimal(base_size = 20) +
+  ggplot2::theme(legend.text = ggtext::element_markdown())
 pSSD_plot_river <- label_matrix(pSSD_plot_river, "River water")
 
 ggsave(pSSD_plot_river, filename = "figures/pSSD_plot_river.png", width = 9, height = 6, dpi = 300)
@@ -1380,7 +1468,7 @@ mc2d_rq_density_plot
 
 Hoffman et al. (2026) show that vertical transport can make a sampled PSD deviate from a single power law, with apparent slopes differing from the underlying PSD by about two exponent units across a critical size. The following diagnostics are model-based sensitivities. They do not replace the production CF, but they show how much the Food Dilution and Tissue Translocation risk summaries move when the slope uncertainty is widened beyond OLS fit error and when surface/subsurface samples are analyzed separately.
 
-```{r hoffman-slope-uncertainty-sensitivity}
+```{r hoffman-slope-uncertainty-sensitivity, cache=TRUE, cache.extra=n_boot}
 summarize_mc2d_hc5 <- function(x) {
   x |>
     dplyr::filter(HCx == 5) |>
@@ -1435,7 +1523,7 @@ knitr::kable(
 
 The `structural_sd = 0` row isolates the corrected differential-slope convention with fit uncertainty only. Wider rows are assumptions motivated by Hoffman et al. (2026) and the RIVM (2025) precedent for deliberately broad slope priors; they are sampled in the MC2D outer uncertainty loop through `combined_cf`, not in the inner exposure-variability loop.
 
-```{r hoffman-depth-stratified-sensitivity}
+```{r hoffman-depth-stratified-sensitivity, cache=TRUE, cache.extra=n_boot}
 depth_levels <- levels(monitoring$sample_depth_general)
 
 depth_shape_fits <- dplyr::bind_rows(lapply(depth_levels, function(depth_i) {
@@ -1537,7 +1625,7 @@ Surface and subsurface strata are both large enough to fit C-PSD slopes and boot
 
 The headline river assessment pools particle and monitoring data across all four sampling locations (Carmel, Pajaro, Salinas, San Lorenzo) into a single C-PSD fit and a single exposure distribution. This section instead runs the full workflow -- C-PSD fit, differential-slope draws, correction factor, EED bootstrap, and Food Dilution/Tissue Translocation risk characterization -- **independently for each river**, reusing each location's C-PSD fit already computed in Section 4.2.1 (`cpsd_fits_by_loc`) and each river's own monitoring replicates, but the same production hazard distribution (`haz`) throughout, since species toxicity does not depend on which river was sampled. This tests whether the pooled result masks location-specific differences in exposure (driven by each river's own particle-size slope and measured concentrations) rather than assuming one river is representative of all four.
 
-```{r river-stratified-risk, message=FALSE, warning=FALSE}
+```{r river-stratified-risk, message=FALSE, warning=FALSE, cache=TRUE, cache.extra=n_boot}
 river_hc5_risk <- dplyr::bind_rows(lapply(locations, function(loc) {
   fit_i     <- cpsd_fits_by_loc[[loc]]
   seed_base <- 41000 + match(loc, locations) * 10
@@ -1744,7 +1832,7 @@ raw_particles_sed <- raw_particles_sed |>
 ```
 
 ### Particle length
-```{r cpsd-fits-sed-length}
+```{r cpsd-fits-sed-length, cache=TRUE, cache.extra=raw_data_cache_key}
 cpsd_fits_sed_length <- fit_cpsd_by_shape(
   raw_particles_sed, value_col = "length_um",
   config = list(
@@ -1788,7 +1876,7 @@ sed_length_cpsd_plot
 ```
 
 ### Particle surface area
-```{r cpsd-fits-sed-area}
+```{r cpsd-fits-sed-area, cache=TRUE, cache.extra=raw_data_cache_key}
 cpsd_fits_sed_area <- fit_cpsd_by_shape(
   raw_particles_sed, value_col = "area_um2",
   config = list(
@@ -1837,7 +1925,7 @@ cat("Sediment fiber    volume LOD: [", signif(vlb_sed$fiber[1],    2), ",", sign
 cat("Sediment all      volume LOD: [", signif(vlb_sed$all[1],      2), ",", signif(vlb_sed$all[2],      2), "] µm³\n")
 ```
 
-```{r cpsd-fits-sed-volume}
+```{r cpsd-fits-sed-volume, cache=TRUE, cache.extra=list(raw_data_cache_key, vlb_sed)}
 cpsd_fits_sed_volume <- fit_cpsd_by_shape(
   raw_particles_sed, value_col = "V_um3",
   config = list(
@@ -2077,7 +2165,7 @@ alpha_combined_plot_sed
 ```
 
 #### Align Toxicity Data
-```{r align-tox-sed}
+```{r align-tox-sed, cache=TRUE, cache.extra=n_boot}
 # run_pssd_pipeline() (sourced from R/mp_risk_utils.R) bundles MC_sim_align_parallel(),
 # the ERM-specific results_df filtering, erm_registry construction, and make_all_pSSDs()
 # into one step used identically across river/sediment/ocean. Sediment is mass-based
@@ -2108,7 +2196,8 @@ pSSDs_sed <- sed_pssd$pSSDs
 
 ```{r pssd-plot-sed}
 # Uses ggrepel internally — save once, display the rendered PNG (see river pSSD_plot note above).
-pSSD_plot_sed <- pSSDs_sed$`Tier3_Freshwater Sediment_Food Dilution`$pSSD_plot
+pSSD_plot_sed <- pSSDs_sed$`Tier3_Freshwater Sediment_Food Dilution`$pSSD_plot +
+  ggplot2::theme(legend.text = ggtext::element_markdown())
 pSSD_plot_sed <- label_matrix(pSSD_plot_sed, "Sediment")
 
 ggsave(pSSD_plot_sed, filename = "figures/pSSD_plot_sed.png", width = 9, height = 6, dpi = 300)
@@ -2304,7 +2393,7 @@ cat("Ocean particles: n =", nrow(raw_particles_ocean),
 
 ### Particle length
 
-```{r cpsd-fits-ocean-length}
+```{r cpsd-fits-ocean-length, cache=TRUE, cache.extra=raw_data_cache_key}
 cpsd_fits_ocean_length <- fit_cpsd_by_shape(
   raw_particles_ocean, value_col = "length_um",
   config = list(
@@ -2336,7 +2425,7 @@ ocean_length_cpsd_plot
 
 ### Particle surface area
 
-```{r cpsd-fits-ocean-area}
+```{r cpsd-fits-ocean-area, cache=TRUE, cache.extra=raw_data_cache_key}
 cpsd_fits_ocean_area <- fit_cpsd_by_shape(
   raw_particles_ocean, value_col = "area_um2",
   config = list(
@@ -2382,7 +2471,7 @@ cat("Ocean fiber    volume LOD (informational only — too few particles to use 
     signif(vlb_ocean$fiber[1], 2), ",", signif(vlb_ocean$fiber[2], 2), "] µm³\n")
 ```
 
-```{r cpsd-fits-ocean-volume}
+```{r cpsd-fits-ocean-volume, cache=TRUE, cache.extra=list(raw_data_cache_key, vlb_ocean)}
 # fragment and all use the same uniform vol_bin_um as river/sediment. fiber is the one
 # documented exception (see note above): with only 4 particles inside its physically-
 # derived window, no fixed window is viable, so it falls back to auto-detection
@@ -2470,6 +2559,25 @@ cpsd_loc_points_ro <- dplyr::bind_rows(
     location = factor(location, levels = locations_ro)
   ) |>
   dplyr::filter(!is.na(logN))
+
+# Visualization-only trim (does not touch any fitted number): the fixed
+# vol_bin_um bin width, applied to volume's multi-order-of-magnitude range,
+# generates thousands of mostly-empty bins in the extreme long tail for any
+# shape/location with even a few very-large-volume particles (their
+# cumulative count N_ge stays > 0 almost to the last bin, so
+# extract_fit_points()'s N_ge > 0 filter doesn't drop them) -- e.g. Carmel
+# fiber's raw points span to 1.24e8 um^3 while its own fit window tops out
+# near 5.8e6. With facet scales = "free_x" this stretches that one panel's
+# axis so far the real fitted region (a thin sliver at the left edge)
+# effectively disappears. Trimming each (location, shape, metric) group to
+# its own 99th percentile of L_low removes that artifact tail while
+# retaining the near-LOD "faded" context points every other panel already
+# shows; the underlying fit objects (cpsd_loc_shape_vol_ro etc.) and every
+# computed a_cpsd/a_psd value are untouched.
+cpsd_loc_points_ro <- cpsd_loc_points_ro |>
+  dplyr::group_by(location, shape, metric) |>
+  dplyr::filter(L_low <= stats::quantile(L_low, 0.99, na.rm = TRUE)) |>
+  dplyr::ungroup()
 
 loc_palette_ro_used <- loc_palette_ro[names(loc_palette_ro) %in% as.character(unique(cpsd_loc_lines_ro$location))]
 
@@ -2613,6 +2721,7 @@ fit_to_alpha_row <- function(matrix_label, shape_label, fit, psd_id, source_deta
     n_bins = fit$n_bins,
     a_cpsd = fit$a_cpsd,
     a_psd = fit$a_psd,
+    se_a_psd = fit$se_a_psd,
     lod_low_um = fit$lower_lod_used_um,
     lod_high_um = fit$upper_lod_um,
     alpha_abs = abs(fit$a_psd),
@@ -2692,7 +2801,8 @@ this_study_river_shape <- this_study_length_alpha |>
     Matrix = "Freshwater",
     Shape,
     alpha_abs,
-    se = NA_real_,
+    se = se_a_psd,
+    se_kind = "SE",
     point_label = Shape,
     n_desc = paste0(n_bins, " length bins (C-PSD fit)"),
     lod_desc = paste0(round(lod_low_um), "–", round(lod_high_um), " µm (Segur LOD)"),
@@ -2706,7 +2816,8 @@ this_study_ocean_shape <- this_study_length_alpha |>
     Matrix = "Marine",
     Shape,
     alpha_abs,
-    se = NA_real_,
+    se = se_a_psd,
+    se_kind = "SE",
     point_label = Shape,
     n_desc = paste0(n_bins, " length bins (C-PSD fit)"),
     lod_desc = paste0(round(lod_low_um), "–", round(lod_high_um), " µm (Segur LOD)"),
@@ -2721,7 +2832,8 @@ this_study_river_sites <- loc_summary |>
     Matrix = "Freshwater",
     Shape = "all-site",
     alpha_abs = abs(a_psd),
-    se = NA_real_,
+    se = se_a_cpsd,
+    se_kind = "SE",
     point_label = location,
     n_desc = paste0(n_bins, " length bins (C-PSD fit)"),
     lod_desc = paste0(round(lod_low_um), "–", round(lod_high_um), " µm (Segur LOD)"),
@@ -2737,6 +2849,7 @@ wang_df <- tibble::tibble(
   Shape       = "all",
   alpha_abs   = c(3.65, 3.89, 3.19),
   se          = c(0.21, 0.36, 0.58),
+  se_kind     = "SD",
   point_label = c("Combined", "Lobith (Rhine)", "Eijsden (Meuse)"),
   n_desc      = c("n = 6 samples (pooled fit)", "n = 4 samples (site mean)", "n = 2 samples (site mean)"),
   lod_desc    = c("118 µm (min, pooled fit)", "38–92 µm (per-sample range)", "35–90 µm (per-sample range)"),
@@ -2749,6 +2862,7 @@ segur_ocean_ref_df <- tibble::tibble(
   Shape       = "all",
   alpha_abs   = 2.66,
   se          = NA_real_,
+  se_kind     = NA_character_,
   point_label = NA_character_,
   n_desc      = "Reference default (not sample-based)",
   lod_desc    = "Not reported",
@@ -2762,6 +2876,7 @@ kooi_df <- tibble::tibble(
   alpha_abs   = c(kooi_alpha_freshwater, kooi_alpha_marine),
   se          = c(PSSDplusplus::param_default_values$alpha.freshwater.sd,
                    PSSDplusplus::param_default_values$alpha.marine.sd),
+  se_kind     = "SE",
   point_label = NA_character_,
   n_desc      = "PSSDplusplus::param_default_values literature synthesis default",
   lod_desc    = "Not reported",
@@ -2778,6 +2893,7 @@ zhao_df <- tibble::tibble(
   Shape       = "all",
   alpha_abs   = c(1.50, 1.53),
   se          = c(0.53, NA_real_),
+  se_kind     = "SD",
   point_label = c("Raw (unadjusted)", "Mesh-adjusted"),
   n_desc      = "n = 45 studies (meta-analysis; freshwater + marine pooled, not separated in source)",
   lod_desc    = "10–5000 µm (model domain)",
@@ -2791,6 +2907,7 @@ literature_ocean_df <- literature_ocean_only |>
     Shape       = "all",
     alpha_abs,
     se          = NA_real_,
+    se_kind     = NA_character_,
     point_label = NA_character_,
     n_desc      = paste0("PSD_ID = ", PSD_ID),
     lod_desc    = paste0(round(lod_low_um), "–", round(lod_high_um), " µm"),
@@ -2836,7 +2953,13 @@ alpha_forest_df <- dplyr::bind_rows(
     is_boxplot_row  = Source == "Literature ocean (MPSizeBase compilation, marine)",
     # offset was fixed at each source-piece's own construction (above), so it
     # is never recomputed from a mismatched/shared group size here.
-    x_pos = as.numeric(Source) + offset
+    x_pos = as.numeric(Source) + offset,
+    # ci_mult: 1.96 for genuine standard-error sources (a true 95% CI, normal
+    # approximation) -- Kooi et al. and This Study (se_a_psd/se_a_cpsd from
+    # the C-PSD fits). 1 for sources whose "se" column is actually a reported
+    # SD (Wang, Zhao -- both explicitly documented as SD in this plot's
+    # caption already), left as +-1 SD rather than mislabeled as a CI.
+    ci_mult = dplyr::if_else(se_kind == "SE", 1.96, 1)
   )
 
 matrix_pal_forest <- c(
@@ -2857,14 +2980,22 @@ alpha_comparison_plot <- ggplot2::ggplot(
     color = "#009E73", alpha = 0.12, width = 0.55, outlier.shape = NA
   ) +
   ggplot2::geom_errorbar(
+    # 95% CI (+-1.96 x SE, normal approximation) for genuine-SE sources:
+    # Kooi et al. (param_default_values .sd fields) and This Study
+    # (se_a_psd/se_a_cpsd from the C-PSD fits, wired in above; was previously
+    # hardcoded NA here). Wang/Zhao's bars stay +-1 SD (ci_mult = 1), matching
+    # what this plot's own caption already documents them as. Segur et al.'s
+    # single ocean reference value has no SE to show (a fixed literature
+    # default, not a fitted estimate with its own uncertainty) -- correctly
+    # stays without a bar.
     data = alpha_forest_df |> dplyr::filter(!is.na(se)),
-    ggplot2::aes(ymin = alpha_abs - se, ymax = alpha_abs + se, color = Matrix),
+    ggplot2::aes(ymin = alpha_abs - ci_mult * se, ymax = alpha_abs + ci_mult * se, color = Matrix),
     width = 0.10, linewidth = 0.6
   ) +
   ggplot2::geom_jitter(
     data = alpha_forest_df |> dplyr::filter(is_boxplot_row),
     ggplot2::aes(color = Matrix, shape = Shape),
-    width = 0.16, height = 0, alpha = 0.35, size = 1.6
+    width = 0.24, height = 0, alpha = 0.35, size = 1.6
   ) +
   ggplot2::geom_point(
     data = alpha_forest_df |> dplyr::filter(!is_boxplot_row),
@@ -2900,6 +3031,9 @@ alpha_comparison_plot <- ggplot2::ggplot(
     ),
     caption = paste0(
       "Colors match freshwater/marine usage elsewhere in this document (blue = freshwater, green = marine). ",
+      "Error bars: Kooi et al. and This Study show a 95% CI (+-1.96 SE, from each fit's own se_a_cpsd/se_a_psd); ",
+      "Wang et al. and Zhao et al. show +-1 reported SD (not a CI -- see below); Segur et al.'s ocean reference is a ",
+      "fixed literature default with no fitted uncertainty, so it has no error bar. ",
       "Zhao et al. (2026) is unclassified gray because its 45-study meta-analysis pools freshwater and marine sites ",
       "and reports only a pooled mean ± SD (no per-study values or shape split), plotted as point ± SD rather than a boxplot. ",
       "Literature ocean (MPSizeBase) box+jitter uses ", nrow(literature_ocean_only), " individual PSD_IDs. ",
@@ -3097,7 +3231,7 @@ tryCatch(
 
 ### Align toxicity data
 
-```{r ocean-mc-sim}
+```{r ocean-mc-sim, cache=TRUE, cache.extra=n_boot}
 # run_pssd_pipeline() (sourced from R/mp_risk_utils.R) bundles MC_sim_align_parallel(),
 # the ERM-specific results_df filtering, erm_registry construction, and make_all_pSSDs()
 # into one step used identically across river/sediment/ocean.
@@ -3128,7 +3262,8 @@ pSSDs_ocean <- ocean_pssd$pSSDs
 
 ```{r pssd-plot-ocean}
 # Uses ggrepel internally — save once, display the rendered PNG (see river pSSD_plot note above).
-pSSD_plot_ocean <- pSSDs_ocean$`Tier3_Marine_Food Dilution`$pSSD_plot
+pSSD_plot_ocean <- pSSDs_ocean$`Tier3_Marine_Food Dilution`$pSSD_plot +
+  ggplot2::theme(legend.text = ggtext::element_markdown())
 pSSD_plot_ocean <- label_matrix(pSSD_plot_ocean, "Ocean water")
 
 ggsave(pSSD_plot_ocean, filename = "figures/pSSD_plot_ocean.png", width = 9, height = 6, dpi = 300)
@@ -3233,7 +3368,7 @@ rb_river_tt <- dplyr::filter(mc2d_summary, ERM == "Tissue Translocation", HCx ==
 rb_sed_fd   <- dplyr::filter(risk_summary_sed, ERM == "Food Dilution", HCx == 5)
 ```
 
-> **River and ocean water (the quantitative headline result).** At HC5, river water Food Dilution median RQ = `r round(rb_river_fd$RQ_p50_med, 2)` (P(RQ>1) = `r round(rb_river_fd$P_exceed_med*100,1)`%) and Tissue Translocation median RQ = `r round(rb_river_tt$RQ_p50_med, 3)` (P(RQ>1) = `r round(rb_river_tt$P_exceed_med*100,1)`%); ocean water Food Dilution median RQ = `r round(rs_ocean_food_hc5$RQ_p50_med, 2)` (P(RQ>1) = `r round(rs_ocean_food_hc5$P_exceed_med*100,1)`%) and Tissue Translocation median RQ = `r round(rs_ocean_tissue_hc5$RQ_p50_med, 3)` (P(RQ>1) = `r round(rs_ocean_tissue_hc5$P_exceed_med*100,1)`%). **Food Dilution is risk-dominant; Tissue Translocation is below threshold at the median**, for both matrices. The single-slope exposure correction (used above) and a piecewise (dual-slope) bounding sensitivity bracket the sub-detection-limit extrapolation; both are quantified in the Sensitivity & structural uncertainty section below. **Sediment is excluded from this conclusion**: its exposure concentration is a per-liter water value with no dry-mass basis, not a genuine particles/kg-dry-weight measurement, and its nominal Food Dilution RQ (`r formatC(round(rb_sed_fd$RQ_p50), format = "d", big.mark = ",")`, P = `r round(rb_sed_fd$P_exceed*100)`%) fails a benthic-plausibility guard by roughly eleven orders of magnitude (Section 11). A fully quantified executive summary, including the RQ decomposition that separates the exposure/length-slope/area-slope/volume-slope contributions, follows in Key Findings below.
+> **River and ocean water (the quantitative headline result).** At HC5, river water Food Dilution median RQ = `r round(rb_river_fd$RQ_p50_med, 2)` (P(RQ>1) = `r round(rb_river_fd$P_exceed_med*100,1)`%) and Tissue Translocation median RQ = `r round(rb_river_tt$RQ_p50_med, 3)` (P(RQ>1) = `r round(rb_river_tt$P_exceed_med*100,1)`%); ocean water Food Dilution median RQ = `r round(rs_ocean_food_hc5$RQ_p50_med, 2)` (P(RQ>1) = `r round(rs_ocean_food_hc5$P_exceed_med*100,1)`%) and Tissue Translocation median RQ = `r round(rs_ocean_tissue_hc5$RQ_p50_med, 3)` (P(RQ>1) = `r round(rs_ocean_tissue_hc5$P_exceed_med*100,1)`%). **A food-dilution threshold exceedance cannot be excluded, but it is method-conditional** (floor-sensitive and driven by which toxicity studies enter the food-dilution SSD, not by exposure extrapolation alone -- Section 12.5.1.3.1); **Tissue Translocation is below threshold at the median for both matrices.** The single-slope exposure correction (used above), a piecewise (dual-slope) bounding sensitivity, and an MLE/lognormal extrapolation-model comparison (Section 12.5.2) together bracket the sub-detection-limit extrapolation; all are quantified in the Sensitivity & structural uncertainty section below. **Sediment is excluded from this conclusion**: its exposure concentration is a per-liter water value with no dry-mass basis, not a genuine particles/kg-dry-weight measurement, and its nominal Food Dilution RQ (`r formatC(round(rb_sed_fd$RQ_p50), format = "d", big.mark = ",")`, P = `r round(rb_sed_fd$P_exceed*100)`%) fails a benthic-plausibility guard by roughly eleven orders of magnitude (Section 11). A fully quantified executive summary, including the RQ decomposition that separates the exposure/length-slope/area-slope/volume-slope contributions, follows in Key Findings below.
 
 ---
 
@@ -3246,7 +3381,7 @@ param_values_legacy_sed    <- legacy_cumulative_av_params(param_values_sed,  "se
 param_values_legacy_ocean  <- legacy_cumulative_av_params(param_values_ocean,"marine",                cpsd_fit_volume_ocean, cpsd_fit_area_ocean)
 ```
 
-```{r spec1b-legacy-river-pipeline, include=FALSE}
+```{r spec1b-legacy-river-pipeline, include=FALSE, cache=TRUE, cache.extra=n_boot}
 set.seed(7004)
 param_matrix_legacy_river <- matrix_function(
   n = n_boot,
@@ -3277,7 +3412,7 @@ risk_draws_legacy_river  <- draw_rq_mc1d(haz_legacy_river, eed_boot$q50, n_risk 
 risk_summary_legacy_river <- summarize_rq(risk_draws_legacy_river)
 ```
 
-```{r spec1b-legacy-sed-pipeline, include=FALSE}
+```{r spec1b-legacy-sed-pipeline, include=FALSE, cache=TRUE, cache.extra=n_boot}
 set.seed(7005)
 param_matrix_legacy_sed <- matrix_function(
   n = n_boot,
@@ -3312,7 +3447,7 @@ risk_draws_legacy_sed  <- draw_rq_mc1d(haz_legacy_sed, eed_boot_sed$q50, n_risk 
 risk_summary_legacy_sed <- summarize_rq(risk_draws_legacy_sed)
 ```
 
-```{r spec1b-legacy-ocean-pipeline, include=FALSE}
+```{r spec1b-legacy-ocean-pipeline, include=FALSE, cache=TRUE, cache.extra=n_boot}
 set.seed(7006)
 param_matrix_legacy_ocean <- matrix_function(
   n = n_boot,
@@ -3440,17 +3575,21 @@ eed_boot_piecewise_ocean <- if (is.finite(pw_ocean$cf_piecewise)) {
 } else NULL
 
 set.seed(9411)
-risk_summary_piecewise_river <- if (!is.null(eed_boot_piecewise_river)) {
-  summarize_rq(draw_rq_mc1d(haz, eed_boot_piecewise_river$q50, n_risk = n_risk))
+risk_draws_piecewise_river <- if (!is.null(eed_boot_piecewise_river)) {
+  draw_rq_mc1d(haz, eed_boot_piecewise_river$q50, n_risk = n_risk)
 } else NULL
+risk_summary_piecewise_river <- if (!is.null(risk_draws_piecewise_river)) summarize_rq(risk_draws_piecewise_river) else NULL
+
 set.seed(9412)
 risk_summary_piecewise_sed <- if (!is.null(eed_boot_piecewise_sed)) {
   summarize_rq(draw_rq_mc1d(haz_sed, eed_boot_piecewise_sed$q50, n_risk = n_risk_sed))
 } else NULL
+
 set.seed(9413)
-risk_summary_piecewise_ocean <- if (!is.null(eed_boot_piecewise_ocean)) {
-  summarize_rq(draw_rq_mc1d(haz_ocean, eed_boot_piecewise_ocean$q50, n_risk = n_risk_ocean))
+risk_draws_piecewise_ocean <- if (!is.null(eed_boot_piecewise_ocean)) {
+  draw_rq_mc1d(haz_ocean, eed_boot_piecewise_ocean$q50, n_risk = n_risk_ocean)
 } else NULL
+risk_summary_piecewise_ocean <- if (!is.null(risk_draws_piecewise_ocean)) summarize_rq(risk_draws_piecewise_ocean) else NULL
 ```
 
 ```{r spec2b-bounding-table}
@@ -3509,24 +3648,61 @@ rq_bounding_tbl <- dplyr::bind_rows(
   dplyr::select(Matrix, Case, ERM, RQ_p50, RQ_p95, P_exceed) |>
   dplyr::arrange(Matrix, ERM, Case)
 
+# 95% CI (2.5th-97.5th percentile of the underlying 1D risk draws) for the
+# plot's error bars -- summarize_rq() itself only returns p50/p95/p99, so the
+# lower bound is computed here directly from each case's already-existing raw
+# draws object (river/ocean single-slope: risk_draws/risk_draws_ocean, already
+# built in Sections 8/12.4; piecewise: risk_draws_piecewise_river/_ocean,
+# saved alongside their summaries above) rather than retrofitting summarize_rq().
+rq_ci_from_draws <- function(draws, matrix_label, case_label) {
+  if (is.null(draws)) return(NULL)
+  draws |>
+    dplyr::filter(ERM %in% c("Food Dilution", "Tissue Translocation"), HCx == 5) |>
+    dplyr::group_by(ERM) |>
+    dplyr::summarise(RQ_p025 = stats::quantile(RQ, 0.025, na.rm = TRUE),
+                      RQ_p975 = stats::quantile(RQ, 0.975, na.rm = TRUE), .groups = "drop") |>
+    dplyr::mutate(Matrix = matrix_label, Case = case_label)
+}
+
+rq_bounding_ci <- dplyr::bind_rows(
+  rq_ci_from_draws(risk_draws,                 "River water", "Single-slope (production)"),
+  rq_ci_from_draws(risk_draws_piecewise_river,  "River water", "Piecewise (bounding)"),
+  rq_ci_from_draws(risk_draws_ocean,            "Ocean water", "Single-slope (production)"),
+  rq_ci_from_draws(risk_draws_piecewise_ocean,  "Ocean water", "Piecewise (bounding)")
+)
+
+rq_bounding_tbl <- rq_bounding_tbl |> dplyr::left_join(rq_bounding_ci, by = c("Matrix", "Case", "ERM"))
+
 knitr::kable(
   rq_bounding_tbl, digits = 3,
-  caption = "SPEC 2b: Food Dilution / Tissue Translocation HC5 RQ bounding range, single-slope (production) vs. piecewise (bounding sensitivity)"
+  caption = paste0(
+    "SPEC 2b: Food Dilution / Tissue Translocation HC5 RQ bounding range, single-slope (production) vs. piecewise ",
+    "(bounding sensitivity). RQ_p025/RQ_p975 = 95% CI (2.5th-97.5th percentile of the 1D risk draws); not available ",
+    "for Sediment (illustrative only, no comparable raw-draws object retained)."
+  )
 )
 ```
 
 ```{r spec2b-rq-bounding-plot, fig.width=11, fig.height=6}
+# Sediment excluded entirely (not just labeled illustrative) -- its exposure
+# concentration is not a genuine particles/kg-dry-weight value (SPEC 1d), so
+# it is not comparable to the River/Ocean RQs even on a log scale.
+rq_bounding_dodge <- ggplot2::position_dodge(width = 0.5)
+
 rq_bounding_plot <- rq_bounding_tbl |>
+  dplyr::filter(Matrix != "Sediment") |>
   ggplot2::ggplot(ggplot2::aes(x = Matrix, y = RQ_p50, color = ERM, shape = Case)) +
   ggplot2::geom_hline(yintercept = 1, linetype = "dashed", color = "gray40") +
-  ggplot2::geom_point(size = 3.5, position = ggplot2::position_dodge(width = 0.5)) +
+  ggplot2::geom_errorbar(ggplot2::aes(ymin = RQ_p025, ymax = RQ_p975), width = 0.2, linewidth = 0.6,
+                         position = rq_bounding_dodge, na.rm = TRUE) +
+  ggplot2::geom_point(size = 3.5, position = rq_bounding_dodge) +
   ggplot2::scale_y_log10(labels = scales::label_number()) +
   ggplot2::scale_color_manual(values = ERM_PALETTE, name = "ERM") +
   ggplot2::scale_shape_manual(values = c("Single-slope (production)" = 16, "Piecewise (bounding)" = 17), name = NULL) +
   ggplot2::labs(
     x = NULL, y = "HC5 median RQ [log10 scale]",
     title = "Food Dilution / Tissue Translocation HC5 RQ: single-slope vs. piecewise bounding sensitivity",
-    subtitle = "Dashed line = RQ = 1. Sediment is illustrative only (SPEC 1d)."
+    subtitle = "Dashed line = RQ = 1. Bars = 95% CI (2.5th-97.5th percentile of the 1D risk draws). Sediment excluded (illustrative only, SPEC 1d; see Section 13.3 table for its non-comparable value)."
   ) +
   ggplot2::theme_minimal(base_size = 15) +
   ggplot2::theme(legend.position = "bottom", panel.border = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.4))
@@ -3541,18 +3717,17 @@ rq_bounding_plot
 # 14. Combined risk quotient comparison across matrices
 
 `plot_rq_hist_combined()` (sourced from `R/risk_plotting.R`) row-binds the 1D Monte Carlo
-risk quotient draws for all three matrices — now that river (Section 8), sediment
-(Section 11.4), and ocean (Section 12.4) each have a 1D RQ distribution — into a single
-figure faceted by **Matrix (rows) × ERM (columns)**, so every panel is self-labeled by
-matrix rather than relying on a caption. **The Sediment row is retained here for completeness
-but is illustrative/non-quantitative (SPEC 1d, Section 11.3.0/11.4.0): its exposure
-concentration is not a genuine particles/kg-dry-weight value, so it must not be read
-alongside the River water and Ocean water rows as a comparable risk finding.**
+risk quotient draws for river (Section 8) and ocean (Section 12.4) into a single figure
+faceted by **Matrix (rows) × ERM (columns)**, so every panel is self-labeled by matrix
+rather than relying on a caption. **Sediment is excluded from this comparison entirely**
+(not merely labeled illustrative, SPEC 1d, Section 11.3.0/11.4.0): its exposure
+concentration is not a genuine particles/kg-dry-weight value, so it is not comparable to
+the River water and Ocean water rows even on a shared log-scale axis; its own (illustrative,
+non-quantitative) risk characterization remains in Section 11.4.
 
-```{r rq-comparison-all-matrices, fig.width=10, fig.height=9}
+```{r rq-comparison-all-matrices, fig.width=10, fig.height=6}
 rq_comparison_all_matrices_plot <- plot_rq_hist_combined(list(
   "River water" = risk_draws,
-  "Sediment (illustrative only, SPEC 1d)" = risk_draws_sed,
   "Ocean water" = risk_draws_ocean
 ))
 
@@ -3562,7 +3737,7 @@ rq_comparison_all_matrices_plot
 ```
 
 
-```{r spec3b-decomp-length-alpha-legacy, include=FALSE}
+```{r spec3b-decomp-length-alpha-legacy, include=FALSE, cache=TRUE, cache.extra=n_boot}
 # (ii) Hazard-side length-slope alignment reverted to legacy (cumulative-as-
 # differential); a.v/a.sa/a.m and exposure stay at their corrected values.
 # Requires one additional pSSD rerun (river only, for compute budget).
@@ -3604,7 +3779,7 @@ risk_draws_legacy_alpha_river <- draw_rq_mc1d(haz_legacy_alpha_river, eed_boot$q
 risk_summary_legacy_alpha_river <- summarize_rq(risk_draws_legacy_alpha_river)
 ```
 
-```{r spec3c-decomp-asa-legacy, include=FALSE}
+```{r spec3c-decomp-asa-legacy, include=FALSE, cache=TRUE, cache.extra=n_boot}
 # (iv) Hazard surface-area-slope alignment ONLY reverted to legacy
 # (cumulative-as-differential); a.v/a.m, length alpha, and exposure all stay
 # at their corrected values. This isolates a.sa alone, separate from the
@@ -3684,7 +3859,7 @@ The production correction factor extrapolates the measured particle count down t
 
 At each floor, three things move together: (1) the exposure-side correction factor and EED are recomputed over `[L_tar_min, 5000]` µm; (2) the pSSD++ integration floor (`x1M_set` in `matrix_function()`, `x1D_set` in `run_pssd_pipeline()`) is set to the same `L_tar_min`; and (3) the Food Dilution toxicity records are filtered as above before the hazard alignment is re-derived. The `L_tar_min = 1` µm row reuses the already-computed production CF/EED/hazard objects rather than recomputing an identical result under a new seed (relocate-don't-recompute).
 
-```{r m12-floor-sensitivity, message=FALSE, warning=FALSE}
+```{r m12-floor-sensitivity, message=FALSE, warning=FALSE, cache=TRUE, cache.extra=n_boot}
 m12_floors <- c(1, 2.5, 5, 7.5, 10, 20)
 
 m12_run_one_floor <- function(L_tar_min, matrix_label, monitoring_df, cpsd_fit, alpha_draws,
@@ -3992,6 +4167,683 @@ m12_diag <- list(
 
 Ocean's larger raw species pool is real (`r dplyr::n_distinct(tox_data_ocean$Species)` marine vs `r dplyr::n_distinct(tox_data$Species)` freshwater species pass the same QC filters before any size floor is applied) but it is concentrated at much smaller tested particle sizes: the marine subset's median characteristic tested size is `r round(m12_diag$ocean_med_size, 1)` µm against `r round(m12_diag$river_med_size, 1)` µm for freshwater, and `r round(100 * mean(tox_data_ocean$polydispersity == "monodisperse"), 0)`% of marine records are monodisperse (small, uniform test beads) versus `r round(100 * mean(tox_data$polydispersity == "monodisperse"), 0)`% for freshwater. Raising the floor to 20 µm therefore removes marine records disproportionately: usable species fall from `r m12_diag$ocean_sp1` to `r m12_diag$ocean_sp20` for ocean (a `r scales::percent(1 - m12_diag$ocean_sp20/m12_diag$ocean_sp1, accuracy = 1)` drop) versus `r m12_diag$river_sp1` to `r m12_diag$river_sp20` for river (`r scales::percent(1 - m12_diag$river_sp20/m12_diag$river_sp1, accuracy = 1)`). Fish records, the single largest marine Food-Dilution-relevant group at 1 µm, collapse from `r m12_diag$ocean_fish1` to `r m12_diag$ocean_fish20` -- almost all marine fish-feeding studies in this ToMEx subset used particles smaller than 20 µm. Once `run_pssd_pipeline()`'s own ingestibility/dose-positive/non-Algae gating runs on top of that, too few marine species remain for `PSSDplusplus` to construct a Food Dilution SSD at all at `L_tar_min` = 20 µm, so `pSSDs[["Tier3_Marine_Food Dilution"]]` is `NULL` and the row is flagged NA rather than fabricated -- this is a genuine data-sparsity limit of the current marine ToMEx subset at larger size floors, not a pipeline defect. The two finer intermediate floors (5, 10 µm) added below still resolve, confirming the failure is specific to the 20 µm floor rather than a broad breakdown of the marine pipeline.
 
+## 12.5.1.3 M2 -- Decomposition of the M1.2 floor effect
+
+**DECOMPOSITION DIAGNOSTIC -- NOT A RISK ESTIMATE.** Section 12.5.1 varies a single control knob, `L_tar_min`, and moves three things at once: (1) the exposure correction-factor extrapolation, (2) the pSSD++ hazard-integration range, and (3) which tox records survive `filter_tox_by_size_floor()` (composition). Because these move together, M1.2 alone cannot attribute the RQ collapse it shows to a mechanism. This section freezes tox composition at a common `L_tar_min = 10` µm reference set (`tox_fixed`) and re-runs the pipeline in two arms that isolate the other two components, then decomposes M1.2's own total collapse into exposure-CF, hazard-integration, and composition contributions in log-RQ space. No production number is touched; every output here is a labeled diagnostic. Per `spec/m2_spec.md`'s own caveat: freezing tox at >= 10 µm is mechanistically conservative for Tissue Translocation specifically, since it removes exactly the small (< 83 µm, and especially < 10 µm) particles most translocation-relevant -- the TT arm below is a lower bound on TT hazard and a diagnostic contrast, not a TT risk estimate.
+
+```{r m2-harness, message=FALSE, warning=FALSE}
+TOX_FIXED_FLOOR <- 10 # µm; the highest M1.2 floor at which both river and ocean Food Dilution SSDs still converge (ocean fails at 20 µm) -- a composition-stable set common to every arm.
+tox_fixed_river <- filter_tox_by_size_floor(tox_data,       TOX_FIXED_FLOOR)
+tox_fixed_ocean <- filter_tox_by_size_floor(tox_data_ocean, TOX_FIXED_FLOOR)
+m2_floors <- c(1, 2.5, 5, 7.5, 10) # adds 7.5 µm vs the spec's motivating {1,2.5,5,10} to resolve the 5->10 shoulder; matches m12_floors exactly so M1.2 values need no interpolation.
+
+m2_get_cfg <- function(compartment) {
+  if (compartment == "river") {
+    list(monitoring_df = monitoring, cpsd_fit = cpsd_fit_all, alpha_draws = alpha,
+         tox_data_base = tox_data, tox_fixed = tox_fixed_river,
+         param_values_base = param_values, environments = c("Freshwater"),
+         matrix_extra_args = list(), rave_override_fn = rave_override_river, env_key = "Freshwater",
+         prod_cf = combined_cf, prod_eed = eed_boot, prod_haz = haz)
+  } else {
+    list(monitoring_df = monitoring_ocean, cpsd_fit = cpsd_fit_ocean_all, alpha_draws = alpha_ocean,
+         tox_data_base = tox_data_ocean, tox_fixed = tox_fixed_ocean,
+         param_values_base = param_values_ocean, environments = c("Marine"),
+         matrix_extra_args = list(include_marine_surface_water = TRUE, include_freshwater_surface_water = FALSE,
+                                   include_marine_sediment = FALSE, include_freshwater_sediment = FALSE),
+         rave_override_fn = rave_override_ocean, env_key = "Marine",
+         prod_cf = combined_cf_ocean, prod_eed = eed_boot_ocean, prod_haz = haz_ocean)
+  }
+}
+
+# One pSSD/hazard fit (matrix_function_safe() -> run_pssd_pipeline() -> build_haz_df()),
+# tryCatch-wrapped per the M1.2 precedent so a data-insufficient cell reports a
+# note instead of crashing the render (spec guardrail: "report the failure
+# rather than silently dropping the cell").
+m2_compute_hazard <- function(cfg, tox_i, x_haz, cache_tag, seed_hazard) {
+  set.seed(seed_hazard)
+  param_matrix_i <- do.call(
+    matrix_function_safe,
+    c(list(n_sobol = n_boot, params = cfg$param_values_base, upper.tissue.truncation.limit = 500,
+           x1M_set = x_haz, x2D_set = 5000), cfg$matrix_extra_args)
+  ) |> cfg$rave_override_fn()
+
+  tryCatch({
+    pssd_i <- run_pssd_pipeline(
+      tox_data = tox_i, param_matrix = param_matrix_i, environments = cfg$environments,
+      cache_suffix = cache_tag, dose_unit = "L", n_sim = n_boot,
+      num_cores = parallel::detectCores() - 2, sim = 30, cv_uf = 0.5, rmore_method = "lognormal",
+      seed = seed_hazard, x1D_set = x_haz
+    )
+    haz_try <- build_haz_df(pssd_i$pSSDs, cfg$env_key)
+    if (is.null(haz_try) || nrow(haz_try) == 0) {
+      list(ok = FALSE, haz = NULL, note = "pSSD fit returned no hazard rows at this arm/floor")
+    } else {
+      list(ok = TRUE, haz = haz_try, note = NA_character_)
+    }
+  }, error = function(e) list(ok = FALSE, haz = NULL, note = paste0("pSSD/hazard fit failed: ", conditionMessage(e))))
+}
+
+#' One (compartment, arm, floor) cell of the M2 grid
+#'
+#' arm "A"        -- composition AND hazard-integration bound frozen at
+#'                   TOX_FIXED_FLOOR (tox_fixed, x1M/x1D = 10); only the
+#'                   exposure CF floor tracks L_tar_min. Isolates component
+#'                   (1), pure exposure-CF/de-extrapolation.
+#' arm "B"        -- composition frozen (tox_fixed) but the hazard-integration
+#'                   bound now tracks L_tar_min too. Adds component (2),
+#'                   hazard-integration-range, on top of Arm A.
+#' arm "M12equiv" -- composition ALSO tracks L_tar_min (filter_tox_by_size_floor
+#'                   re-applied at every floor), i.e. exactly M1.2's own
+#'                   pipeline. Reused directly from the live m12_results object
+#'                   for Food Dilution (never recomputed); computed fresh here
+#'                   for Tissue Translocation, which M1.2 itself never covered.
+m2_run_one <- function(compartment, arm, L_tar_min, seed_exposure, seed_hazard, arm_a_haz_cache) {
+  cfg <- m2_get_cfg(compartment)
+  tox_i <- if (arm %in% c("A", "B")) cfg$tox_fixed else filter_tox_by_size_floor(cfg$tox_data_base, L_tar_min)
+  n_tox_i <- nrow(tox_i)
+  n_species_i <- dplyr::n_distinct(tox_i$Species)
+
+  na_row <- function(note) {
+    tibble::tibble(
+      compartment = compartment, arm = arm, L_tar_min = L_tar_min,
+      n_tox_records = n_tox_i, n_species = n_species_i,
+      CF_p50 = NA_real_, EED_q50 = NA_real_,
+      ERM = NA_character_, HC5_median = NA_real_,
+      RQ_p50_1D = NA_real_, RQ_p025_1D = NA_real_, RQ_p975_1D = NA_real_, P_exceed_1D = NA_real_,
+      RQ_p50_MC2D = NA_real_, P_exceed_MC2D = NA_real_, note = note,
+      risk_draws_1d = list(NULL)
+    )
+  }
+
+  # Exposure: seed is a function of (compartment, floor) ONLY -- shared across
+  # all three arms (m2-grid-run below), never varying by arm, because CF/EED
+  # computation is identical logic for every arm (all three track L_tar_min on
+  # the exposure side; only the hazard side differs). This is required for
+  # M2.1's paired study-inclusion-effect companion panel (Section 12.5.1.3.1):
+  # the paired ratio RQ_M12,i/RQ_ArmB,i = HC5_ArmB,i/HC5_M12,i only holds if
+  # E_i (exposure draw i) is literally the same value for Arm B and M12equiv
+  # at every Monte Carlo index i. No "relocate, don't recompute" shortcut at
+  # L_tar_min = 1 here (unlike M1.2's own floor=1 reuse) -- reusing the
+  # separately-seeded production EED at that floor would break the pairing
+  # exactly where the headline finding lives.
+  set.seed(seed_exposure)
+  corr_i <- correct_and_bootstrap_eed(
+    monitoring = cfg$monitoring_df, conc_col = "C_measured_pL", cpsd_fit = cfg$cpsd_fit,
+    alpha_draws = cfg$alpha_draws, L_tar_min = L_tar_min, L_tar_max = 5000,
+    n_draws = 3000, n_boot = n_boot, probs = c(0.5, 0.95), slope_convention = "differential"
+  )
+  combined_cf_i <- corr_i$combined_cf
+  eed_boot_i    <- corr_i$eed_boot
+
+  if (arm == "A") {
+    # Arm A's hazard is floor-invariant by construction (fixed tox, fixed
+    # x1M/x1D = TOX_FIXED_FLOOR regardless of L_tar_min) -- computed once per
+    # compartment (below) and reused here, both as a compute-cost saving and
+    # as the mechanism that makes Arm A's HC5 bit-identical across floors
+    # (acceptance check 2, verified below).
+    haz_result <- arm_a_haz_cache[[compartment]]
+  } else {
+    haz_result <- m2_compute_hazard(
+      cfg, tox_i, x_haz = L_tar_min,
+      cache_tag = paste0("m2_", compartment, "_", arm, "_", L_tar_min),
+      seed_hazard = seed_hazard
+    )
+  }
+  if (!haz_result$ok) return(na_row(haz_result$note))
+  haz_i <- haz_result$haz
+
+  # Same shared-seed principle applies to the E-side resampling inside
+  # draw_rq_mc1d(): seeding identically (seed_exposure + 1, shared across
+  # arms) before each arm's call, given identical eed_boot_i$q50 inputs and
+  # identical (ERM, HCx) group iteration order (dplyr::group_by() sorts
+  # alphabetically), produces identical E_i draws per ERM group across arms.
+  # draw_idx retains draw order so the companion panel can pair rows exactly.
+  set.seed(seed_exposure + 1)
+  risk_draws_1d <- draw_rq_mc1d(haz_i, eed_boot_i$q50, n_risk = 1000) |>
+    dplyr::filter(HCx == 5) |>
+    dplyr::group_by(ERM) |>
+    dplyr::mutate(draw_idx = dplyr::row_number()) |>
+    dplyr::ungroup()
+
+  rs_1d <- risk_draws_1d |>
+    dplyr::group_by(ERM, HCx) |>
+    dplyr::summarise(
+      RQ_p50  = stats::median(RQ), P_exceed = mean(RQ > 1, na.rm = TRUE),
+      RQ_p025 = stats::quantile(RQ, 0.025, na.rm = TRUE), RQ_p975 = stats::quantile(RQ, 0.975, na.rm = TRUE),
+      .groups = "drop"
+    )
+
+  # mc2d_risk() resamples the already-computed combined_cf_i/haz_i (no new
+  # pSSD fit), so this is cheap relative to the hazard fit above -- included
+  # per the spec's Table M2-1 ("Arm A RQ (1D + MC2D med)") and M2.1's caveat 2
+  # (metric dependence: the 1D "<1" statement must be checked under MC2D too).
+  set.seed(seed_exposure + 2)
+  mc2d_i <- mc2d_risk(monitoring_df = cfg$monitoring_df, combined_cf = combined_cf_i, haz_df = haz_i,
+                       n_uncertainty = 100, n_variability = 500, seed = seed_exposure + 2)
+  rs_mc2d <- mc2d_i |> dplyr::filter(HCx == 5) |> dplyr::group_by(ERM) |>
+    dplyr::summarise(RQ_p50_MC2D = stats::median(RQ_p50), P_exceed_MC2D = stats::median(P_exceed), .groups = "drop")
+
+  hc5_by_erm <- haz_i |> dplyr::filter(HCx == 5) |> dplyr::group_by(ERM) |>
+    dplyr::summarise(HC5_median = stats::median(PNEC), .groups = "drop")
+
+  # risk_draws_1d nested as a per-ERM list-column so the companion panel
+  # (Section 12.5.1.3.1) can unnest and pair Arm B / M12equiv draws by
+  # (compartment, ERM, L_tar_min, draw_idx) without any new pSSD computation.
+  draws_nested <- risk_draws_1d |> dplyr::group_by(ERM) |> tidyr::nest() |> dplyr::rename(risk_draws_1d = data)
+
+  rs_1d |>
+    dplyr::left_join(hc5_by_erm, by = "ERM") |>
+    dplyr::left_join(rs_mc2d, by = "ERM") |>
+    dplyr::left_join(draws_nested, by = "ERM") |>
+    dplyr::transmute(
+      compartment = compartment, arm = arm, L_tar_min = L_tar_min,
+      n_tox_records = n_tox_i, n_species = n_species_i,
+      CF_p50 = stats::median(combined_cf_i), EED_q50 = stats::median(eed_boot_i$q50),
+      ERM = ERM, HC5_median = HC5_median,
+      RQ_p50_1D = RQ_p50, RQ_p025_1D = RQ_p025, RQ_p975_1D = RQ_p975, P_exceed_1D = P_exceed,
+      RQ_p50_MC2D = RQ_p50_MC2D, P_exceed_MC2D = P_exceed_MC2D, note = NA_character_,
+      risk_draws_1d = risk_draws_1d
+    )
+}
+```
+
+```{r m2-grid-run, cache=TRUE, cache.extra=n_boot, message=FALSE, warning=FALSE}
+arm_a_haz_cache <- list(
+  river = m2_compute_hazard(m2_get_cfg("river"), tox_fixed_river, TOX_FIXED_FLOOR, "m2_armA_haz_river", seed_hazard = 81011),
+  ocean = m2_compute_hazard(m2_get_cfg("ocean"), tox_fixed_ocean, TOX_FIXED_FLOOR, "m2_armA_haz_ocean", seed_hazard = 81021)
+)
+
+m2_grid <- tidyr::expand_grid(
+  compartment = c("river", "ocean"),
+  arm         = c("A", "B", "M12equiv"),
+  L_tar_min   = m2_floors
+)
+
+m2_results <- purrr::pmap_dfr(m2_grid, function(compartment, arm, L_tar_min) {
+  comp_idx  <- match(compartment, c("river", "ocean"))
+  arm_idx   <- match(arm, c("A", "B", "M12equiv"))
+  floor_idx <- match(L_tar_min, m2_floors)
+  # seed_exposure deliberately excludes arm_idx (shared across arms -- see the
+  # m2-harness chunk's comment on why Arm B / M12equiv need identical E draws).
+  seed_exposure <- 81000 + comp_idx * 10000 + floor_idx * 10
+  seed_hazard   <- 81000 + comp_idx * 10000 + arm_idx * 1000 + floor_idx * 10 + 1
+  m2_run_one(compartment, arm, L_tar_min, seed_exposure, seed_hazard, arm_a_haz_cache)
+})
+```
+
+```{r m2-ref-tables, message=FALSE, warning=FALSE}
+# Food Dilution M1.2 reference: read the ALREADY-RENDERED, live M1.2 result
+# directly from m12_results (Section 12.5.1) -- never re-derived, per the
+# spec's explicit "do not re-run M1.2" instruction and this document's
+# no-retyped-literals convention. Tissue Translocation has no M1.2 curve in
+# this document (M1.2 was scoped to Food Dilution only, per its own spec), so
+# for TT the "M1.2-equivalent" reference is M2's own tox-tracking M12equiv
+# arm. Carries the RQ point estimate + 1D 95% CI + MC2D median so the
+# scenario figure (Section 12.5.1.3.1) and the decomposition (Section
+# 12.5.1.3.5) both draw from one function instead of two separate constructions.
+bind_m12_reference <- function() {
+  fd <- m12_results |>
+    dplyr::filter(L_tar_min %in% m2_floors, is.na(note)) |>
+    dplyr::transmute(
+      compartment = ifelse(Matrix == "River water", "river", "ocean"),
+      ERM = "Food Dilution", L_tar_min,
+      RQ_p50 = RQ_p50_1D, RQ_lo = RQ_p025_1D, RQ_hi = RQ_p975_1D, RQ_mc2d = RQ_p50_MC2D, HC5 = HC5_median
+    )
+  tt <- m2_results |>
+    dplyr::filter(arm == "M12equiv", ERM == "Tissue Translocation", !is.na(RQ_p50_1D)) |>
+    dplyr::transmute(compartment, ERM, L_tar_min,
+                      RQ_p50 = RQ_p50_1D, RQ_lo = RQ_p025_1D, RQ_hi = RQ_p975_1D, RQ_mc2d = RQ_p50_MC2D, HC5 = HC5_median)
+  dplyr::bind_rows(fd, tt)
+}
+
+m12_ref_full <- bind_m12_reference()
+m12_ref <- m12_ref_full |> dplyr::transmute(compartment, ERM, L_tar_min, RQ_m12 = RQ_p50)
+
+arm_a_ref <- m2_results |> dplyr::filter(arm == "A", !is.na(RQ_p50_1D)) |>
+  dplyr::transmute(compartment, ERM, L_tar_min, RQ_A = RQ_p50_1D)
+arm_b_ref <- m2_results |> dplyr::filter(arm == "B", !is.na(RQ_p50_1D)) |>
+  dplyr::transmute(compartment, ERM, L_tar_min, RQ_B = RQ_p50_1D)
+
+m2_panel_labels <- c(river = "River", ocean = "Ocean")
+```
+
+```{r m2-decomposition-data, message=FALSE, warning=FALSE}
+# Three-way decomposition, computed here (data only -- Table M2-2 and the
+# fold-contribution table are DISPLAYED later, in the relegated Section
+# 12.5.1.3.5, but the underlying numbers are needed by the PROMOTED
+# interpretation in 12.5.1.3.1 too, so the arithmetic lives in one place):
+#   dlogRQ_total(f)       = logRQ_M1.2(f)  - logRQ_M1.2(10)   [[from the live M1.2/M12equiv reference]]
+#   dlogRQ_exposureCF(f)  = logRQ_ArmA(f)  - logRQ_ArmA(10)   [[pure exposure-CF/de-extrapolation]]
+#   dlogRQ_hazardInteg(f) = logRQ_ArmB(f)  - logRQ_ArmA(f)    [[hazard-integration-range effect]]
+#   dlogRQ_composition(f) = logRQ_M1.2(f)  - logRQ_ArmB(f)    [[study-filtration/composition residual]]
+m2_decomp <- m12_ref |>
+  dplyr::inner_join(arm_a_ref, by = c("compartment", "ERM", "L_tar_min")) |>
+  dplyr::inner_join(arm_b_ref, by = c("compartment", "ERM", "L_tar_min")) |>
+  dplyr::filter(RQ_m12 > 0, RQ_A > 0, RQ_B > 0) |>
+  dplyr::mutate(logRQ_m12 = log10(RQ_m12), logRQ_A = log10(RQ_A), logRQ_B = log10(RQ_B)) |>
+  dplyr::group_by(compartment, ERM) |>
+  dplyr::mutate(
+    logRQ_m12_ref = logRQ_m12[L_tar_min == TOX_FIXED_FLOOR][1],
+    logRQ_A_ref   = logRQ_A[L_tar_min == TOX_FIXED_FLOOR][1]
+  ) |>
+  dplyr::mutate(
+    dlogRQ_total       = logRQ_m12 - logRQ_m12_ref,
+    dlogRQ_exposureCF  = logRQ_A - logRQ_A_ref,
+    dlogRQ_hazardInteg = logRQ_B - logRQ_A,
+    dlogRQ_composition = logRQ_m12 - logRQ_B,
+    residual           = dlogRQ_total - (dlogRQ_exposureCF + dlogRQ_hazardInteg + dlogRQ_composition)
+  ) |>
+  dplyr::ungroup() |>
+  dplyr::select(-logRQ_m12_ref, -logRQ_A_ref)
+
+# fold_* = 10^(dlogRQ) directly (NOT negated): dlogRQ_total(1) = logRQ(1) -
+# logRQ(10), and RQ(1) >> RQ(10) (RQ collapses as the floor rises), so
+# dlogRQ_total(1) is large and POSITIVE -- 10^(dlogRQ_total) > 1 correctly
+# represents "RQ is this many times higher at 1 µm than at 10 µm," i.e. the
+# collapse magnitude the spec's motivating "~100-130x" language means.
+m2_fold_summary <- m2_decomp |>
+  dplyr::filter(L_tar_min == min(m2_floors)) |>
+  dplyr::mutate(
+    fold_total       = 10^(dlogRQ_total),
+    fold_exposureCF  = 10^(dlogRQ_exposureCF),
+    fold_hazardInteg = 10^(dlogRQ_hazardInteg),
+    fold_composition = 10^(dlogRQ_composition)
+  ) |>
+  dplyr::select(compartment, ERM, fold_total, fold_exposureCF, fold_hazardInteg, fold_composition)
+```
+
+### 12.5.1.3.1 Study inclusion, not sub-10 µm extrapolation, drives the exceedance
+
+Two of M2's three arms are size-coherent -- exposure and hazard are rescaled *together* to the identical `[L_tar_min, 5000]` µm range at every floor -- and their difference isolates the study-inclusion (composition) effect cleanly, with no size-basis mismatch: **Arm B** (tox composition frozen at `r TOX_FIXED_FLOOR` µm; only which studies are SSD members is held fixed) versus **M1.2/M12equiv** (tox composition also tracks the floor, i.e. exactly the production/M1.2 pipeline). Arm A does not appear here -- see Section 12.5.1.3.5 for why its absolute values are not physically meaningful on their own.
+
+```{r m2-scenario-data, message=FALSE, warning=FALSE}
+scenario_levels <- c("Study set fixed (>=10 µm tox)", "Study set tracks floor (production)")
+
+m2_scenario_df <- dplyr::bind_rows(
+  m2_results |> dplyr::filter(arm == "B", !is.na(RQ_p50_1D)) |>
+    dplyr::transmute(compartment, ERM, L_tar_min,
+                      RQ_p50 = RQ_p50_1D, RQ_lo = RQ_p025_1D, RQ_hi = RQ_p975_1D,
+                      RQ_mc2d = RQ_p50_MC2D, HC5 = HC5_median, scenario = scenario_levels[1]),
+  m12_ref_full |> dplyr::mutate(scenario = scenario_levels[2])
+) |>
+  dplyr::mutate(scenario = factor(scenario, levels = scenario_levels))
+
+# Paired study-inclusion effect (companion panel): Arm B and M12equiv share
+# IDENTICAL exposure draws at each (compartment, floor) -- the m2-harness
+# chunk seeds correct_and_bootstrap_eed() and draw_rq_mc1d()'s E-sampling
+# identically across arms for exactly this reason -- so pairing by draw_idx
+# cancels the exposure term exactly:
+#   RQ_M12,i / RQ_ArmB,i = (E_i / H_M12,i) / (E_i / H_ArmB,i) = H_ArmB,i / H_M12,i
+m2_paired_draws <- m2_results |>
+  dplyr::filter(arm %in% c("B", "M12equiv"), !is.na(RQ_p50_1D)) |>
+  dplyr::select(compartment, arm, L_tar_min, ERM, risk_draws_1d) |>
+  tidyr::unnest(risk_draws_1d)
+
+paired_ratio_df <- m2_paired_draws |>
+  dplyr::select(compartment, arm, L_tar_min, ERM, draw_idx, H) |>
+  tidyr::pivot_wider(names_from = arm, values_from = H, names_prefix = "H_") |>
+  dplyr::filter(!is.na(H_B), !is.na(H_M12equiv)) |>
+  dplyr::mutate(ratio = H_B / H_M12equiv) |>
+  dplyr::group_by(compartment, ERM, L_tar_min) |>
+  dplyr::summarise(
+    ratio_p50  = stats::median(ratio),
+    ratio_p025 = stats::quantile(ratio, 0.025, na.rm = TRUE),
+    ratio_p975 = stats::quantile(ratio, 0.975, na.rm = TRUE),
+    n_paired   = dplyr::n(),
+    .groups = "drop"
+  )
+```
+
+```{r m2-scenario-plot, fig.width=10, fig.height=8, message=FALSE, warning=FALSE}
+# Both ERMs shown (rows) x both compartments (columns), scenario as color.
+# Food Dilution is the primary/pre-registered finding; Tissue Translocation
+# carries the >= 10 µm composition-freeze caveat (Section 12.5.1.3's intro,
+# Section 12.5.1's M12equiv note) in both rows since it's now shown directly
+# rather than relegated to a second figure.
+m2_scenario_plot <- m2_scenario_df |>
+  ggplot2::ggplot(ggplot2::aes(x = L_tar_min, y = RQ_p50, color = scenario, group = scenario)) +
+  ggplot2::geom_hline(yintercept = 1, linetype = "dashed", color = "gray40") +
+  ggplot2::geom_line(linewidth = 0.9, position = ggplot2::position_dodge(width = 0.5), na.rm = TRUE) +
+  ggplot2::geom_errorbar(ggplot2::aes(ymin = RQ_lo, ymax = RQ_hi), width = 0.6, linewidth = 0.6,
+                         position = ggplot2::position_dodge(width = 0.5), na.rm = TRUE) +
+  ggplot2::geom_point(size = 3, position = ggplot2::position_dodge(width = 0.5), na.rm = TRUE) +
+  ggplot2::scale_y_log10(labels = scales::label_number()) +
+  ggplot2::scale_x_continuous(breaks = m2_floors) +
+  ggplot2::facet_grid(ERM ~ compartment, labeller = ggplot2::labeller(compartment = m2_panel_labels), scales = "free_y") +
+  ggplot2::scale_color_manual(values = c("#C87A8A", "#00A396"), name = NULL) +
+  ggplot2::labs(
+    x = expression(L[tar-min]~"(µm)"), y = "HC5 median RQ (1D) [log10]",
+    title = "Study inclusion, not sub-10 µm extrapolation, drives the exceedance",
+    subtitle = stringr::str_wrap(
+      "Both curves rise toward 1 µm (both contain size extrapolation) -- the effect of interest is the GAP between them, not either curve's rise.",
+      width = 95
+    ),
+    caption = stringr::str_wrap(
+      "Rows: ERM. Columns: compartment. Tissue Translocation's \"tracks floor\" curve carries the >= 10 µm composition-freeze caveat (Section 12.5.1.3) -- a lower bound on TT hazard, not a TT risk estimate.",
+      width = 110
+    )
+  ) +
+  ggplot2::theme_minimal(base_size = 15) +
+  ggplot2::theme(legend.position = "bottom", panel.border = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.4),
+                 strip.text = ggplot2::element_text(face = "bold"),
+                 plot.caption = ggplot2::element_text(size = 8, color = "gray50", hjust = 0))
+
+ggsave(m2_scenario_plot, filename = "figures/m2_scenario_plot.png", width = 10, height = 8, dpi = 300)
+m2_scenario_plot
+```
+
+```{r m2-studyinc-effect, fig.width=10, fig.height=5, message=FALSE, warning=FALSE}
+m2_studyinc_effect <- paired_ratio_df |>
+  dplyr::filter(ERM == "Food Dilution") |>
+  ggplot2::ggplot(ggplot2::aes(x = factor(L_tar_min), y = ratio_p50)) +
+  ggplot2::geom_hline(yintercept = 1, linetype = "dashed", color = "gray40") +
+  ggplot2::geom_pointrange(ggplot2::aes(ymin = ratio_p025, ymax = ratio_p975), color = "#D55E00") +
+  ggplot2::facet_wrap(~compartment, labeller = ggplot2::labeller(compartment = m2_panel_labels)) +
+  ggplot2::scale_y_log10() +
+  ggplot2::labs(
+    x = expression(L[tar-min]~"(µm)"),
+    y = "Study-inclusion effect = HC5(fixed) / HC5(tracks)  [paired, log10]",
+    title = "Study-inclusion effect on Food Dilution HC5, exposure variance removed by pairing",
+    subtitle = "Isolated hazard-side effect (Arm B vs M12equiv, identically-seeded exposure draws cancelled by pairing). Tight CI reflects that cancellation, not extra precision."
+  ) +
+  ggplot2::theme_minimal(base_size = 15) +
+  ggplot2::theme(panel.border = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.4),
+                 strip.text = ggplot2::element_text(face = "bold"))
+
+ggsave(m2_studyinc_effect, filename = "figures/m2_studyinc_effect.png", width = 10, height = 5, dpi = 300)
+m2_studyinc_effect
+```
+
+```{r m2-interp-text, echo=FALSE}
+.m2_river_fd_1 <- function(df) df |> dplyr::filter(compartment == "river", ERM == "Food Dilution", L_tar_min == min(m2_floors))
+.m2_river_fd_10 <- function(df) df |> dplyr::filter(compartment == "river", ERM == "Food Dilution", L_tar_min == TOX_FIXED_FLOOR)
+
+m2_armB_river_1  <- m2_results |> dplyr::filter(arm == "B") |> .m2_river_fd_1()
+m2_armB_river_10 <- m2_results |> dplyr::filter(arm == "B") |> .m2_river_fd_10()
+m2_m12_river_1   <- m12_ref_full |> .m2_river_fd_1()
+m2_fold_river    <- m2_fold_summary |> dplyr::filter(compartment == "river", ERM == "Food Dilution")
+m2_armB_ocean_1  <- m2_results |> dplyr::filter(arm == "B", compartment == "ocean", ERM == "Food Dilution", L_tar_min == min(m2_floors))
+m2_m12_ocean_1   <- m12_ref_full |> dplyr::filter(compartment == "ocean", ERM == "Food Dilution", L_tar_min == min(m2_floors))
+
+m2_have_core <- nrow(m2_armB_river_1) == 1 && nrow(m2_armB_river_10) == 1 && nrow(m2_m12_river_1) == 1 && nrow(m2_fold_river) == 1
+
+m2_interp_main <- if (m2_have_core) {
+  armB_below1 <- m2_armB_river_1$RQ_p50_1D < 1
+  m12_above1  <- m2_m12_river_1$RQ_p50 > 1
+  crossing_phrase <- if (armB_below1 && m12_above1) {
+    "The 1 µm-floor exceedance is therefore created by admitting <10 µm-tested studies into the food-dilution SSD (a hazard/HC5 effect), not by coherent sub-10 µm extrapolation."
+  } else if (!armB_below1) {
+    "Here the size-coherent (Arm B) river Food Dilution RQ is already >= 1 at a 1 µm floor even with the study set fixed, so -- unlike the pre-registered B/E expectation -- coherent extrapolation alone is sufficient for exceedance in this render; study inclusion is an additional, not the sole, driver."
+  } else {
+    "Here neither scenario's river Food Dilution RQ reaches 1 at a 1 µm floor in this render, so the production exceedance is not reproduced by either size-coherent path alone; see Table M2-1 (Section 12.5.1.3.5) for the full picture."
+  }
+  paste0(
+    "With both exposure and hazard rescaled coherently to a common [L_tar_min, 5000] µm range but the toxicity ",
+    "study set held fixed (Arm B), the river Food Dilution RQ at a 1 µm exposure floor is ",
+    round(m2_armB_river_1$RQ_p50_1D, 3), " (1D) -- ", if (armB_below1) "below 1" else "at or above 1",
+    ". Allowing the study set to open as the floor drops (M12/production) collapses the Food Dilution HC5 from ~",
+    round(m2_armB_river_10$HC5_median, 0), " to ~", round(m2_m12_river_1$HC5, 0), " and raises the RQ to ",
+    round(m2_m12_river_1$RQ_p50, 3), ". ", crossing_phrase
+  )
+} else {
+  "M2.1's river Food Dilution scenario rows were not fully available at this render budget (see acceptance-check/NA-row notes in Section 12.5.1.3.5)."
+}
+
+m2_interp_caveat1 <- if (m2_have_core) {
+  paste0(
+    "**Magnitude vs threshold-crossing.** Sub-10 µm exposure de-extrapolation is not negligible -- it is the ",
+    "larger single lever by magnitude (river Food Dilution exposure-CF fold ", round(m2_fold_river$fold_exposureCF, 2),
+    "x vs composition fold ", round(m2_fold_river$fold_composition, 2), "x). It fails to cross 1 only because it ",
+    "operates on a fixed >=10 µm study set with a very low baseline RQ. Read this as \"study inclusion is decisive ",
+    "for threshold-crossing,\" never as \"extrapolation is irrelevant.\""
+  )
+} else ""
+
+m2_interp_caveat2 <- if (m2_have_core && nrow(m2_armB_ocean_1) == 1 && nrow(m2_m12_ocean_1) == 1) {
+  ocean_armB_le1 <- m2_armB_ocean_1$RQ_p50_1D <= 1 && m2_armB_ocean_1$RQ_p50_MC2D <= 1
+  paste0(
+    "**Metric dependence.** The clean \"<1 without study inclusion\" statement is strictly true in 1D for the river; ",
+    "under MC2D the river Arm B Food Dilution RQ is ", round(m2_armB_river_1$RQ_p50_MC2D, 3), " versus M12's ",
+    round(m2_m12_river_1$RQ_mc2d, 3), ". Ocean Arm B ", if (ocean_armB_le1) "stays <= 1 under both metrics" else "does not stay <= 1 under both metrics in this render (see Table M2-1)",
+    " (ocean Arm B 1D = ", round(m2_armB_ocean_1$RQ_p50_1D, 3), ", MC2D = ", round(m2_armB_ocean_1$RQ_p50_MC2D, 3), ")."
+  )
+} else ""
+```
+
+`r m2_interp_main` `r m2_interp_caveat1` `r m2_interp_caveat2` This is a pre-registered hypothesis test (`spec/m2_spec.md` Section 4.1; reframed for presentation by `spec/m21.md`), not a tuned conclusion -- the rendered numbers above are reported regardless of which way they fall. Tissue Translocation's M12equiv reference (computed fresh here, since M1.2 itself never covered TT) carries the >= `r TOX_FIXED_FLOOR` µm composition-freeze caveat throughout: it is a lower bound on TT hazard, not a TT risk estimate. Mechanistically, food dilution is a large-particle (volume/gut-filling) mechanism while small particles preferentially drive translocation (Section 12.5.1's M1.1 framing); admitting small-particle studies into the volume-based food-dilution SSD is the plausible reason the HC5 collapses when the study set is allowed to track the floor, though this analysis tests the *effect*, not that specific *mechanism*, directly.
+
+```{r m2-scenario-caption, echo=FALSE}
+m2_cap_river_1 <- list(
+  armB = m2_armB_river_1, armB10 = m2_armB_river_10, m12 = m2_m12_river_1,
+  gap_fold = if (m2_have_core) round(m2_m12_river_1$RQ_p50 / m2_armB_river_1$RQ_p50_1D, 0) else NA_real_,
+  gap_mc2d = if (m2_have_core) round(m2_m12_river_1$RQ_mc2d / m2_armB_river_1$RQ_p50_MC2D, 1) else NA_real_
+)
+m2_caption_text <- if (m2_have_core) {
+  paste0(
+    "**Figure.** The Food Dilution risk exceedance is created by toxicity-study inclusion, not by sub-10 µm size ",
+    "extrapolation. Median Food Dilution risk quotient (RQ, 1D) versus the lower size floor L_tar_min, faceted by ",
+    "compartment; points = median, bars = 95% CI (2.5th-97.5th percentile of the 1D risk draws); dashed line RQ = 1. ",
+    "Blue (\"study set fixed >=10 µm\") rescales exposure and hazard coherently to [L_tar_min, 5000] µm but holds ",
+    "SSD membership fixed; orange (\"study set tracks floor\") is the production/M1.2 pipeline, which additionally ",
+    "admits studies tested below the floor. Both scenarios rise as the floor decreases -- that shared rise is coherent ",
+    "size extrapolation, present in both. The effect of interest is the vertical gap between the curves: at a 1 µm ",
+    "floor the river RQ is ", round(m2_cap_river_1$armB$RQ_p50_1D, 3), " with the study set fixed but ",
+    round(m2_cap_river_1$m12$RQ_p50, 3), " when it tracks the floor (a ", m2_cap_river_1$gap_fold,
+    "x study-inclusion effect), because the food-dilution HC5 collapses from ~", round(m2_cap_river_1$armB10$HC5_median, 0),
+    " to ~", round(m2_cap_river_1$m12$HC5, 0), " particles/L when <10 µm-tested studies enter the SSD. Coherent ",
+    "extrapolation alone leaves the river RQ ", if (m2_cap_river_1$armB$RQ_p50_1D < 1) "below 1 (1D)" else "at or above 1 (1D)",
+    "; under MC2D the fixed-set river RQ is ", round(m2_cap_river_1$armB$RQ_p50_MC2D, 3), ", ~",
+    m2_cap_river_1$gap_mc2d, "x below the tracking scenario. Diagnostic of model behavior -- the production risk ",
+    "characterization is unchanged."
+  )
+} else {
+  "Caption unavailable: core river Food Dilution scenario rows were not available at this render budget."
+}
+```
+
+`r m2_caption_text`
+
+### 12.5.1.3.2 Why Arm A's absolute values don't matter: the HC5-cancellation identity
+
+Because the exposure-CF term is a difference of two Arm-A quantities that share the identical pinned HC5 (Arm A's hazard is computed once per compartment and reused at every floor -- Section 12.5.1.3.5's acceptance check 2), the HC5 divides out algebraically: ΔlogRQ_exposureCF(f) = log₁₀\[EED(f)/EED(10)\]. Arm A's non-physical absolute RQ (exposure and hazard deliberately aligned to *different* size ranges) never survives this subtraction -- only a pure exposure ratio does.
+
+```{r m2-hc5-cancel-check, echo=FALSE}
+eed_armA_river_1  <- m2_results |> dplyr::filter(compartment == "river", arm == "A", ERM == "Food Dilution", L_tar_min == min(m2_floors)) |> dplyr::pull(EED_q50)
+eed_armA_river_10 <- m2_results |> dplyr::filter(compartment == "river", arm == "A", ERM == "Food Dilution", L_tar_min == TOX_FIXED_FLOOR) |> dplyr::pull(EED_q50)
+m2_eed_ratio_check <- if (length(eed_armA_river_1) == 1 && length(eed_armA_river_10) == 1 && eed_armA_river_10 > 0) {
+  eed_armA_river_1 / eed_armA_river_10
+} else NA_real_
+m2_exposureCF_dlog_check <- m2_decomp |> dplyr::filter(compartment == "river", ERM == "Food Dilution", L_tar_min == min(m2_floors)) |> dplyr::pull(dlogRQ_exposureCF)
+```
+
+Verified against the raw exposure: river Food Dilution EED q50 is `r round(eed_armA_river_1, 3)` at 1 µm and `r round(eed_armA_river_10, 3)` at `r TOX_FIXED_FLOOR` µm -- a ratio of `r round(m2_eed_ratio_check, 1)`x, matching the reported exposure-CF fold (`r round(10^m2_exposureCF_dlog_check, 1)`x, Section 12.5.1.3.5) within Monte Carlo noise (ΔlogRQ_exposureCF = `r round(m2_exposureCF_dlog_check, 3)` at the 1 µm river Food Dilution cell).
+
+### 12.5.1.3.5 Sub-decomposition of the coherent trajectory (supplementary)
+
+**Arm A is a diagnostic device only.** Its absolute RQ is non-physical (exposure and hazard are deliberately aligned to different size ranges: exposure over `[L_tar_min, 5000]` but hazard pinned to `[`r TOX_FIXED_FLOOR`, 5000]`). It appears in the decomposition below solely as the difference ΔlogRQ_exposureCF = logRQ_A(f) − logRQ_A(10), in which the pinned HC5 cancels exactly (Section 12.5.1.3.2), leaving a pure exposure ratio. **It is never a risk estimate.** Retained in full here, under this explicit flag, for auditability.
+
+```{r m2-acceptance-check-2, message=FALSE, warning=FALSE}
+# Acceptance check 2 (spec Section 2.5): Arm A HC5 must be bit-identical
+# across every floor for a given compartment x ERM, since Arm A's hazard is
+# computed once (arm_a_haz_cache above) and reused, not re-derived per floor.
+# Holds unconditionally -- it is a property of the harness wiring, not of MC
+# sample size, so it is NOT gated on is_production_budget the way the
+# freeze-point/closure checks below are.
+m2_armA_hc5_check <- m2_results |>
+  dplyr::filter(arm == "A", !is.na(HC5_median)) |>
+  dplyr::group_by(compartment, ERM) |>
+  dplyr::summarise(hc5_range = max(HC5_median) - min(HC5_median), n_floors = dplyr::n(), .groups = "drop")
+
+knitr::kable(m2_armA_hc5_check, digits = 6,
+             caption = "M2 acceptance check 2: Arm A HC5 range across floors (must be exactly 0).")
+
+stopifnot(
+  "M2 acceptance check 2 FAILED: Arm A HC5 is not flat across floors -- harness mis-wired" =
+    all(m2_armA_hc5_check$hc5_range == 0)
+)
+cat("M2 acceptance check 2 passed: Arm A HC5 is bit-identical across all floors, every compartment x ERM.\n")
+```
+
+```{r m2-table1, message=FALSE, warning=FALSE}
+m2_table1 <- m2_results |>
+  dplyr::filter(arm %in% c("A", "B"), !is.na(RQ_p50_1D)) |>
+  dplyr::transmute(compartment, ERM, L_tar_min, arm,
+                    RQ_1D = RQ_p50_1D, RQ_MC2D = RQ_p50_MC2D, HC5 = HC5_median) |>
+  tidyr::pivot_wider(names_from = arm, values_from = c(RQ_1D, RQ_MC2D, HC5), names_glue = "{arm}_{.value}") |>
+  dplyr::left_join(m12_ref, by = c("compartment", "ERM", "L_tar_min")) |>
+  dplyr::arrange(compartment, ERM, L_tar_min) |>
+  dplyr::rename(M1.2_RQ_1D = RQ_m12)
+
+knitr::kable(
+  m2_table1 |>
+    dplyr::select(compartment, ERM, L_tar_min, A_RQ_1D, A_RQ_MC2D, B_RQ_1D, B_RQ_MC2D, M1.2_RQ_1D, A_HC5, B_HC5),
+  digits = 3,
+  caption = paste0(
+    "Table M2-1: Arm A / Arm B / M1.2(-equivalent) RQ by floor, river and ocean, both ERMs. ",
+    "At L_tar_min = ", TOX_FIXED_FLOOR, " µm (the freeze point), A_RQ_1D, B_RQ_1D, and M1.2_RQ_1D should coincide ",
+    "within MC noise (acceptance check 1 below) -- the same coincidence visually shown in Section 12.5.1.3.1's scenario figure."
+  ),
+  col.names = c("Compartment", "ERM", "L_tar_min (µm)", "Arm A RQ (1D)", "Arm A RQ (MC2D)",
+                "Arm B RQ (1D)", "Arm B RQ (MC2D)", "M1.2(-equiv) RQ (1D)", "Arm A HC5", "Arm B HC5")
+)
+```
+
+```{r m2-decomposition-table, message=FALSE, warning=FALSE}
+knitr::kable(
+  m2_decomp |>
+    dplyr::select(compartment, ERM, L_tar_min, RQ_m12, RQ_A, RQ_B,
+                   dlogRQ_total, dlogRQ_exposureCF, dlogRQ_hazardInteg, dlogRQ_composition, residual),
+  digits = 3,
+  caption = paste0(
+    "Table M2-2: three-way ΔlogRQ decomposition relative to the ", TOX_FIXED_FLOOR,
+    " µm reference floor. RQ_m12 = M1.2 total (Food Dilution) / M12equiv arm (Tissue Translocation). ",
+    "residual = MC-noise gap between the M1.2/M12equiv reference and Arm A/B (independently seeded runs of nominally the same setup)."
+  )
+)
+# Note: because dlogRQ_exposureCF + dlogRQ_hazardInteg + dlogRQ_composition
+# telescopes algebraically to (logRQ_m12 - logRQ_A_ref), the "residual" above
+# is exactly (logRQ_A_ref - logRQ_m12_ref) within each compartment x ERM group
+# -- i.e. it IS the freeze-point coincidence gap (acceptance check 1), not a
+# separate quantity. Both are reported because the spec calls for both, but
+# they are not independent evidence of harness correctness.
+```
+
+```{r m2-acceptance-checks-1-3, message=FALSE, warning=FALSE}
+if (is_production_budget) {
+  m2_max_resid <- max(abs(m2_decomp$residual), na.rm = TRUE)
+  m2_tol <- 0.3 # log10 units (~2x); generous for independently-seeded MC noise, tight enough to catch a genuine multi-order-of-magnitude wiring error
+  cat("M2 acceptance checks (production budget, n_boot =", n_boot, "):\n")
+  cat("  Check 1 (freeze-point coincidence) & check 3 (decomposition closure) share one quantity here (see note above): max|residual| =",
+      signif(m2_max_resid, 3), "log10 units (tolerance", m2_tol, ").\n")
+  stopifnot(
+    "M2 acceptance checks 1/3 FAILED: freeze-point coincidence / decomposition closure residual exceeds tolerance -- see m2_decomp" =
+      m2_max_resid < m2_tol
+  )
+  cat("M2 acceptance checks 1 and 3 passed.\n")
+} else {
+  message("M2 acceptance checks 1 and 3 (freeze-point coincidence, decomposition closure) skipped: dev-scale render (n_boot = ",
+          n_boot, " < 1000); MC noise is too large relative to the tolerance at this budget. Re-check at the production budget.")
+}
+
+# Check 4 (sign sanity, spec Section 2.5): the spec states "exposure-CF
+# component should be negative ... RQ falls as floor rises." Under THIS
+# section's delta-vs-10-µm-reference parameterization (dlogRQ_exposureCF(f) =
+# logRQ_A(f) - logRQ_A(10)), "RQ falls as floor rises" means RQ_A(f) > RQ_A(10)
+# for every floor f < 10 µm (more sub-floor extrapolation at a lower floor ->
+# higher CF -> higher EED -> higher RQ, holding hazard fixed as Arm A does) --
+# i.e. dlogRQ_exposureCF(f) should be POSITIVE for f < 10, not negative; the
+# spec's "negative" describes the trend as the floor itself increases, not
+# the sign in this fixed-reference-point delta. Reported, not gated (the
+# spec constrains this component's sign informationally; only composition's
+# sign is explicitly left unconstrained -- but forcing a stopifnot() here
+# would just be re-deriving arithmetic already guaranteed by
+# correction_factor()'s own monotonicity, not new evidence about the harness).
+m2_sign_check <- m2_decomp |>
+  dplyr::filter(L_tar_min != TOX_FIXED_FLOOR) |>
+  dplyr::summarise(frac_expected_sign = mean(dlogRQ_exposureCF > 0, na.rm = TRUE), .groups = "drop")
+cat("Sign sanity: exposure-CF component has the expected sign (RQ_A(f) > RQ_A(10) for f <", TOX_FIXED_FLOOR, "µm) for",
+    scales::percent(m2_sign_check$frac_expected_sign, accuracy = 1), "of non-reference rows.\n")
+```
+
+```{r m2-fold-contribution-table, message=FALSE, warning=FALSE}
+knitr::kable(
+  m2_fold_summary, digits = 2,
+  caption = paste0(
+    "Fold-contribution of each component to the RQ collapse between ", min(m2_floors), " and ", TOX_FIXED_FLOOR,
+    " µm (values > 1 = RQ is that many times HIGHER at ", min(m2_floors), " µm than at ", TOX_FIXED_FLOOR,
+    " µm -- i.e. the collapse magnitude going from ", min(m2_floors), " up to ", TOX_FIXED_FLOOR,
+    " µm; a component near 1x contributed negligibly). The composition-fold column is the one carried up into the promoted interpretation (Section 12.5.1.3.1)."
+  ),
+  col.names = c("Compartment", "ERM", "Total fold-change", "Exposure-CF fold", "Hazard-integ fold", "Composition fold")
+)
+```
+
+```{r m2-fig1-stacked-decomposition, fig.width=11, fig.height=8, message=FALSE, warning=FALSE}
+# Exposure-CF deliberately excluded from the stack: it is an Arm-A-only
+# quantity (non-physical absolute value, Section 12.5.1.3.5's header note) and
+# is shown on its own in Figure M2-2 below. The two components stacked here
+# (hazard-integration, composition) do NOT sum to dlogRQ_total (the diamond)
+# -- the gap between the stack top and the diamond is exactly the
+# exposure-CF contribution, captioned explicitly rather than silently implied.
+m2_decomp_long <- m2_decomp |>
+  dplyr::select(compartment, ERM, L_tar_min, dlogRQ_hazardInteg, dlogRQ_composition, dlogRQ_total) |>
+  tidyr::pivot_longer(cols = c(dlogRQ_hazardInteg, dlogRQ_composition),
+                       names_to = "component", values_to = "dlogRQ") |>
+  dplyr::mutate(component = dplyr::recode(component,
+    dlogRQ_hazardInteg = "Hazard-integration", dlogRQ_composition = "Composition"))
+
+m2_fig1 <- m2_decomp_long |>
+  ggplot2::ggplot(ggplot2::aes(x = factor(L_tar_min), y = dlogRQ, fill = component)) +
+  ggplot2::geom_col(position = "stack", width = 0.65) +
+  ggplot2::geom_point(
+    data = m2_decomp_long |> dplyr::distinct(compartment, ERM, L_tar_min, dlogRQ_total),
+    ggplot2::aes(x = factor(L_tar_min), y = dlogRQ_total), inherit.aes = FALSE,
+    shape = 23, size = 2.6, fill = "white", color = "black", stroke = 0.9
+  ) +
+  ggplot2::geom_hline(yintercept = 0, linetype = "dashed", color = "gray40") +
+  ggplot2::facet_grid(ERM ~ compartment, labeller = ggplot2::labeller(compartment = m2_panel_labels)) +
+  ggplot2::scale_fill_manual(values = c("Hazard-integration" = "#E69F00", "Composition" = "#D55E00"), name = NULL) +
+  ggplot2::labs(
+    x = expression(L[tar-min]~"(µm)"), y = expression(Delta*log[10]*"(RQ) vs " * 10 ~ mu*m),
+    title = "M2: hazard-integration and composition components of the M1.2 floor effect (supplementary)",
+    subtitle = "DECOMPOSITION DIAGNOSTIC -- NOT A RISK ESTIMATE. Stacked bars = 2 components (exposure-CF excluded, see Figure M2-2); diamond = M1.2/M12equiv total.",
+    caption = "Rows: ERM. Columns: compartment. Reference floor = 10 µm (bars/diamond = 0 there). Gap between stack top and diamond = the excluded exposure-CF component."
+  ) +
+  ggplot2::theme_minimal(base_size = 15) +
+  ggplot2::theme(legend.position = "bottom", panel.border = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.4),
+                 strip.text = ggplot2::element_text(face = "bold"),
+                 plot.caption = ggplot2::element_text(size = 8, color = "gray50", hjust = 0))
+
+ggsave(m2_fig1, filename = "figures/m2_fig1_stacked_decomposition.png", width = 11, height = 8, dpi = 300)
+m2_fig1
+```
+
+```{r m2-fig2-arma-vs-floor, fig.width=10, fig.height=5, message=FALSE, warning=FALSE}
+m2_arm_a_plot_df <- m2_results |> dplyr::filter(arm == "A", !is.na(RQ_p50_1D))
+
+m2_fig2 <- m2_arm_a_plot_df |>
+  ggplot2::ggplot(ggplot2::aes(x = L_tar_min, y = RQ_p50_1D, color = ERM)) +
+  ggplot2::geom_hline(yintercept = 1, linetype = "dashed", color = "red") +
+  ggplot2::geom_line(linewidth = 0.9) +
+  ggplot2::geom_point(size = 3) +
+  ggplot2::scale_y_log10(labels = scales::label_number()) +
+  ggplot2::scale_color_manual(values = ERM_PALETTE, name = NULL) +
+  ggplot2::facet_wrap(~compartment, labeller = ggplot2::labeller(compartment = m2_panel_labels)) +
+  ggplot2::labs(
+    x = expression(L[tar-min]~"(µm)"), y = "Arm A RQ (1D) [log10 scale, non-physical -- see Section 12.5.1.3.5 header note]",
+    title = "M2 Figure 2 (supplementary): Arm A RQ vs floor (hazard frozen at 10 µm; HC5 flat by construction)",
+    subtitle = "DECOMPOSITION DIAGNOSTIC -- NOT A RISK ESTIMATE (exposure/hazard size-mismatched by design in Arm A). Dashed line = RQ = 1."
+  ) +
+  ggplot2::theme_minimal(base_size = 15) +
+  ggplot2::theme(legend.position = "bottom", panel.border = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.4),
+                 strip.text = ggplot2::element_text(face = "bold"))
+
+ggsave(m2_fig2, filename = "figures/m2_fig2_arma_vs_floor.png", width = 10, height = 5, dpi = 300)
+m2_fig2
+```
+
+**Guardrails.** No production headline number is affected by this section (M2 reuses the same underlying `correct_and_bootstrap_eed()` / `matrix_function_safe()` / `run_pssd_pipeline()` / `mc2d_risk()` functions M1.2 already uses, in new diagnostic configurations; it does not modify the production `L_tar_min = 1`, fully-tracking pipeline). Arm A deliberately mismatches the exposure and hazard size bases -- every Arm A number above is a diagnostic, not a valid stand-alone risk quotient; Arm B numbers, by contrast, are legitimate size-coherent risk quotients (just not the production headline, since composition is deliberately held fixed). Sediment is not touched.
+
 ## 12.5.2 Model-selection robustness: MLE and a tapered/lognormal small-end model
 
 Distinct from Section 4.1's method-choice statement: this section does not ask whether C-PSD is the right method (it is; Segur et al. 2026 already established C-PSD ≈ MLE in accuracy). It asks how much the *risk result* depends on the sub-floor extrapolation model, given Segur et al.'s own caveat that C-PSD extrapolates below the measured range, and marine-surface literature suggesting the true small-end particle-size distribution may roll off (fewer small particles than a single power law implies) rather than continue as one power law to 1 µm.
@@ -4065,9 +4917,15 @@ m13_propagate_one <- function(fit, L_meas_min, L_meas_max, monitoring_df, conc_c
     set.seed(seed)
     eed_i <- bootstrap_eed(monitoring_df[[conc_col]] * cf_val, n_boot = n_boot, probs = c(0.5, 0.95))
     set.seed(seed + 1)
-    summarize_rq(draw_rq_mc1d(haz_df, eed_i$q50, n_risk = n_risk)) |>
-      dplyr::filter(ERM %in% c("Food Dilution", "Tissue Translocation"), HCx == 5) |>
-      dplyr::select(ERM, RQ_p50, P_exceed)
+    draws_i <- draw_rq_mc1d(haz_df, eed_i$q50, n_risk = n_risk) |>
+      dplyr::filter(ERM %in% c("Food Dilution", "Tissue Translocation"), HCx == 5)
+    draws_i |>
+      dplyr::group_by(ERM) |>
+      dplyr::summarise(
+        RQ_p50   = stats::median(RQ), P_exceed = mean(RQ > 1, na.rm = TRUE),
+        RQ_p025  = stats::quantile(RQ, 0.025, na.rm = TRUE), RQ_p975 = stats::quantile(RQ, 0.975, na.rm = TRUE),
+        .groups  = "drop"
+      )
   }
 
   dplyr::bind_rows(
@@ -4087,7 +4945,7 @@ m13_ocean_rq <- m13_propagate_one(
 )
 
 m13_rq_results <- dplyr::bind_rows(m13_river_rq, m13_ocean_rq) |>
-  dplyr::relocate(Matrix, Model, ERM, CF, RQ_p50, P_exceed)
+  dplyr::relocate(Matrix, Model, ERM, CF, RQ_p50, RQ_p025, RQ_p975, P_exceed)
 
 knitr::kable(
   m13_rq_results, digits = 3,
@@ -4096,17 +4954,21 @@ knitr::kable(
 ```
 
 ```{r m13-rq-plot, fig.width=11, fig.height=6}
+m13_rq_dodge <- ggplot2::position_dodge(width = 0.5)
+
 m13_rq_plot <- m13_rq_results |>
   ggplot2::ggplot(ggplot2::aes(x = Model, y = RQ_p50, color = ERM, shape = Matrix)) +
   ggplot2::geom_hline(yintercept = 1, linetype = "dashed", color = "gray40") +
-  ggplot2::geom_point(size = 3.5, position = ggplot2::position_dodge(width = 0.5)) +
+  ggplot2::geom_errorbar(ggplot2::aes(ymin = RQ_p025, ymax = RQ_p975), width = 0.2, linewidth = 0.6,
+                         position = m13_rq_dodge, na.rm = TRUE) +
+  ggplot2::geom_point(size = 3.5, position = m13_rq_dodge) +
   ggplot2::scale_y_log10(labels = scales::label_number()) +
   ggplot2::scale_color_manual(values = ERM_PALETTE, name = "ERM") +
   ggplot2::coord_flip() +
   ggplot2::labs(
     x = NULL, y = "HC5 median RQ [log10 scale]",
     title = "RQ under each extrapolation model: C-PSD vs. MLE power law vs. lognormal small-end",
-    subtitle = "Dashed line = RQ = 1. Hazard held at production values; only the exposure-side extrapolation model varies."
+    subtitle = "Dashed line = RQ = 1. Bars = 95% CI (2.5th-97.5th percentile of the 1D risk draws). Hazard held at production values; only the exposure-side extrapolation model varies."
   ) +
   ggplot2::theme_minimal(base_size = 14) +
   ggplot2::theme(legend.position = "bottom", panel.border = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.4))
@@ -4115,7 +4977,54 @@ ggsave(m13_rq_plot, filename = "figures/m13_rq_plot.png", width = 11, height = 6
 m13_rq_plot
 ```
 
-**Guardrails and interpretation.** The C-PSD single-slope fit remains the production default; MLE and lognormal are labeled comparators only, and hazard is never re-derived in this section (only the exposure-side extrapolation model changes, holding `haz`/`haz_ocean` fixed at their production values). Report GoF failures honestly: `r if (m13_fit_summary$power_law_rejected[m13_fit_summary$Matrix == "River water"]) "the power law IS rejected for river water (bootstrap p < 0.1)" else "the power law is NOT rejected for river water"`, and `r if (m13_fit_summary$power_law_rejected[m13_fit_summary$Matrix == "Ocean water"]) "IS rejected for ocean water" else "is NOT rejected for ocean water"` (bootstrap p = `r round(m13_fit_summary$bootstrap_p[m13_fit_summary$Matrix=="River water"],3)` river, `r round(m13_fit_summary$bootstrap_p[m13_fit_summary$Matrix=="Ocean water"],3)` ocean). The Vuong test indicates whether the power law and lognormal are statistically distinguishable at each matrix's shared `xmin` (p < 0.05 favors one model over the other; a non-significant result means the data cannot discriminate between them at this sample size). If the Food Dilution exceedance conclusion holds across all three models, the risk result is robust to the extrapolation-model choice; if it flips under the lognormal small-end model, that sensitivity should be stated plainly.
+```{r m13-holdflip-vars, echo=FALSE}
+# N3 Part B: the missing populated hold/flip conclusion. Every number pulled
+# live from m13_rq_results / m13_fit_summary (already rendered above); no
+# retyped literals, no conditional template left unpopulated.
+m13_holdflip_one <- function(matrix_label) {
+  rows <- m13_rq_results |> dplyr::filter(Matrix == matrix_label, ERM == "Food Dilution")
+  cpsd <- rows |> dplyr::filter(Model == "C-PSD (production)")
+  mle  <- rows |> dplyr::filter(Model == "MLE power law")
+  logn <- rows |> dplyr::filter(Model == "Lognormal (tapered small-end)")
+  if (nrow(cpsd) != 1 || nrow(mle) != 1 || nrow(logn) != 1) return(paste0("Model comparison rows were incomplete for ", matrix_label, " at this render."))
+  status_word <- function(rq) if (rq > 1) "holds (RQ > 1)" else if (rq > 0.9) "is marginal (RQ near 1)" else "falls below 1"
+  paste0(
+    "For ", matrix_label, ", the production C-PSD single-slope Food Dilution HC5 RQ is ", round(cpsd$RQ_p50, 3),
+    " (P(RQ>1) = ", round(cpsd$P_exceed * 100, 1), "%); under the MLE power law it is ", round(mle$RQ_p50, 3),
+    " (P(RQ>1) = ", round(mle$P_exceed * 100, 1), "%), so the exceedance ", status_word(mle$RQ_p50),
+    "; under the lognormal small-end model it is ", round(logn$RQ_p50, 3), " (P(RQ>1) = ", round(logn$P_exceed * 100, 1),
+    "%), so the exceedance ", status_word(logn$RQ_p50), "."
+  )
+}
+m13_holdflip_river <- m13_holdflip_one("River water")
+m13_holdflip_ocean <- m13_holdflip_one("Ocean water")
+
+m13_xmin_river <- m13_fit_summary$xmin_um[m13_fit_summary$Matrix == "River water"]
+m13_xmin_ocean <- m13_fit_summary$xmin_um[m13_fit_summary$Matrix == "Ocean water"]
+
+m13_river_fd_logn <- m13_rq_results |> dplyr::filter(Matrix == "River water", ERM == "Food Dilution", Model == "Lognormal (tapered small-end)")
+m13_ocean_fd_logn <- m13_rq_results |> dplyr::filter(Matrix == "Ocean water", ERM == "Food Dilution", Model == "Lognormal (tapered small-end)")
+m13_bounding_word <- if (nrow(m13_river_fd_logn) == 1 && nrow(m13_ocean_fd_logn) == 1) {
+  if (m13_river_fd_logn$RQ_p50 > 1 && m13_ocean_fd_logn$RQ_p50 > 1) {
+    paste0(
+      "Both matrices' Food Dilution RQ stays above 1 under the lognormal small-end model, so the exceedance is robust ",
+      "to the extrapolation-model choice tested here -- this strengthens the \"cannot be excluded\" statement in the Key ",
+      "Findings summary rather than qualifying it."
+    )
+  } else {
+    paste0(
+      "At least one matrix's Food Dilution RQ falls below 1 under the lognormal small-end model, so the exceedance is ",
+      "not robust to this defensible small-end roll-off; read this alongside the sub-2.5 µm floor collapse (Section ",
+      "12.5.1) and the piecewise river Food Dilution RQ (Section 13.3) as convergent evidence that the food-dilution ",
+      "exceedance sits on the unconstrained sub-floor extrapolation zone."
+    )
+  }
+} else "The lognormal-model comparison could not be completed for both matrices at this render budget."
+```
+
+**Guardrails and interpretation.** The C-PSD single-slope fit remains the production default; MLE and lognormal are labeled comparators only, and hazard is never re-derived in this section (only the exposure-side extrapolation model changes, holding `haz`/`haz_ocean` fixed at their production values). Report GoF failures honestly: `r if (m13_fit_summary$power_law_rejected[m13_fit_summary$Matrix == "River water"]) "the power law IS rejected for river water (bootstrap p < 0.1)" else "the power law is NOT rejected for river water"`, and `r if (m13_fit_summary$power_law_rejected[m13_fit_summary$Matrix == "Ocean water"]) "IS rejected for ocean water" else "is NOT rejected for ocean water"` (bootstrap p = `r round(m13_fit_summary$bootstrap_p[m13_fit_summary$Matrix=="River water"],3)` river, `r round(m13_fit_summary$bootstrap_p[m13_fit_summary$Matrix=="Ocean water"],3)` ocean). The Vuong test indicates whether the power law and lognormal are statistically distinguishable at each matrix's shared `xmin` (p < 0.05 favors one model over the other; a non-significant result means the data cannot discriminate between them at this sample size; river Vuong statistic = `r round(m13_fit_summary$vuong_stat[m13_fit_summary$Matrix=="River water"],3)`, p = `r round(m13_fit_summary$vuong_p[m13_fit_summary$Matrix=="River water"],3)`; ocean statistic = `r round(m13_fit_summary$vuong_stat[m13_fit_summary$Matrix=="Ocean water"],3)`, p = `r round(m13_fit_summary$vuong_p[m13_fit_summary$Matrix=="Ocean water"],3)`).
+
+**Hold/flip conclusion.** `r m13_holdflip_river` `r m13_holdflip_ocean` Both fits report `xmin` explicitly (`r round(m13_xmin_river,1)` µm river, `r round(m13_xmin_ocean,1)` µm ocean, Table M1.3-fits above); the fit constrains only the measured range at or above `xmin` -- the sub-`xmin` extrapolation to 1 µm remains model-dependent regardless of goodness-of-fit, the same unconstrained sub-floor zone the floor-sensitivity (Section 12.5.1) and piecewise (Section 13.3) analyses probe from other angles. `r m13_bounding_word` Because the power law is not rejected for either matrix (bootstrap p reported above), the lognormal is an admissible alternative, not a preferred one -- the honest statement is the RQ range across admissible models, weighted by the (non-)discriminating Vuong result. Mechanistically, food dilution is a large-particle (volume/gut-filling) mechanism while small particles preferentially drive translocation; admitting small-particle studies into the volume-based food-dilution SSD (Section 12.5.1.3.1) is the plausible reason a shifted extrapolation model would move the RQ -- this section tests the *effect* of the extrapolation model choice, not that specific mechanism, directly. Ocean fiber (5 populated C-PSD bins) remains excluded from MLE fitting as too sparse for a stable tail fit; the pooled-"all"-shapes basis is used for both matrices' MLE/lognormal fits.
 
 ## 12.5.3 River vs ocean polymer composition: test for buoyant-polymer enrichment
 
@@ -4218,6 +5127,54 @@ cat(
   "(Hidalgo-Ruz et al. 2012) falls in the narrow density band (1.00-1.025 g/cm3) that would flip ",
   "classification between freshwater and seawater reference density.\n"
 )
+
+# By-group (Ocean / River-surface / River-subsurface) breakdown for the plot
+# below, since ocean has no recorded depth stratum in this dataset (Section
+# 12.5.3.1) -- it stays a single pooled group rather than being split.
+m14_buoyant_fraction_bygroup <- m14_particles |>
+  dplyr::mutate(
+    Group = dplyr::case_when(
+      Matrix == "Ocean water" ~ "Ocean water",
+      Matrix == "River water" & Depth == "surface"    ~ "River - surface",
+      Matrix == "River water" & Depth == "subsurface" ~ "River - subsurface",
+      TRUE ~ NA_character_
+    )
+  ) |>
+  dplyr::filter(!is.na(Group)) |>
+  dplyr::group_by(Group) |>
+  dplyr::summarise(n = dplyr::n(), n_buoyant = sum(is_buoyant), fraction_buoyant = n_buoyant / n, .groups = "drop") |>
+  dplyr::rowwise() |>
+  dplyr::mutate(ci = list(stats::binom.test(n_buoyant, n)$conf.int), ci_low = ci[1], ci_high = ci[2]) |>
+  dplyr::ungroup() |>
+  dplyr::select(-ci)
+
+knitr::kable(
+  m14_buoyant_fraction_bygroup, digits = 3,
+  caption = "Buoyant-polymer (PP + PE) fraction by group (river split by depth stratum; ocean pooled, no recorded depth), with binomial 95% CIs",
+  col.names = c("Group", "n", "n buoyant", "Fraction buoyant", "95% CI low", "95% CI high")
+)
+
+# River surface-vs-subsurface buoyancy test: same one-sided H1 (surface
+# fraction > subsurface fraction) and the same expected-cell-count fallback
+# convention as Section 12.5.3.1.1's dedicated treatment of this question,
+# computed locally here too so this plot's annotation is self-contained
+# rather than forward-referencing a later section.
+m14_river_depth_2x2 <- table(
+  factor(m14_particles$Depth[m14_particles$Matrix == "River water"], levels = c("subsurface", "surface")),
+  m14_particles$is_buoyant[m14_particles$Matrix == "River water"]
+)
+m14_river_depth_expected_min <- suppressWarnings(min(chisq.test(m14_river_depth_2x2)$expected))
+m14_river_depth_test <- if (m14_river_depth_expected_min < 5) {
+  fisher.test(m14_river_depth_2x2, alternative = "greater")
+} else {
+  stats::prop.test(
+    x = rev(m14_river_depth_2x2[, "TRUE"]), n = rev(rowSums(m14_river_depth_2x2)), alternative = "greater"
+  )
+}
+cat(
+  "River surface vs subsurface buoyant fraction (one-sided H1: surface > subsurface):", m14_river_depth_test$method,
+  "-- p =", signif(m14_river_depth_test$p.value, 4), "(see Section 12.5.3.1.1 for the full treatment)\n"
+)
 ```
 
 ```{r m14-composition-plot, fig.width=11, fig.height=6}
@@ -4242,19 +5199,32 @@ m14_composition_plot <- m14_particles |>
 ggsave(m14_composition_plot, filename = "figures/m14_composition_plot.png", width = 11, height = 6, dpi = 300)
 m14_composition_plot
 
-m14_buoyant_plot <- m14_buoyant_fraction |>
-  ggplot2::ggplot(ggplot2::aes(x = Matrix, y = fraction_buoyant, color = Matrix)) +
+m14_group_levels <- c("Ocean water", "River - surface", "River - subsurface")
+m14_group_pal <- c("Ocean water" = "#009E73", "River - surface" = "#0072B2", "River - subsurface" = "#56B4E9")
+
+m14_2x2_label <- paste0(
+  "River (pooled) vs ocean: ", m14_2x2_test$method, ", p = ", signif(m14_2x2_test$p.value, 3),
+  "\nRiver surface vs subsurface: ", m14_river_depth_test$method, ", p = ", signif(m14_river_depth_test$p.value, 3)
+)
+m14_buoyant_ymax <- max(m14_buoyant_fraction_bygroup$ci_high, na.rm = TRUE)
+
+m14_buoyant_plot <- m14_buoyant_fraction_bygroup |>
+  dplyr::mutate(Group = factor(Group, levels = m14_group_levels)) |>
+  ggplot2::ggplot(ggplot2::aes(x = Group, y = fraction_buoyant, color = Group)) +
   ggplot2::geom_pointrange(ggplot2::aes(ymin = ci_low, ymax = ci_high), size = 0.8, linewidth = 1) +
-  ggplot2::scale_color_manual(values = c("River water" = "#0072B2", "Ocean water" = "#009E73"), guide = "none") +
-  ggplot2::scale_y_continuous(labels = scales::label_percent(), limits = c(0, NA)) +
+  ggplot2::annotate("text", x = 2, y = m14_buoyant_ymax * 1.28, label = m14_2x2_label,
+                    size = 3.2, hjust = 0.5, color = "gray30", lineheight = 1.1) +
+  ggplot2::scale_color_manual(values = m14_group_pal, guide = "none") +
+  ggplot2::scale_y_continuous(labels = scales::label_percent(), limits = c(0, m14_buoyant_ymax * 1.45)) +
   ggplot2::labs(
     x = NULL, y = "Buoyant (PP + PE) fraction, with binomial 95% CI",
-    title = "Buoyant-polymer fraction: river vs ocean"
+    title = "Buoyant-polymer fraction: ocean vs river (by depth stratum)",
+    subtitle = "Ocean has no recorded depth stratum in this dataset (Section 12.5.3.1) -- shown pooled, not assumed surface."
   ) +
   ggplot2::theme_minimal(base_size = 14) +
   ggplot2::theme(panel.border = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.4))
 
-ggsave(m14_buoyant_plot, filename = "figures/m14_buoyant_plot.png", width = 7, height = 5, dpi = 300)
+ggsave(m14_buoyant_plot, filename = "figures/m14_buoyant_plot.png", width = 8, height = 5.5, dpi = 300)
 m14_buoyant_plot
 ```
 
@@ -4311,7 +5281,63 @@ ggsave(m14_depth_composition_plot, filename = "figures/m14_depth_composition_plo
 m14_depth_composition_plot
 ```
 
-**Interpretation.** Comparing the two river panels isolates a within-matrix depth effect (same sampling program, same µFTIR workflow, same LOD window); comparing either river panel to the ocean panel still mixes a matrix effect with the unrecorded-depth limitation above. `r scales::percent(m14_buoyant_fraction$fraction_buoyant[m14_buoyant_fraction$Matrix == "Ocean water"], accuracy=0.1)` buoyant fraction in ocean vs river's surface/subsurface split (Section 12.5.3 table) is the more decision-relevant comparison than the full multi-polymer breakdown shown here, which is provided as a descriptive, hypothesis-generating cross-tabulation rather than an additional formal test.
+**Interpretation.** Comparing the two river panels isolates a within-matrix depth effect (same sampling program, same µFTIR workflow, same LOD window); comparing either river panel to the ocean panel still mixes a matrix effect with the unrecorded-depth limitation above. `r scales::percent(m14_buoyant_fraction$fraction_buoyant[m14_buoyant_fraction$Matrix == "Ocean water"], accuracy=0.1)` buoyant fraction in ocean vs river's surface/subsurface split (Section 12.5.3 table) is the more decision-relevant comparison than the full multi-polymer breakdown shown here, which is a descriptive, hypothesis-generating cross-tabulation. The within-river surface-vs-subsurface buoyancy comparison it motivates is tested formally below.
+
+#### 12.5.3.1.1 Formal test: are buoyant particles relatively more abundant at the river surface than subsurface?
+
+Rationale: if buoyant (PP + PE) particles float toward and accumulate at the air-water interface, the river surface stratum should show a higher buoyant *fraction* than the subsurface stratum sampled at the same locations and times. This is a directional (one-sided) hypothesis, tested only within river water -- ocean has no recorded depth stratum (Section 12.5.3.1 above), so it cannot be included.
+
+```{r m14-depth-buoyancy-test, message=FALSE, warning=FALSE}
+river_depth_buoyant <- m14_particles |>
+  dplyr::filter(Matrix == "River water", Depth %in% c("surface", "subsurface")) |>
+  dplyr::mutate(Depth = factor(Depth, levels = c("subsurface", "surface")))
+
+river_depth_buoyant_fraction <- river_depth_buoyant |>
+  dplyr::group_by(Depth) |>
+  dplyr::summarise(n = dplyr::n(), n_buoyant = sum(is_buoyant), fraction_buoyant = n_buoyant / n, .groups = "drop") |>
+  dplyr::rowwise() |>
+  dplyr::mutate(
+    ci = list(stats::binom.test(n_buoyant, n)$conf.int),
+    ci_low  = ci[1],
+    ci_high = ci[2]
+  ) |>
+  dplyr::ungroup() |>
+  dplyr::select(-ci)
+
+knitr::kable(
+  river_depth_buoyant_fraction, digits = 3,
+  caption = "River water only: buoyant-polymer (PP + PE) fraction by sampling depth, with binomial 95% CIs.",
+  col.names = c("Depth", "n", "n buoyant", "Fraction buoyant", "95% CI low", "95% CI high")
+)
+
+n_surf    <- river_depth_buoyant_fraction$n[river_depth_buoyant_fraction$Depth == "surface"]
+n_sub     <- river_depth_buoyant_fraction$n[river_depth_buoyant_fraction$Depth == "subsurface"]
+nb_surf   <- river_depth_buoyant_fraction$n_buoyant[river_depth_buoyant_fraction$Depth == "surface"]
+nb_sub    <- river_depth_buoyant_fraction$n_buoyant[river_depth_buoyant_fraction$Depth == "subsurface"]
+river_depth_2x2 <- table(river_depth_buoyant$Depth, river_depth_buoyant$is_buoyant)
+river_depth_expected_min <- suppressWarnings(min(chisq.test(river_depth_2x2)$expected))
+
+# One-sided two-proportion test: H1 = surface buoyant fraction > subsurface
+# buoyant fraction. Falls back to a one-sided Fisher's exact test if any
+# expected cell count is small (same threshold convention as Section 12.5.3's
+# river-vs-ocean 2x2 test). river_depth_2x2 rows are (subsurface, surface) and
+# columns are (not buoyant, buoyant), so a higher surface buoyant fraction
+# implies odds ratio = (FALSE_sub * TRUE_surf) / (TRUE_sub * FALSE_surf) > 1
+# -- alternative = "greater" is the correct one-sided direction for both tests.
+river_depth_buoyancy_test <- if (river_depth_expected_min < 5) {
+  fisher.test(river_depth_2x2, alternative = "greater")
+} else {
+  stats::prop.test(x = c(nb_surf, nb_sub), n = c(n_surf, n_sub), alternative = "greater")
+}
+
+cat(
+  "Surface vs subsurface buoyant fraction, river water only:", river_depth_buoyancy_test$method,
+  "-- one-sided H1: surface fraction > subsurface fraction -- p =", signif(river_depth_buoyancy_test$p.value, 4),
+  "(min expected cell count =", round(river_depth_expected_min, 2), ")\n"
+)
+```
+
+**Interpretation.** The river surface stratum's buoyant fraction is `r scales::percent(river_depth_buoyant_fraction$fraction_buoyant[river_depth_buoyant_fraction$Depth == "surface"], accuracy=0.1)` (n = `r n_surf`) versus `r scales::percent(river_depth_buoyant_fraction$fraction_buoyant[river_depth_buoyant_fraction$Depth == "subsurface"], accuracy=0.1)` at the subsurface (n = `r n_sub`); the one-sided test above gives p = `r signif(river_depth_buoyancy_test$p.value, 3)`. `r if (river_depth_buoyancy_test$p.value < 0.05) { "This supports the hypothesis that buoyant particles are relatively enriched at the river surface, consistent with density-driven vertical sorting within the water column." } else if (nb_surf / n_surf < nb_sub / n_sub) { "This does not support the hypothesis -- the observed direction is the opposite of what surface buoyant-enrichment would predict: the subsurface fraction is numerically higher than the surface fraction, though the 95% CIs above overlap substantially. Density-driven vertical sorting by buoyancy is not evident in this river dataset; the depth difference, if real, is more likely driven by something other than polymer buoyancy (e.g., local hydrodynamics, sampling time, or shape-dependent settling of non-buoyant fibers)." } else { "This does not provide statistically significant support for surface enrichment of buoyant particles at the conventional 0.05 threshold, though the observed fractions point in the hypothesized direction; the effect (if real) is smaller than this dataset's river n can resolve." }` This is a within-matrix, same-program, same-workflow comparison (unlike the river-vs-ocean buoyancy test in Section 12.5.3, which is additionally confounded by the ocean depth-recording gap noted above), so a significant result here would be comparatively strong evidence for local vertical sorting by buoyancy specifically.
 
 
 # 15. Key Findings Summary
@@ -4408,7 +5434,7 @@ knitr::kable(
 
 ## 15.1 Revised uncertainty interpretation
 
-The main unresolved methodological uncertainties are now: (1) µFTIR objective and the marginal 50–100 µm detection zone, and (2) transport-induced PSD structural uncertainty described by Hoffman et al. (2026). The latter can affect absolute concentrations through the CF exponent, and may also affect relative comparisons when surface/subsurface samples, fibers/fragments, or buoyant/settling polymers are mixed in a pooled single-power-law fit. The sensitivity analyses above therefore replace the older conclusion that no further correction was warranted. The calibrated interpretation is that the Food Dilution pathway remains the dominant ERM in this screening assessment, while magnitude estimates should be read together with the slope-uncertainty, depth-stratified, density/buoyancy, and water-sediment coherence diagnostics.
+The main unresolved methodological uncertainties are now: (1) µFTIR objective and the marginal 50–100 µm detection zone, (2) transport-induced PSD structural uncertainty described by Hoffman et al. (2026), and (3) the lower extrapolation floor and toxicity-study-inclusion rule quantified in Section 12.5.1.3.1. The Hoffman uncertainty can affect absolute concentrations through the CF exponent, and may also affect relative comparisons when surface/subsurface samples, fibers/fragments, or buoyant/settling polymers are mixed in a pooled single-power-law fit. The sensitivity analyses above therefore replace the older conclusion that no further correction was warranted. The calibrated interpretation is that a Food Dilution threshold exceedance cannot be excluded but is method-conditional (floor-sensitive and study-inclusion-driven, Section 12.5.1.3.1; further bracketed by the piecewise and MLE/lognormal extrapolation-model sensitivities, Sections 13.2 and 12.5.2) rather than an unconditional risk-dominance finding, while magnitude estimates should be read together with the slope-uncertainty, depth-stratified, density/buoyancy, and water-sediment coherence diagnostics.
 
 ## 15.2 Modeling priorities
 
@@ -4439,7 +5465,74 @@ This section restates the executive summary with the corrected numbers now that 
 
 **(f) Sediment as a time-dependent, accumulating compartment (SPEC 1e).** Independent of the exposure-concentration problem in (e), Section 11.5 reframes sediment as an accumulating depositional sink in which deposited microplastics continue to fragment in place, so both bioaccessible exposure and hazard (HC5, via which benthic species become size-accessible) evolve over residence time ([Thuy-Dung, Groenenberg & Koelmans 2026](https://doi.org/10.1186/s43591-026-00210-8)). Any static sediment metric — including the illustrative Section 11.4 figures — is therefore a **lower-bound snapshot**, not an equilibrium value. Section 11.5.2 demonstrates this illustratively with a labeled, non-quantitative PSD-shift sensitivity showing the derived Food Dilution and Tissue Translocation HC5 falling as the sediment PSD is shifted progressively finer; Section 11.5.4 adds a most-sensitive-species screen (sediment, plus a river/ocean companion) since individual-species risk can precede a derivable community SSD signal. This is a framework/sensitivity addition — it does not change point (e): sediment remains excluded from the headline risk conclusion.
 
-**Summary.** Food Dilution remains the risk-dominant ERM relative to Tissue Translocation for river and ocean water in this screening assessment, consistent with the qualitative conclusion of the prior revision; the sediment pathway is excluded from this conclusion pending real concentration data (point (e) above). The magnitude of the Food Dilution RQ, however, depends materially on which of the three convention fixes above is applied, and the decomposition in Appendix A is intended to make that dependency auditable rather than implicit.
+```{r n3-summary-vars, echo=FALSE}
+# N3 Part A: live-computed replacement for the "Food Dilution remains
+# risk-dominant" summary sentence, reframed around the Section 12.5.1.3.1
+# study-inclusion finding. Every number below is pulled from an already-
+# rendered live object (mc2d_summary-derived rb_*/rs_ocean_* from Section 12;
+# m2_* from Section 12.5.1.3.1; risk_summary_piecewise_river from Section
+# 13.3) -- none retyped. Precise M2 decomposition numbers (fold-values, Arm B
+# RQ, HC5 collapse) are gated on is_production_budget per spec/N3.md's
+# guardrail, since M2 acceptance checks 1/3 (freeze-point coincidence,
+# decomposition closure) are themselves skipped at dev-scale.
+n3_piecewise_fd_river <- if (!is.null(risk_summary_piecewise_river)) {
+  risk_summary_piecewise_river |> dplyr::filter(ERM == "Food Dilution", HCx == 5)
+} else NULL
+
+n3_floor25_river_fd <- m12_results |> dplyr::filter(Matrix == "River water", L_tar_min == 2.5)
+
+n3_have_m2 <- exists("m2_armB_river_1") && exists("m2_armB_ocean_1") && exists("m2_m12_river_1") &&
+  exists("m2_armB_river_10") && exists("m2_fold_river") && nrow(m2_armB_river_1) == 1 &&
+  nrow(m2_armB_ocean_1) == 1 && nrow(m2_m12_river_1) == 1 && nrow(m2_armB_river_10) == 1 && nrow(m2_fold_river) == 1
+
+n3_summary_core <- paste0(
+  "A food-dilution threshold exceedance cannot be excluded but is not robust. At the field-standard 1 µm floor, ",
+  "the food-dilution RQ exceeds 1 in both matrices (river MC2D median RQ = ", round(rb_river_fd$RQ_p50_med, 2),
+  ", P(RQ>1) = ", round(rb_river_fd$P_exceed_med * 100, 1), "%; ocean = ", round(rs_ocean_food_hc5$RQ_p50_med, 2),
+  ", P(RQ>1) = ", round(rs_ocean_food_hc5$P_exceed_med * 100, 1), "%), while Tissue Translocation is below threshold ",
+  "(river ", round(rb_river_tt$RQ_p50_med, 3), "; ocean ", round(rs_ocean_tissue_hc5$RQ_p50_med, 3), "). ",
+  "This exceedance is conditional: it collapses ", if (nrow(n3_floor25_river_fd) == 1 && !is.na(n3_floor25_river_fd$RQ_p50_1D)) {
+    paste0("(river Food Dilution RQ ", if (n3_floor25_river_fd$RQ_p50_1D < 1) "already below 1" else "already much smaller",
+           " by a 2.5 µm floor, ", round(n3_floor25_river_fd$RQ_p50_1D, 3), ") ")
+  } else "",
+  "as the lower size floor rises from 1 µm (Section 12.5.1), and Section 12.5.1.3.1 shows it is generated by admitting ",
+  "<10 µm-tested toxicity studies into the volume-based food-dilution SSD (a hazard/HC5 effect) rather than by coherent ",
+  "sub-10 µm exposure extrapolation."
+)
+
+n3_summary_m2 <- if (n3_have_m2 && is_production_budget) {
+  paste0(
+    " With the study set held fixed and exposure and hazard rescaled coherently (Arm B, Section 12.5.1.3.1), the river ",
+    "food-dilution RQ at a 1 µm floor is ", round(m2_armB_river_1$RQ_p50_1D, 3), " (1D) and ",
+    round(m2_armB_river_1$RQ_p50_MC2D, 3), " under MC2D, with ocean below 1 under both metrics (1D = ",
+    round(m2_armB_ocean_1$RQ_p50_1D, 3), ", MC2D = ", round(m2_armB_ocean_1$RQ_p50_MC2D, 3), "). Because the ~",
+    round(m2_m12_river_1$HC5, 0), " particles/L food-dilution HC5 (production, tracking study set) reproduces the ",
+    "published field-standard value, this fragility is a property of the standard method, not of these sites -- the ",
+    "fixed-study-set HC5 is ~", round(m2_armB_river_10$HC5_median, 0), " by comparison. Tissue translocation is robustly ",
+    "below threshold across all floors (Section 12.5.1.3). Sub-10 µm exposure de-extrapolation is not negligible -- it ",
+    "is the larger single lever by magnitude (river exposure-CF fold ", round(m2_fold_river$fold_exposureCF, 2),
+    "x vs composition fold ", round(m2_fold_river$fold_composition, 2), "x); read this as \"study inclusion is decisive ",
+    "for threshold-crossing,\" never as \"extrapolation is irrelevant.\""
+  )
+} else if (n3_have_m2) {
+  paste0(
+    " A size-coherent, fixed-study-set comparison (Arm B, Section 12.5.1.3.1) is available but its precise fold-values ",
+    "are provisional at this dev-scale render (n_boot = ", n_boot, " < 1000; M2's own freeze-point-coincidence and ",
+    "decomposition-closure checks are skipped below the production budget) -- see Section 12.5.1.3.1 directly rather ",
+    "than this summary for indicative dev-scale numbers."
+  )
+} else ""
+
+n3_summary_bracket <- paste0(
+  " The exceedance's magnitude is further bracketed by two exposure-model sensitivities: the two-segment (piecewise) ",
+  "fit (Section 13.2/13.3", if (!is.null(n3_piecewise_fd_river)) paste0(", river Food Dilution RQ ", round(n3_piecewise_fd_river$RQ_p50, 2)) else "",
+  ") and the MLE/lognormal small-end extrapolation model (Section 12.5.2), both reported in the sensitivity sections above."
+)
+
+n3_summary_text <- paste0(n3_summary_core, n3_summary_m2, n3_summary_bracket)
+```
+
+**Summary.** `r n3_summary_text` The sediment pathway remains excluded from this conclusion pending real concentration data (point (e) above). The magnitude-uncertainty pointer here has shifted from the convention-fix audit to the floor / study-inclusion / extrapolation-model triad above; the three-convention-fix decomposition (point (b), Appendix A) remains in the report as an internal audit artifact, not as the principal driver of remaining magnitude uncertainty.
 
 ## 15.4 individual-species RCR — river/ocean companion screen
 
@@ -4912,7 +6005,7 @@ This subsection implements `sediment_psd_shift_sensitivity()` (`R/mp_risk_utils.
 
 **What is *not* transplanted.** Thuy-Dung et al.'s *k*~frag~/shell-geometry fragmentation model is calibrated to polymer-coated-fertilizer prills with 7-year field data — a single, known-age, known-geometry polymer system — not the heterogeneous mixed-polymer sediment microplastics of unknown age sampled here. Rather than fit a kinetic rate that would not transfer to this dataset, the size-shift below is parameterized as an explicit, cited scenario grid: an added shift to the differential length/area/volume/mass slopes (`alpha`/`a.v`/`a.sa`/`a.m.sediment.freshwater`, positive-alpha convention — larger values are steeper/finer), applied identically across all four size metrics as a simplifying assumption (fragmentation is assumed to shift all size metrics proportionally).
 
-```{r sediment-psd-shift-sensitivity}
+```{r sediment-psd-shift-sensitivity, cache=TRUE, cache.extra=n_boot}
 # 0 = no shift (baseline -- an internal consistency check against
 # Section 11.4's production sediment HC5, subject to Monte Carlo/parallel RNG
 # noise since no fixed seed is threaded through PSSDplusplus's parallel
