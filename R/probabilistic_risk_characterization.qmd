@@ -2569,15 +2569,27 @@ cpsd_loc_points_ro <- dplyr::bind_rows(
 # fiber's raw points span to 1.24e8 um^3 while its own fit window tops out
 # near 5.8e6. With facet scales = "free_x" this stretches that one panel's
 # axis so far the real fitted region (a thin sliver at the left edge)
-# effectively disappears. Trimming each (location, shape, metric) group to
-# its own 99th percentile of L_low removes that artifact tail while
-# retaining the near-LOD "faded" context points every other panel already
-# shows; the underlying fit objects (cpsd_loc_shape_vol_ro etc.) and every
-# computed a_cpsd/a_psd value are untouched.
-cpsd_loc_points_ro <- cpsd_loc_points_ro |>
+# effectively disappears.
+#
+# A percentile-of-count trim does NOT fix this: bins are evenly spaced by
+# vol_bin_um, so on this near-uniform grid the 99th percentile of L_low sits
+# at ~99% of the full range too (barely trims the axis). Trim relative to
+# each (location, shape, metric) panel's OWN fit-window upper bound instead
+# (already available as max(L_low) within cpsd_loc_lines_ro's fitted line for
+# that group) -- keep points out to 8x that bound, which comfortably shows
+# "just outside LOD" context on every normal panel (where the full data range
+# is already within a few x of the fit window) while cutting the artifact
+# tail on the few panels where it runs 20x+ beyond. The underlying fit
+# objects (cpsd_loc_shape_vol_ro etc.) and every computed a_cpsd/a_psd value
+# are untouched -- this only changes which points are drawn.
+cpsd_loc_trim_bounds <- cpsd_loc_lines_ro |>
   dplyr::group_by(location, shape, metric) |>
-  dplyr::filter(L_low <= stats::quantile(L_low, 0.99, na.rm = TRUE)) |>
-  dplyr::ungroup()
+  dplyr::summarise(lod_hi_group = max(L_low, na.rm = TRUE), .groups = "drop")
+
+cpsd_loc_points_ro <- cpsd_loc_points_ro |>
+  dplyr::left_join(cpsd_loc_trim_bounds, by = c("location", "shape", "metric")) |>
+  dplyr::filter(is.na(lod_hi_group) | L_low <= lod_hi_group * 8) |>
+  dplyr::select(-lod_hi_group)
 
 loc_palette_ro_used <- loc_palette_ro[names(loc_palette_ro) %in% as.character(unique(cpsd_loc_lines_ro$location))]
 
