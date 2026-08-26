@@ -244,6 +244,47 @@ fit_cpsd_segur_r <- function(x_um, bin_um = 10, fit_range_um = c(NA_real_, NA_re
   )
 }
 
+#' Cochran's Q heterogeneity test for a set of independently fitted slopes
+#'
+#' Tests whether K independently fitted C-PSD slope estimates (e.g. one per
+#' river location, each from its own `fit_cpsd_segur_r()` call with its own
+#' LOD window) are consistent with a single common slope, using inverse-
+#' variance weighting -- the standard fixed-effect meta-analysis heterogeneity
+#' test (Cochran 1954). This is the appropriate test here (rather than a
+#' pooled interaction-term regression) because each location's fit uses its
+#' own independently selected LOD window, so the underlying per-bin data are
+#' not on a common x-range that a single pooled regression could use.
+#'
+#' @param a Numeric vector of K slope estimates (a_cpsd or a_psd; any
+#'   consistent convention, since Q is scale/shift-invariant to a common
+#'   linear transform of a within a single call).
+#' @param se Numeric vector of K standard errors, same length/order as `a`.
+#' @param labels Optional character vector of length K (e.g. location names),
+#'   carried through to `weights` for reporting.
+#' @return List with `Q` (Cochran's Q statistic), `df` (= K-1), `p_value`,
+#'   `i2` (I-squared, % of total variation attributable to heterogeneity
+#'   rather than sampling error; Higgins & Thompson 2002), `weighted_mean`
+#'   (inverse-variance-weighted mean slope), and `weights` (a tibble of
+#'   labels/estimates/weights for reporting).
+slope_heterogeneity_test <- function(a, se, labels = NULL) {
+  stopifnot(length(a) == length(se), length(a) >= 2, all(se > 0, na.rm = TRUE))
+  k <- length(a)
+  w <- 1 / se^2
+  weighted_mean <- sum(w * a) / sum(w)
+  Q  <- sum(w * (a - weighted_mean)^2)
+  df <- k - 1
+  p_value <- stats::pchisq(Q, df = df, lower.tail = FALSE)
+  i2 <- max(0, (Q - df) / Q * 100)
+  list(
+    Q = Q, df = df, p_value = p_value, i2 = i2,
+    weighted_mean = weighted_mean,
+    weights = tibble::tibble(
+      label = if (is.null(labels)) seq_len(k) else labels,
+      estimate = a, se = se, weight = w
+    )
+  )
+}
+
 
 # ── Particle morphology helpers ───────────────────────────────────────────────
 

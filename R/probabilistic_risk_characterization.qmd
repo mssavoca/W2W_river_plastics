@@ -257,9 +257,10 @@ knitr::kable(
   caption = "Polymer density lookup (Hidalgo-Ruz et al. 2012, Table 2) used for the Hoffman et al. (2026) transport diagnostics."
 )
 
-raw_particles_river |>
-  dplyr::count(polymer_density_group, buoyancy_freshwater, sort = TRUE) |>
-  knitr::kable(caption = "River particle density groups and freshwater buoyancy flags")
+polymer_density_composition_tbl <- raw_particles_river |>
+  dplyr::count(polymer_density_group, buoyancy_freshwater, sort = TRUE)
+
+knitr::kable(polymer_density_composition_tbl, caption = "River particle density groups and freshwater buoyancy flags")
 ```
 
 ## 3.2 Monitoring concentration observations (site replicates)
@@ -370,6 +371,23 @@ loc_summary <- dplyr::bind_rows(lapply(names(cpsd_fits_by_loc), function(loc) {
 }))
 
 knitr::kable(loc_summary, caption = "C-PSD length fits by river location (Segur 2026 algorithm)")
+```
+
+```{r cpsd-location-heterogeneity}
+# Formal test of whether the per-location C-PSD slopes above differ by more
+# than sampling error alone: Cochran's Q heterogeneity test (fixed-effect
+# meta-analysis convention), inverse-variance-weighted across the four
+# independently fitted river-location slopes (each with its own LOD window).
+river_slope_heterogeneity <- slope_heterogeneity_test(
+  a = loc_summary$a_cpsd, se = loc_summary$se_a_cpsd, labels = loc_summary$location
+)
+
+cat(
+  "River location slope heterogeneity: Q(", river_slope_heterogeneity$df, ") = ",
+  round(river_slope_heterogeneity$Q, 2), ", p = ", signif(river_slope_heterogeneity$p_value, 3),
+  ", I2 = ", round(river_slope_heterogeneity$i2, 1), "%, weighted-mean a_cpsd = ",
+  round(river_slope_heterogeneity$weighted_mean, 3), "\n", sep = ""
+)
 ```
 
 ```{r cpsd-location-slope-plot}
@@ -907,14 +925,16 @@ cpsd_river_length_facet_plot
 
 ### 4.2.5 Per-river power-law slopes across size metrics
 
-The per-location C-PSD fits from Section 4.2.4 yield a C-PSD slope *a*~cpsd~ for each combination of river location and size metric (length, surface area, volume) -- the preferred, robust convention (Section 4.1), not the inferior BN-PSD/differential convention. Comparing these slopes across metrics shows how the shape of the size distribution changes with the geometric measure used, and whether location-to-location variation is consistent across metrics.
+The per-location C-PSD fits from Section 4.2.4 yield a C-PSD slope *a*~cpsd~ for each combination of river location and size metric (length, surface area, volume) -- the preferred, robust convention (Section 4.1), not the inferior BN-PSD/differential convention. Comparing these slopes across metrics shows how the shape of the size distribution changes with the geometric measure used, and whether location-to-location variation is consistent across metrics. This river-only breakdown is combined with the pooled sediment and ocean slopes into a single across-matrix comparison in Section 12.0.2, once those matrices' area/volume fits are available.
 
-```{r cpsd-slopes-all-metrics, fig.width=10, fig.height=4.5}
+```{r cpsd-slopes-all-metrics-data}
 # Extract per-location a_cpsd (C-PSD, the preferred/robust convention -- Section
 # 4.1) for surface area and volume from the per-river fits. Previously plotted
 # a_psd (the differential, BN-PSD-equivalent slope); BN-PSD alone is
 # insufficient to correct binning bias (Segur et al. 2026), so this comparison
 # now uses the C-PSD slope directly rather than its BN-PSD-convention shift.
+# Data only here -- the plot itself (figures/cpsd_slopes_all_metrics_plot.png)
+# is built in Section 12.0.2 once sediment and ocean area/volume fits exist.
 extract_loc_slopes <- function(fits_by_loc, metric_name) {
   dplyr::bind_rows(lapply(names(fits_by_loc), function(loc) {
     fo <- fits_by_loc[[loc]][["all"]]
@@ -932,44 +952,6 @@ loc_slopes_all <- dplyr::bind_rows(
     metric   = factor(metric, levels = c("Length (µm)", "Surface Area (µm²)", "Volume (µm³)")),
     location = factor(location, levels = locations)
   )
-
-# Reference slope (Segur 2026 ocean fragment mean, length metric), converted
-# from the BN-PSD/differential convention Segur et al. report (-2.66) to the
-# C-PSD/cumulative convention plotted here (a_cpsd = a_psd + 1).
-ref_slopes <- data.frame(
-  metric    = factor("Length (µm)", levels = levels(loc_slopes_all$metric)),
-  ref_slope = -2.66 + 1,
-  ref_label = "Segur 2026\nfragment mean (C-PSD)"
-)
-
-cpsd_slopes_all_metrics_plot <- ggplot2::ggplot(loc_slopes_all,
-    ggplot2::aes(x = location, y = a_cpsd, color = location)) +
-  ggplot2::geom_hline(
-    data = ref_slopes,
-    ggplot2::aes(yintercept = ref_slope),
-    linetype = "dashed", color = "gray50", linewidth = 0.7, inherit.aes = FALSE
-  ) +
-  ggplot2::geom_point(size = 4) +
-  ggplot2::geom_errorbar(
-    ggplot2::aes(ymin = a_cpsd - se_a_cpsd, ymax = a_cpsd + se_a_cpsd),
-    width = 0.2, linewidth = 0.8
-  ) +
-  ggplot2::facet_wrap(~ metric, nrow = 1, scales = "free_y") +
-  ggplot2::scale_color_manual(values = loc_palette, guide = "none") +
-  ggplot2::labs(
-    x        = "River location",
-    y        = expression(italic(a)[cpsd]),
-    title    = "C-PSD slope by river location and size metric",
-    subtitle = "Error bars = ±1 SE  |  Dashed = Segur 2026 fragment reference, converted to C-PSD convention (length only)"
-  ) +
-  ggplot2::theme_minimal(base_size = 20) +
-  ggplot2::theme(
-    panel.border = ggplot2::element_rect(color = "gray85", fill = NA, linewidth = 0.4),
-    strip.text   = ggplot2::element_text(face = "bold"),
-    axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))
-
-ggsave(cpsd_slopes_all_metrics_plot, filename = "figures/cpsd_slopes_all_metrics_plot.png", width = 11, height = 7, dpi = 300)
-cpsd_slopes_all_metrics_plot
 ```
 
 Following the probabilistic rescaling approach (e.g., Coffin et al. 2022), treat the **differential** PSD slope as uncertain and represent it by a truncated normal distribution. The Segur C-PSD fit estimates *a*~cpsd~ for N(≥L); the Koelmans et al. (2020), Kooi et al. (2021), and Coffin et al. (2022) correction-factor equation integrates dN/dL = k·L^*a*, so the slope passed to `correction_factor()` is *a*~psd~ = *a*~cpsd~ − 1. Hoffman et al. (2026) adds a model-based structural uncertainty concern: transport can produce apparent dual-slope PSDs whose exponents differ by about two, so `slope_structural_sd` = `r slope_structural_sd` is added as an explicit assumption beyond the fit SE.
@@ -2405,7 +2387,110 @@ cpsd_fits_ocean_length <- fit_cpsd_by_shape(
 cpsd_fit_ocean_frag  <- cpsd_fits_ocean_length$fragment
 cpsd_fit_ocean_fiber <- cpsd_fits_ocean_length$fiber
 cpsd_fit_ocean_all   <- cpsd_fits_ocean_length$all
+```
 
+```{r cpsd-fits-ocean-by-location, cache=TRUE, cache.extra=raw_data_cache_key}
+# Ocean-water sample_location carries the same four river-mouth-adjacent
+# coastal site names as raw_particles_river (Carmel, Pajaro, Salinas, San
+# Lorenzo) -- ocean water was collected adjacent to each river's discharge,
+# not at one generic offshore site -- so the same per-location C-PSD fit and
+# heterogeneity test used for river water (Section 4.2.4) can be run here.
+# Ocean per-location n is much smaller than river (117 total vs 1207), so a
+# tryCatch guard (mirroring safe_cpsd() in Section 4.2.4) is required: some
+# locations may have too few/too sparse particles for the two-step LOD
+# algorithm to find any valid populated-bin window.
+ocean_locations <- sort(unique(raw_particles_ocean$sample_location))
+
+safe_cpsd_ocean_loc <- function(data, ...) {
+  if (length(data) < 10) return(list(valid = FALSE))
+  tryCatch(
+    c(fit_cpsd_segur_r(data, ...), list(valid = TRUE)),
+    error = function(e) list(valid = FALSE)
+  )
+}
+
+cpsd_fits_ocean_by_loc <- lapply(setNames(ocean_locations, ocean_locations), function(loc) {
+  dat <- raw_particles_ocean |> dplyr::filter(sample_location == loc) |> dplyr::pull(length_um)
+  safe_cpsd_ocean_loc(dat, bin_um = 5)
+})
+
+ocean_loc_summary <- dplyr::bind_rows(lapply(names(cpsd_fits_ocean_by_loc), function(loc) {
+  fo <- cpsd_fits_ocean_by_loc[[loc]]
+  if (isTRUE(fo$valid)) {
+    tibble::tibble(
+      location     = loc,
+      n_particles  = sum(raw_particles_ocean$sample_location == loc),
+      a_cpsd       = round(fo$a_cpsd,   3),
+      se_a_cpsd    = round(fo$se_a_cpsd, 3),
+      a_psd        = round(fo$a_psd,    3),
+      lod_low_um   = round(fo$lower_lod_used_um, 0),
+      lod_high_um  = round(fo$upper_lod_um,       0),
+      r2           = round(fo$r2,       3),
+      n_bins       = fo$n_bins,
+      fit_mode     = fo$fit_mode
+    )
+  } else {
+    tibble::tibble(
+      location = loc, n_particles = sum(raw_particles_ocean$sample_location == loc),
+      a_cpsd = NA_real_, se_a_cpsd = NA_real_, a_psd = NA_real_,
+      lod_low_um = NA_real_, lod_high_um = NA_real_, r2 = NA_real_,
+      n_bins = NA_integer_, fit_mode = "no_fit"
+    )
+  }
+}))
+
+knitr::kable(ocean_loc_summary, caption = "C-PSD length fits by ocean (coastal) location (Segur 2026 algorithm)")
+```
+
+```{r cpsd-ocean-location-heterogeneity}
+# Same Cochran's Q heterogeneity test as the river-location version above,
+# applied to the ocean per-location slopes. Locations with fit_mode != "ok"
+# (too few particles/bins for a valid LOD window) are excluded from the test
+# rather than silently contributing an unstable estimate.
+ocean_loc_summary_valid <- dplyr::filter(ocean_loc_summary, fit_mode == "ok", is.finite(se_a_cpsd), se_a_cpsd > 0)
+
+ocean_slope_heterogeneity <- if (nrow(ocean_loc_summary_valid) >= 2) {
+  slope_heterogeneity_test(
+    a = ocean_loc_summary_valid$a_cpsd, se = ocean_loc_summary_valid$se_a_cpsd,
+    labels = ocean_loc_summary_valid$location
+  )
+} else NULL
+
+if (!is.null(ocean_slope_heterogeneity)) {
+  cat(
+    "Ocean (coastal) location slope heterogeneity: Q(", ocean_slope_heterogeneity$df, ") = ",
+    round(ocean_slope_heterogeneity$Q, 2), ", p = ", signif(ocean_slope_heterogeneity$p_value, 3),
+    ", I2 = ", round(ocean_slope_heterogeneity$i2, 1), "%, weighted-mean a_cpsd = ",
+    round(ocean_slope_heterogeneity$weighted_mean, 3),
+    " (", nrow(ocean_loc_summary_valid), " of ", nrow(ocean_loc_summary), " locations had a valid fit)\n", sep = ""
+  )
+} else {
+  cat("Ocean location slope heterogeneity test could not be run: fewer than 2 locations had a valid C-PSD fit.\n")
+}
+```
+
+```{r cpsd-ocean-location-slope-plot}
+ocean_location_slope_plot <- ocean_loc_summary |>
+  ggplot2::ggplot(ggplot2::aes(x = location, y = a_psd)) +
+  ggplot2::geom_point(size = 4, color = "#009E73") +
+  ggplot2::geom_errorbar(
+    ggplot2::aes(ymin = a_psd - se_a_cpsd, ymax = a_psd + se_a_cpsd),
+    width = 0.2, color = "#009E73", linewidth = 0.8
+  ) +
+  ggplot2::labs(
+    x        = "Ocean (coastal) location",
+    y        = expression(italic(a)[psd] ~ "=" ~ italic(a)[cpsd] - 1),
+    title    = "Power-law slope by ocean (coastal) location",
+    subtitle = expression("Error bars = ±1 SE")
+  ) +
+  ggplot2::theme_minimal(base_size = 20) +
+  ggplot2::theme(panel.border = ggplot2::element_rect(color = "gray85", fill = NA, linewidth = 0.4))
+
+ggsave(ocean_location_slope_plot, filename = "figures/ocean_location_slope_plot.png", width = 9, height = 6, dpi = 300)
+ocean_location_slope_plot
+```
+
+```{r ocean-length-fits-continue}
 set.seed(8003)
 alpha_ocean    <- alpha_dist(mu = cpsd_fit_ocean_all$a_psd, sd = cpsd_fit_ocean_all$se_a_psd, n = n_mc, structural_sd = slope_structural_sd)
 alpha_ocean_mu <- mean(alpha_ocean)
@@ -2651,6 +2736,67 @@ cpsd_river_ocean_facet_plot <- ggplot2::ggplot() +
 ggsave(cpsd_river_ocean_facet_plot, filename = "figures/cpsd_river_ocean_facet_plot.png",
        width = 12, height = 8, dpi = 300)
 cpsd_river_ocean_facet_plot
+```
+
+### 12.0.2 Slope comparison across matrices and metrics
+
+Extends the per-river-location comparison (Section 4.2.5) with the pooled sediment (Section 11) and pooled ocean (Section 12.1) "all-shapes" fits for the same three size metrics, now that every matrix's area and volume fits are available. Points are colored by matrix rather than location so the four within-river points read as one group against the single pooled sediment and ocean values; the reference line previously drawn at the Segur et al. (2026) literature fragment mean is omitted here, since that value is a single-shape (fragment), single-matrix (ocean-only) literature figure and is not a like-for-like reference for a plot that already includes this study's own pooled matrix-level fits. The y-axis is fixed (not free) across the three metric facets so slope magnitudes are directly comparable panel to panel.
+
+```{r cpsd-slopes-all-metrics-plot, fig.width=11, fig.height=7}
+# Pooled ("all"-shape) sediment and ocean slopes, one row per metric, to sit
+# alongside the four per-river-location rows already in loc_slopes_all
+# (Section 4.2.5). Unlike river, sediment and ocean are not split by location
+# here: sediment has no location field, and the ocean per-location fits
+# (Section 12.0.1a) are length-only (area/volume were never fit per ocean
+# location), so a single pooled point per matrix is the only like-for-like
+# comparison available for all three metrics.
+sed_ocean_slopes_all <- tibble::tribble(
+  ~matrix,    ~metric,               ~a_cpsd,                    ~se_a_cpsd,
+  "Sediment", "Length (µm)",         cpsd_fit_sed_all$a_cpsd,     cpsd_fit_sed_all$se_a_cpsd,
+  "Sediment", "Surface Area (µm²)",  cpsd_fit_area_sed$a_cpsd,    cpsd_fit_area_sed$se_a_cpsd,
+  "Sediment", "Volume (µm³)",        cpsd_fit_volume_sed$a_cpsd,  cpsd_fit_volume_sed$se_a_cpsd,
+  "Ocean",    "Length (µm)",         cpsd_fit_ocean_all$a_cpsd,   cpsd_fit_ocean_all$se_a_cpsd,
+  "Ocean",    "Surface Area (µm²)",  cpsd_fit_area_ocean$a_cpsd,  cpsd_fit_area_ocean$se_a_cpsd,
+  "Ocean",    "Volume (µm³)",        cpsd_fit_volume_ocean$a_cpsd, cpsd_fit_volume_ocean$se_a_cpsd
+) |>
+  dplyr::mutate(group = matrix)
+
+matrix_slopes_all_metrics <- dplyr::bind_rows(
+  dplyr::mutate(loc_slopes_all, matrix = "River", group = as.character(location)),
+  sed_ocean_slopes_all
+) |>
+  dplyr::mutate(
+    metric = factor(metric, levels = c("Length (µm)", "Surface Area (µm²)", "Volume (µm³)")),
+    group  = factor(group, levels = c(as.character(locations), "Sediment", "Ocean")),
+    matrix = factor(matrix, levels = c("River", "Sediment", "Ocean"))
+  )
+
+matrix_pal_slopes <- c("River" = "#0072B2", "Sediment" = "#E69F00", "Ocean" = "#009E73")
+
+cpsd_slopes_all_metrics_plot <- ggplot2::ggplot(matrix_slopes_all_metrics,
+    ggplot2::aes(x = group, y = a_cpsd, color = matrix)) +
+  ggplot2::geom_point(size = 4) +
+  ggplot2::geom_errorbar(
+    ggplot2::aes(ymin = a_cpsd - se_a_cpsd, ymax = a_cpsd + se_a_cpsd),
+    width = 0.2, linewidth = 0.8
+  ) +
+  ggplot2::facet_wrap(~ metric, nrow = 1) +
+  ggplot2::scale_color_manual(values = matrix_pal_slopes, name = "Matrix") +
+  ggplot2::labs(
+    x        = "Location (river) / matrix (sediment, ocean)",
+    y        = expression(italic(a)[cpsd]),
+    title    = "C-PSD slope by location/matrix and size metric",
+    subtitle = "Error bars = ±1 SE. River shown per location; sediment and ocean are pooled matrix-level fits."
+  ) +
+  ggplot2::theme_minimal(base_size = 20) +
+  ggplot2::theme(
+    legend.position = "bottom",
+    panel.border = ggplot2::element_rect(color = "gray85", fill = NA, linewidth = 0.4),
+    strip.text   = ggplot2::element_text(face = "bold"),
+    axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))
+
+ggsave(cpsd_slopes_all_metrics_plot, filename = "figures/cpsd_slopes_all_metrics_plot.png", width = 11, height = 7, dpi = 300)
+cpsd_slopes_all_metrics_plot
 ```
 
 ## 12.1.1 All-matrix particle-length PSD comparison with MPSizeBase
@@ -3541,6 +3687,155 @@ knitr::kable(
 ```
 
 The piecewise fits are diagnostic only. A fit window that straddles the assumed critical size is flagged because the fitted single slope may blend a transport-distorted fine-size regime with the coarser-size regime. Per Hoffman et al. (2026), future refinement should prioritize measured 3-D geometry and polymer density over increasingly elaborate settling equations; even precise-geometry settling models retain substantial residual error, so settling-based corrections should be treated as bias-level adjustments rather than high-precision concentration estimates.
+
+### 13.2.1 Single-slope vs. two-segment fits with binned data (particle length only)
+
+Visualizes the two competing exposure-side models directly against the binned C-PSD data, using the same visual grammar as `plot_cpsd_multi()` (Section 4.2.1.1/Figure `alpha_cpsh_plot`): points outside the fitted LOD window shown at reduced opacity, dotted vertical lines marking the LOD window boundaries, and a 95% CI ribbon around each regression line. Restricted to particle length (the metric the piecewise bounding sensitivity, Section 13.3, actually uses); the analogous area/volume comparison is not produced, since the piecewise model is not fit for those metrics. Colors distinguish matrix (river/sediment/ocean); the two-segment panel's break point for each matrix (Section 13.2 table above) is visible directly as the bend in that matrix's line rather than marked separately, since the gap between the two fitted panels already makes the two-segment shape distinguishable from the single-slope one.
+
+```{r cpsd-single-vs-piecewise-plot, fig.width=13, fig.height=7}
+# Reuses the already-computed pooled "all"-shape length fits (no new fitting):
+# cpsd_fit_all / cpsd_fit_sed_all / cpsd_fit_ocean_all for the single-slope
+# model, and critical_piecewise_tbl$piecewise_break_um (this section, above)
+# for where to split each matrix's two-segment model. The two-segment lines
+# are obtained by refitting a plain lm(log10(N_ge) ~ log10(L_low)) separately
+# on each side of the break, over the *same* LOD-window bins already selected
+# by the single-slope fit (fo$data) -- i.e. an unconstrained-intercept version
+# of the same segment-interaction model piecewise_cpsd_diagnostic() already
+# fit to choose that break point, just refit here to recover per-segment
+# intercepts for plotting (the diagnostic function only returns slopes/AIC).
+cpsd_length_fits_by_matrix <- list(
+  "River water" = cpsd_fit_all,
+  "Sediment"    = cpsd_fit_sed_all,
+  "Ocean water" = cpsd_fit_ocean_all
+)
+# Points/legend use the standard (medium-saturation) matrix palette; regression
+# lines use a separately darkened variant of the same hues so the fit lines
+# read clearly against the dense point cloud rather than blending into it.
+matrix_pal_cpsd      <- c("River water" = "#0072B2", "Sediment" = "#E69F00", "Ocean water" = "#009E73")
+matrix_pal_cpsd_dark <- c("River water" = "#00375C", "Sediment" = "#7A5300", "Ocean water" = "#00432F")
+
+df_all_ms <- dplyr::bind_rows(lapply(names(cpsd_length_fits_by_matrix), function(mat) {
+  fo <- cpsd_length_fits_by_matrix[[mat]]
+  fo$bins |>
+    dplyr::arrange(L_low) |>
+    dplyr::mutate(
+      N_ge   = rev(cumsum(rev(n))),
+      Matrix = mat,
+      in_lod = L_low >= fo$lower_lod_used_um & L_high <= fo$upper_lod_um
+    ) |>
+    dplyr::filter(L_low > 0, N_ge > 0)
+}))
+
+pred_single_ms <- dplyr::bind_rows(lapply(names(cpsd_length_fits_by_matrix), function(mat) {
+  fo   <- cpsd_length_fits_by_matrix[[mat]]
+  grid <- tibble::tibble(L_low = seq(fo$lower_lod_used_um, fo$upper_lod_um, length.out = 200))
+  pred <- predict(fo$fit, newdata = grid, se.fit = TRUE)
+  tibble::tibble(Matrix = mat, L_low = grid$L_low, logN_fit = pred$fit,
+                 logN_lo = pred$fit - 1.96 * pred$se.fit, logN_hi = pred$fit + 1.96 * pred$se.fit)
+}))
+
+pred_piecewise_ms <- dplyr::bind_rows(lapply(names(cpsd_length_fits_by_matrix), function(mat) {
+  fo  <- cpsd_length_fits_by_matrix[[mat]]
+  brk <- critical_piecewise_tbl$piecewise_break_um[critical_piecewise_tbl$Matrix == mat]
+  if (!is.finite(brk)) return(NULL)
+  dat <- dplyr::mutate(fo$data, log_L = log10(L_low), log_N = log10(N_ge))
+  dplyr::bind_rows(lapply(c("low", "high"), function(seg) {
+    sub <- if (seg == "low") dplyr::filter(dat, L_low < brk) else dplyr::filter(dat, L_low >= brk)
+    if (nrow(sub) < 2) return(NULL)
+    fit_seg <- stats::lm(log_N ~ log_L, data = sub)
+    grid    <- tibble::tibble(L_low = seq(min(sub$L_low), max(sub$L_low), length.out = 100))
+    p       <- predict(fit_seg, newdata = data.frame(log_L = log10(grid$L_low)), se.fit = TRUE)
+    tibble::tibble(Matrix = mat, segment = seg, L_low = grid$L_low, logN_fit = p$fit,
+                   logN_lo = p$fit - 1.96 * p$se.fit, logN_hi = p$fit + 1.96 * p$se.fit)
+  }))
+}))
+
+lod_bounds_ms <- dplyr::bind_rows(lapply(names(cpsd_length_fits_by_matrix), function(mat) {
+  fo <- cpsd_length_fits_by_matrix[[mat]]
+  tibble::tibble(Matrix = mat, xval = log10(c(fo$lower_lod_used_um, fo$upper_lod_um)))
+}))
+
+model_levels <- c("Single-slope (production)", "Two-segment (piecewise)")
+
+df_both_ms <- dplyr::bind_rows(
+  dplyr::mutate(df_all_ms, Model = model_levels[1]),
+  dplyr::mutate(df_all_ms, Model = model_levels[2])
+) |>
+  dplyr::mutate(Model = factor(Model, levels = model_levels))
+
+pred_single_ms    <- dplyr::mutate(pred_single_ms,    Model = factor(model_levels[1], levels = model_levels),
+                                    line_color = unname(matrix_pal_cpsd_dark[Matrix]))
+pred_piecewise_ms <- dplyr::mutate(pred_piecewise_ms, Model = factor(model_levels[2], levels = model_levels),
+                                    line_color = unname(matrix_pal_cpsd_dark[Matrix]))
+
+lod_bounds_both_ms <- dplyr::bind_rows(
+  dplyr::mutate(lod_bounds_ms, Model = model_levels[1]),
+  dplyr::mutate(lod_bounds_ms, Model = model_levels[2])
+) |>
+  dplyr::mutate(Model = factor(Model, levels = model_levels))
+
+# Layer order matters: points are drawn first, then a dark "halo" line
+# (thicker, neutral grey, semi-transparent) beneath the actual colored fit
+# line, so the fit line reads clearly on top of the point cloud regardless of
+# how dense the points are. The fit lines themselves use matrix_pal_cpsd_dark
+# via aes(color = I(line_color)) -- a literal (AsIs) color that bypasses the
+# shared discrete color scale, so lines can be darker than points without a
+# second/conflicting legend.
+cpsd_single_vs_piecewise_plot <- ggplot2::ggplot(df_both_ms, ggplot2::aes(x = log10(L_low), y = log10(N_ge), color = Matrix)) +
+  ggplot2::geom_vline(
+    data = lod_bounds_both_ms, ggplot2::aes(xintercept = xval),
+    linetype = "dotted", color = "gray55", linewidth = 0.6, inherit.aes = FALSE
+  ) +
+  ggplot2::geom_point(ggplot2::aes(alpha = in_lod), size = 1.3) +
+  ggplot2::geom_ribbon(
+    data = pred_single_ms, ggplot2::aes(x = log10(L_low), ymin = logN_lo, ymax = logN_hi, fill = Matrix),
+    inherit.aes = FALSE, alpha = 0.15, color = NA
+  ) +
+  ggplot2::geom_ribbon(
+    data = pred_piecewise_ms,
+    ggplot2::aes(x = log10(L_low), ymin = logN_lo, ymax = logN_hi, fill = Matrix, group = interaction(Matrix, segment)),
+    inherit.aes = FALSE, alpha = 0.15, color = NA
+  ) +
+  # Dark halo behind the single-slope line (contrast against the point cloud).
+  ggplot2::geom_line(
+    data = pred_single_ms, ggplot2::aes(x = log10(L_low), y = logN_fit, group = Matrix),
+    inherit.aes = FALSE, color = "grey15", alpha = 0.35, linewidth = 2.6
+  ) +
+  ggplot2::geom_line(
+    data = pred_single_ms, ggplot2::aes(x = log10(L_low), y = logN_fit, color = I(line_color), group = Matrix),
+    inherit.aes = FALSE, linewidth = 1.4, alpha = 1
+  ) +
+  # Dark halo behind the piecewise lines.
+  ggplot2::geom_line(
+    data = pred_piecewise_ms,
+    ggplot2::aes(x = log10(L_low), y = logN_fit, group = interaction(Matrix, segment)),
+    inherit.aes = FALSE, color = "grey15", alpha = 0.35, linewidth = 2.6
+  ) +
+  ggplot2::geom_line(
+    data = pred_piecewise_ms,
+    ggplot2::aes(x = log10(L_low), y = logN_fit, color = I(line_color), group = interaction(Matrix, segment)),
+    inherit.aes = FALSE, linewidth = 1.4, alpha = 1
+  ) +
+  ggplot2::facet_wrap(~ Model, nrow = 1) +
+  ggplot2::scale_color_manual(values = matrix_pal_cpsd, name = "Matrix") +
+  ggplot2::scale_fill_manual(values = matrix_pal_cpsd, guide = "none") +
+  ggplot2::scale_alpha_manual(values = c(`TRUE` = 0.5, `FALSE` = 0.10), guide = "none") +
+  ggplot2::labs(
+    title    = "Single-slope vs. two-segment (piecewise) C-PSD fits by matrix (particle length)",
+    subtitle = "Dotted = fitted LOD window boundaries. Faded points = outside LOD window. In the two-segment panel, the break is where each matrix's line visibly bends.",
+    x        = expression(log[10] * "(Length, " * mu * "m)"),
+    y        = expression(log[10] * (N("">=L)))
+  ) +
+  ggplot2::theme_minimal(base_size = 14) +
+  ggplot2::theme(
+    legend.position = "bottom",
+    strip.text      = ggplot2::element_text(face = "bold", size = 13),
+    panel.border    = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.4)
+  )
+
+ggsave(cpsd_single_vs_piecewise_plot, filename = "figures/cpsd_single_vs_piecewise_plot.png", width = 13, height = 7, dpi = 300)
+cpsd_single_vs_piecewise_plot
+```
 
 ## 13.3 Piecewise (dual-slope) PSD as a bounding exposure case
 
@@ -5355,7 +5650,7 @@ cat(
 # 15. Key Findings Summary
 
 ```{r key-findings, echo=FALSE}
-knitr::kable(
+key_findings_tbl <-
   dplyr::bind_rows(
     tibble::tibble(
       Matrix  = "River water",
@@ -5438,7 +5733,10 @@ knitr::kable(
       LOD_hi_um  = round(cpsd_fit_ocean_fiber$upper_lod_um),
       R2         = round(cpsd_fit_ocean_fiber$r2, 3)
     )
-  ),
+  )
+
+knitr::kable(
+  key_findings_tbl,
   caption = "C-PSD power-law fits (Segur et al. 2026 algorithm). alpha_cpsd is the C-PSD slope; a_psd = alpha_cpsd − 1 is the differential BN-PSD slope used in PSSDplusplus.",
   col.names = c("Matrix", "Shape", "α_CPSD", "SE", "LOD low (µm)", "LOD high (µm)", "R²")
 )
@@ -6249,7 +6547,142 @@ if (n_boot < 1000) {
 }
 ```
 
-# 16. Session Information
+# 16. Export manuscript tables to Excel workbook
+
+Compiles every table referenced in the manuscript (`docs/Manuscript.qmd`, Tables 1-6 and Tables S1-S4) into a single labeled Excel workbook, one sheet per table plus an index sheet. Tables that already exist as named objects elsewhere in this document (`m12_results`, `m2_fold_summary`, `rq_bounding_tbl`, `individual_species_rcr_tbl`, `segur_python_compare`, `lit_alpha_df`) are reused as-is; the remaining manuscript tables (correction-factor/EED summary, headline RQ under MC1D and MC2D, and the species-EC summary) are assembled fresh here from objects already computed above. This section only reads existing objects -- it does not recompute or alter any risk, hazard, or exposure result.
+
+```{r manuscript-table2-cf-eed}
+# Table 2: correction factors and bootstrap EED quantiles by matrix.
+table2_cf_eed <- dplyr::bind_rows(
+  tibble::tibble(
+    Matrix = "River water",
+    CF_q05 = quantile(combined_cf, 0.05), CF_q50 = median(combined_cf), CF_q95 = quantile(combined_cf, 0.95),
+    EED_q50_median = median(eed_boot$q50), EED_q95_median = median(eed_boot$q95)
+  ),
+  tibble::tibble(
+    Matrix = "Ocean water",
+    CF_q05 = quantile(combined_cf_ocean, 0.05), CF_q50 = median(combined_cf_ocean), CF_q95 = quantile(combined_cf_ocean, 0.95),
+    EED_q50_median = median(eed_boot_ocean$q50), EED_q95_median = median(eed_boot_ocean$q95)
+  ),
+  tibble::tibble(
+    Matrix = "Sediment",
+    CF_q05 = quantile(combined_cf_sed, 0.05), CF_q50 = median(combined_cf_sed), CF_q95 = quantile(combined_cf_sed, 0.95),
+    EED_q50_median = median(eed_boot_sed$q50), EED_q95_median = median(eed_boot_sed$q95)
+  )
+) |>
+  dplyr::mutate(dplyr::across(where(is.numeric), ~ round(.x, 3)))
+
+knitr::kable(table2_cf_eed, caption = "Table 2: Correction factors and bootstrap EED quantiles by matrix")
+```
+
+```{r manuscript-table3-headline-rq}
+# Table 3: headline RQ, MC1D and MC2D, river/ocean, food dilution/tissue
+# translocation, at HC5 -- kept as two sheets (3a/3b) rather than one merged
+# table because the MC1D (risk_summary*) and MC2D (mc2d_*summary) objects
+# report different summary statistics (MC1D: pooled P_exceed/RQ_p50/p95/p99;
+# MC2D: the distribution, across outer-loop uncertainty draws, of P_exceed
+# and RQ_p50/p95 -- see Section 2.6/8 above), so forcing them into one table
+# would either lose columns or mix incompatible quantities under the same
+# header.
+table3a_headline_rq_mc1d <- dplyr::bind_rows(
+  dplyr::mutate(risk_summary,       Matrix = "River water"),
+  dplyr::mutate(risk_summary_ocean, Matrix = "Ocean water")
+) |>
+  dplyr::filter(HCx == 5, ERM %in% c("Food Dilution", "Tissue Translocation")) |>
+  dplyr::select(Matrix, ERM, HCx, P_exceed, RQ_p50, RQ_p95, RQ_p99) |>
+  dplyr::mutate(P_exceed = round(P_exceed, 4), RQ_p50 = round(RQ_p50, 4),
+                RQ_p95 = round(RQ_p95, 4), RQ_p99 = round(RQ_p99, 4))
+
+table3b_headline_rq_mc2d <- dplyr::bind_rows(
+  dplyr::mutate(mc2d_summary,       Matrix = "River water"),
+  dplyr::mutate(mc2d_ocean_summary, Matrix = "Ocean water")
+) |>
+  dplyr::filter(HCx == 5, ERM %in% c("Food Dilution", "Tissue Translocation")) |>
+  dplyr::select(Matrix, ERM, HCx, P_exceed_med, P_exceed_p05, P_exceed_p95, RQ_p50_med, RQ_p95_med) |>
+  dplyr::mutate(P_exceed_med = round(P_exceed_med, 4), P_exceed_p05 = round(P_exceed_p05, 4),
+                P_exceed_p95 = round(P_exceed_p95, 4), RQ_p50_med = round(RQ_p50_med, 4),
+                RQ_p95_med = round(RQ_p95_med, 4))
+
+knitr::kable(table3a_headline_rq_mc1d, caption = "Table 3a: Headline RQ under MC1D, river/ocean, HC5")
+knitr::kable(table3b_headline_rq_mc2d, caption = "Table 3b: Headline RQ under MC2D, river/ocean, HC5")
+```
+
+```{r manuscript-tableS3-species-ec}
+# Table S3: SSD species membership (n_species per ERM/matrix) and
+# most-sensitive-species EC values, from the most_sensitive_species() screens
+# already computed above (Sections 11.4/12.5.1.3/15.4) -- not re-derived here.
+table_s3_species_ec <- dplyr::bind_rows(
+  dplyr::mutate(mss_river, Matrix = "River water"),
+  dplyr::mutate(mss_ocean, Matrix = "Ocean water"),
+  dplyr::mutate(mss_sed,   Matrix = "Sediment")
+) |>
+  dplyr::select(Matrix, ERM, n_species, Most_sensitive_species = Species, n_records, median_EC) |>
+  dplyr::mutate(median_EC = round(median_EC, 4))
+
+knitr::kable(table_s3_species_ec, caption = "Table S3: SSD species membership and most-sensitive-species EC values, by matrix and ERM")
+```
+
+```{r manuscript-tables-workbook}
+if (!requireNamespace("openxlsx", quietly = TRUE)) install.packages("openxlsx")
+
+manuscript_tables <- list(
+  "T1_CPSD_slopes"          = key_findings_tbl,
+  "T2_CF_and_EED"           = table2_cf_eed,
+  "T3a_HeadlineRQ_MC1D"     = table3a_headline_rq_mc1d,
+  "T3b_HeadlineRQ_MC2D"     = table3b_headline_rq_mc2d,
+  "T4_IndivSpecies_RCR"     = individual_species_rcr_tbl,
+  "T5_FloorSensitivity"     = m12_results,
+  "T6a_Decomposition"       = m2_fold_summary,
+  "T6b_PiecewiseBounding"   = rq_bounding_tbl,
+  "S1_PolymerComposition"   = polymer_density_composition_tbl,
+  "S2_CPSD_Validation"      = segur_python_compare,
+  "S3_SpeciesMembership_EC" = table_s3_species_ec,
+  "S4_LiteratureAlphaComp"  = lit_alpha_df
+)
+
+manuscript_table_index <- tibble::tribble(
+  ~Sheet,                      ~Manuscript_table, ~Description,
+  "T1_CPSD_slopes",            "Table 1",  "C-PSD slopes (alpha_CPSD +/- SE, LOD, R2) by matrix and shape",
+  "T2_CF_and_EED",             "Table 2",  "Correction factors and bootstrap EED quantiles by matrix",
+  "T3a_HeadlineRQ_MC1D",       "Table 3",  "Headline RQ under MC1D (river/ocean; food dilution/tissue translocation) with exceedance probabilities",
+  "T3b_HeadlineRQ_MC2D",       "Table 3",  "Headline RQ under MC2D (river/ocean; food dilution/tissue translocation) with exceedance probabilities",
+  "T4_IndivSpecies_RCR",       "Table 4",  "Individual-species RCR vs community-HC5 RQ",
+  "T5_FloorSensitivity",       "Table 5",  "Floor-sensitivity results (CF, EED, n species, HC5, RQ) at 1-20 um",
+  "T6a_Decomposition",         "Table 6",  "Decomposition fold-contributions (exposure-CF, hazard-alignment, composition)",
+  "T6b_PiecewiseBounding",     "Table 6",  "Single-slope vs piecewise bounding RQ",
+  "S1_PolymerComposition",     "Table S1", "Polymer density-group composition",
+  "S2_CPSD_Validation",        "Table S2", "C-PSD implementation validation vs Segur PSD_fit.py",
+  "S3_SpeciesMembership_EC",   "Table S3", "SSD species membership and most-sensitive-species EC values",
+  "S4_LiteratureAlphaComp",    "Table S4", "Power-law particle-length PSD slopes, this study vs. literature comparators"
+)
+
+wb <- openxlsx::createWorkbook()
+header_style <- openxlsx::createStyle(textDecoration = "bold", fgFill = "#D9E1F2", border = "Bottom")
+title_style  <- openxlsx::createStyle(textDecoration = "bold", fontSize = 12)
+
+openxlsx::addWorksheet(wb, "README_Index")
+openxlsx::writeData(wb, "README_Index",
+  paste0("Manuscript tables -- exported from probabilistic_risk_characterization.qmd, rendered ", format(Sys.Date(), "%Y-%m-%d")),
+  startRow = 1, startCol = 1)
+openxlsx::addStyle(wb, "README_Index", title_style, rows = 1, cols = 1)
+openxlsx::writeDataTable(wb, "README_Index", manuscript_table_index, startRow = 3, tableStyle = "TableStyleMedium2")
+openxlsx::setColWidths(wb, "README_Index", cols = 1:3, widths = c(26, 16, 80))
+
+for (nm in names(manuscript_tables)) {
+  openxlsx::addWorksheet(wb, nm)
+  openxlsx::writeDataTable(wb, nm, manuscript_tables[[nm]], tableStyle = "TableStyleMedium2")
+  openxlsx::freezePane(wb, nm, firstRow = TRUE)
+  n_cols <- ncol(manuscript_tables[[nm]])
+  openxlsx::setColWidths(wb, nm, cols = seq_len(n_cols), widths = "auto")
+}
+
+manuscript_tables_xlsx_path <- file.path(proj_root, "data_output", "manuscript_tables.xlsx")
+openxlsx::saveWorkbook(wb, manuscript_tables_xlsx_path, overwrite = TRUE)
+cat("Manuscript tables workbook written to:", manuscript_tables_xlsx_path, "\n")
+cat("Sheets:", paste(c("README_Index", names(manuscript_tables)), collapse = ", "), "\n")
+```
+
+# 17. Session Information
 
 ```{r session-info, echo=FALSE}
 sessionInfo()
