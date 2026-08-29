@@ -6682,7 +6682,368 @@ cat("Manuscript tables workbook written to:", manuscript_tables_xlsx_path, "\n")
 cat("Sheets:", paste(c("README_Index", names(manuscript_tables)), collapse = ", "), "\n")
 ```
 
-# 17. Session Information
+# 17. Single-matrix variants of multi-matrix figures
+
+Every figure above that overlays two or more matrices (river, ocean, sediment) in one panel is reproduced here as separate single-matrix variants -- river-only, ocean-only, and/or sediment-only, whichever matrices that particular figure actually contains. Each variant reuses the exact data and geometry of its combined source figure, filtered to one matrix, and is saved alongside the original under a `_river`/`_ocean`/`_sediment` filename suffix. Matrices that a given combined figure never included (e.g., sediment in the river/ocean-only comparisons below) have no corresponding variant produced, rather than a fabricated empty one.
+
+## 17.1 Figure 1 / cpsd_river_ocean_facet_plot (river, ocean)
+
+```{r single-matrix-cpsd-river-ocean, fig.width=10, fig.height=7}
+build_cpsd_river_ocean_variant <- function(sel_locations, mat_label) {
+  pts <- dplyr::filter(cpsd_loc_points_ro, location %in% sel_locations)
+  lns <- dplyr::filter(cpsd_loc_lines_ro,  location %in% sel_locations)
+  pal <- loc_palette_ro_used[names(loc_palette_ro_used) %in% sel_locations]
+
+  p <- ggplot2::ggplot() +
+    ggplot2::geom_point(
+      data = dplyr::filter(pts, !in_lod),
+      ggplot2::aes(x = log10(L_low), y = logN, color = location),
+      size = 0.7, alpha = 0.05, shape = 16
+    ) +
+    ggplot2::geom_point(
+      data = dplyr::filter(pts, in_lod),
+      ggplot2::aes(x = log10(L_low), y = logN, color = location),
+      size = 1.3, alpha = 0.75, shape = 16
+    ) +
+    ggplot2::geom_ribbon(
+      data = lns, ggplot2::aes(x = log10(L_low), ymin = logN_lo, ymax = logN_hi, fill = location),
+      alpha = 0.12, color = NA
+    ) +
+    ggplot2::geom_line(
+      data = lns, ggplot2::aes(x = log10(L_low), y = logN_fit, color = location),
+      linewidth = 0.9, alpha = 0.9
+    ) +
+    ggplot2::facet_grid(shape ~ metric, scales = "free_x", labeller = ggplot2::label_value) +
+    ggplot2::coord_cartesian(ylim = y_range_ro) +
+    ggplot2::scale_x_continuous(breaks = int_breaks, labels = function(x) round(x)) +
+    ggplot2::scale_y_continuous(breaks = int_breaks, labels = function(x) round(x)) +
+    ggplot2::scale_color_manual(values = pal, name = NULL) +
+    ggplot2::scale_fill_manual(values = pal, guide = "none") +
+    ggplot2::guides(color = ggplot2::guide_legend(override.aes = list(alpha = 1, size = 3))) +
+    ggplot2::labs(
+      x = expression(log[10] * "(size)"), y = expression(log[10] * (N("">=L))),
+      title    = paste0("C-PSD power-law fits — ", mat_label, " only, by shape and size metric"),
+      subtitle = "Solid lines + ribbon = fit ± 95% CI within Segur LOD window. Faded points = outside LOD."
+    ) +
+    ggplot2::theme_minimal(base_size = 18) +
+    ggplot2::theme(
+      legend.position = "bottom",
+      panel.border    = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.4),
+      strip.text      = ggplot2::element_text(face = "bold", size = 10)
+    )
+
+  ggsave(p, filename = paste0("figures/cpsd_river_ocean_facet_plot_", tolower(mat_label), ".png"),
+         width = 12, height = 8, dpi = 300)
+  p
+}
+
+build_cpsd_river_ocean_variant(locations, "river")
+build_cpsd_river_ocean_variant("Ocean",   "ocean")
+```
+
+## 17.2 Figure S1 / cpsd_slopes_all_metrics_plot (river, sediment, ocean)
+
+```{r single-matrix-slopes-all-metrics, fig.width=9, fig.height=6}
+build_slopes_metrics_variant <- function(mat) {
+  dat <- dplyr::filter(matrix_slopes_all_metrics, matrix == mat)
+  p <- ggplot2::ggplot(dat, ggplot2::aes(x = group, y = a_cpsd, color = matrix)) +
+    ggplot2::geom_point(size = 4) +
+    ggplot2::geom_errorbar(
+      ggplot2::aes(ymin = a_cpsd - se_a_cpsd, ymax = a_cpsd + se_a_cpsd), width = 0.2, linewidth = 0.8
+    ) +
+    ggplot2::facet_wrap(~ metric, nrow = 1) +
+    ggplot2::scale_color_manual(values = matrix_pal_slopes, guide = "none") +
+    ggplot2::labs(
+      x = if (mat == "River") "River location" else NULL,
+      y = expression(italic(a)[cpsd]),
+      title    = paste0("C-PSD slope by size metric — ", mat, " only"),
+      subtitle = "Error bars = ±1 SE."
+    ) +
+    ggplot2::theme_minimal(base_size = 20) +
+    ggplot2::theme(
+      panel.border = ggplot2::element_rect(color = "gray85", fill = NA, linewidth = 0.4),
+      strip.text   = ggplot2::element_text(face = "bold"),
+      axis.text.x  = ggplot2::element_text(angle = 45, hjust = 1)
+    )
+  ggsave(p, filename = paste0("figures/cpsd_slopes_all_metrics_plot_", tolower(mat), ".png"),
+         width = 9, height = 6, dpi = 300)
+  p
+}
+invisible(lapply(c("River", "Sediment", "Ocean"), build_slopes_metrics_variant))
+```
+
+## 17.3 Figure S10 / cpsd_single_vs_piecewise_plot (river, sediment, ocean)
+
+```{r single-matrix-single-vs-piecewise, fig.width=10, fig.height=6}
+build_single_vs_piecewise_variant <- function(mat) {
+  df_f             <- dplyr::filter(df_both_ms,        Matrix == mat)
+  pred_single_f    <- dplyr::filter(pred_single_ms,     Matrix == mat)
+  pred_piecewise_f <- dplyr::filter(pred_piecewise_ms,  Matrix == mat)
+  lod_f            <- dplyr::filter(lod_bounds_both_ms, Matrix == mat)
+
+  p <- ggplot2::ggplot(df_f, ggplot2::aes(x = log10(L_low), y = log10(N_ge), color = Matrix)) +
+    ggplot2::geom_vline(
+      data = lod_f, ggplot2::aes(xintercept = xval),
+      linetype = "dotted", color = "gray55", linewidth = 0.6, inherit.aes = FALSE
+    ) +
+    ggplot2::geom_point(ggplot2::aes(alpha = in_lod), size = 1.3) +
+    ggplot2::geom_ribbon(
+      data = pred_single_f, ggplot2::aes(x = log10(L_low), ymin = logN_lo, ymax = logN_hi),
+      inherit.aes = FALSE, fill = unname(matrix_pal_cpsd[mat]), alpha = 0.15
+    ) +
+    ggplot2::geom_ribbon(
+      data = pred_piecewise_f, ggplot2::aes(x = log10(L_low), ymin = logN_lo, ymax = logN_hi, group = segment),
+      inherit.aes = FALSE, fill = unname(matrix_pal_cpsd[mat]), alpha = 0.15
+    ) +
+    ggplot2::geom_line(
+      data = pred_single_f, ggplot2::aes(x = log10(L_low), y = logN_fit),
+      inherit.aes = FALSE, color = "grey15", alpha = 0.35, linewidth = 2.6
+    ) +
+    ggplot2::geom_line(
+      data = pred_single_f, ggplot2::aes(x = log10(L_low), y = logN_fit, color = I(line_color)),
+      inherit.aes = FALSE, linewidth = 1.4
+    ) +
+    ggplot2::geom_line(
+      data = pred_piecewise_f, ggplot2::aes(x = log10(L_low), y = logN_fit, group = segment),
+      inherit.aes = FALSE, color = "grey15", alpha = 0.35, linewidth = 2.6
+    ) +
+    ggplot2::geom_line(
+      data = pred_piecewise_f, ggplot2::aes(x = log10(L_low), y = logN_fit, color = I(line_color), group = segment),
+      inherit.aes = FALSE, linewidth = 1.4
+    ) +
+    ggplot2::facet_wrap(~ Model, nrow = 1) +
+    ggplot2::scale_color_manual(values = matrix_pal_cpsd, guide = "none") +
+    ggplot2::scale_alpha_manual(values = c(`TRUE` = 0.5, `FALSE` = 0.10), guide = "none") +
+    ggplot2::labs(
+      title    = paste0("Single-slope vs. two-segment C-PSD fit — ", mat, " only (particle length)"),
+      subtitle = "Dotted = fitted LOD window boundaries. Faded points = outside LOD window.",
+      x        = expression(log[10] * "(Length, " * mu * "m)"),
+      y        = expression(log[10] * (N("">=L)))
+    ) +
+    ggplot2::theme_minimal(base_size = 14) +
+    ggplot2::theme(
+      strip.text   = ggplot2::element_text(face = "bold", size = 13),
+      panel.border = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.4)
+    )
+  fname <- paste0("figures/cpsd_single_vs_piecewise_plot_", tolower(gsub(" water", "", mat)), ".png")
+  ggsave(p, filename = fname, width = 10, height = 6, dpi = 300)
+  p
+}
+invisible(lapply(names(cpsd_length_fits_by_matrix), build_single_vs_piecewise_variant))
+```
+
+## 17.4 Figure S5 / rq_bounding_plot (river, ocean)
+
+Sediment is not produced here: it is already excluded from `rq_bounding_tbl`'s own comparison because its RQ is not comparable across matrices (SPEC 1d, Section 13.3), so there is no meaningful sediment-only variant of this specific figure.
+
+```{r single-matrix-rq-bounding, fig.width=7, fig.height=6}
+build_rq_bounding_variant <- function(mat) {
+  dat <- dplyr::filter(rq_bounding_tbl, Matrix == mat)
+  p <- ggplot2::ggplot(dat, ggplot2::aes(x = Case, y = RQ_p50, color = ERM, shape = Case)) +
+    ggplot2::geom_hline(yintercept = 1, linetype = "dashed", color = "gray40") +
+    ggplot2::geom_errorbar(
+      ggplot2::aes(ymin = RQ_p025, ymax = RQ_p975), width = 0.15, linewidth = 0.6,
+      position = ggplot2::position_dodge(width = 0.4), na.rm = TRUE
+    ) +
+    ggplot2::geom_point(size = 3.5, position = ggplot2::position_dodge(width = 0.4)) +
+    ggplot2::scale_y_log10(labels = scales::label_number()) +
+    ggplot2::scale_color_manual(values = ERM_PALETTE, name = "ERM") +
+    ggplot2::scale_shape_manual(values = c("Single-slope (production)" = 16, "Piecewise (bounding)" = 17), guide = "none") +
+    ggplot2::labs(
+      x = NULL, y = "HC5 median RQ [log10 scale]",
+      title    = paste0("Food Dilution / Tissue Translocation HC5 RQ — ", mat, " only"),
+      subtitle = "Dashed line = RQ = 1. Bars = 95% CI (2.5th-97.5th percentile of the 1D risk draws)."
+    ) +
+    ggplot2::theme_minimal(base_size = 15) +
+    ggplot2::theme(legend.position = "bottom", panel.border = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.4))
+  ggsave(p, filename = paste0("figures/rq_bounding_plot_", tolower(gsub(" water", "", mat)), ".png"),
+         width = 7, height = 6, dpi = 300)
+  p
+}
+invisible(lapply(c("River water", "Ocean water"), build_rq_bounding_variant))
+```
+
+## 17.5 Figure S9 / cf_bounding_plot (river, ocean, sediment)
+
+```{r single-matrix-cf-bounding, fig.width=6, fig.height=5.5}
+build_cf_bounding_variant <- function(mat) {
+  dat <- cf_bounding_tbl |>
+    dplyr::filter(Matrix == mat) |>
+    dplyr::select(Matrix, `Single-slope (production)` = CF_single_slope_p50, `Piecewise (bounding)` = CF_piecewise) |>
+    tidyr::pivot_longer(-Matrix, names_to = "Case", values_to = "CF") |>
+    dplyr::mutate(Case = factor(Case, levels = c("Single-slope (production)", "Piecewise (bounding)")))
+
+  p <- ggplot2::ggplot(dat, ggplot2::aes(x = Case, y = CF, color = Case)) +
+    ggplot2::geom_line(ggplot2::aes(group = Matrix), color = "gray70", linewidth = 0.6) +
+    ggplot2::geom_point(size = 4) +
+    ggplot2::scale_y_log10(labels = scales::label_number()) +
+    ggplot2::scale_color_manual(values = c("Single-slope (production)" = "#009E73", "Piecewise (bounding)" = "#D55E00"), guide = "none") +
+    ggplot2::labs(
+      x = NULL, y = "Correction factor (median) [log10 scale]",
+      title = paste0("Single-slope vs. piecewise correction factor — ", mat, " only")
+    ) +
+    ggplot2::theme_minimal(base_size = 15) +
+    ggplot2::theme(panel.border = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.4))
+  ggsave(p, filename = paste0("figures/cf_bounding_plot_", tolower(gsub(" water", "", mat)), ".png"),
+         width = 6, height = 5.5, dpi = 300)
+  p
+}
+invisible(lapply(c("River water", "Ocean water", "Sediment"), build_cf_bounding_variant))
+```
+
+## 17.6 Figure S6 / m14_composition_plot, m14_buoyant_plot, m14_depth_composition_plot (river, ocean)
+
+Sediment is not part of the buoyancy/composition screen (Section 12.5.3): `m14_particles` is built from river and ocean water only, so no sediment variant applies here.
+
+```{r single-matrix-m14-composition, fig.width=8, fig.height=6}
+build_m14_composition_variant <- function(mat) {
+  dat <- m14_particles |>
+    dplyr::filter(Matrix == mat) |>
+    dplyr::count(polymer_density_group) |>
+    dplyr::mutate(fraction = n / sum(n))
+  fillcol <- c("River water" = "#0072B2", "Ocean water" = "#009E73")[[mat]]
+  p <- ggplot2::ggplot(dat, ggplot2::aes(x = polymer_density_group, y = fraction)) +
+    ggplot2::geom_col(fill = fillcol, width = 0.7) +
+    ggplot2::scale_y_continuous(labels = scales::label_percent()) +
+    ggplot2::coord_flip() +
+    ggplot2::labs(x = NULL, y = "Fraction of particles", title = paste0("Polymer composition — ", mat, " only")) +
+    ggplot2::theme_minimal(base_size = 14) +
+    ggplot2::theme(panel.border = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.4))
+  ggsave(p, filename = paste0("figures/m14_composition_plot_", tolower(gsub(" water", "", mat)), ".png"),
+         width = 8, height = 6, dpi = 300)
+  p
+}
+invisible(lapply(c("River water", "Ocean water"), build_m14_composition_variant))
+```
+
+```{r single-matrix-m14-buoyant, fig.width=5, fig.height=5.5}
+build_m14_buoyant_variant <- function(sel_groups, mat_label) {
+  dat <- m14_buoyant_fraction_bygroup |>
+    dplyr::filter(Group %in% sel_groups) |>
+    dplyr::mutate(Group = factor(Group, levels = sel_groups))
+  p <- ggplot2::ggplot(dat, ggplot2::aes(x = Group, y = fraction_buoyant, color = Group)) +
+    ggplot2::geom_pointrange(ggplot2::aes(ymin = ci_low, ymax = ci_high), size = 0.8, linewidth = 1) +
+    ggplot2::scale_color_manual(values = m14_group_pal, guide = "none") +
+    ggplot2::scale_y_continuous(labels = scales::label_percent()) +
+    ggplot2::labs(
+      x = NULL, y = "Buoyant (PP + PE) fraction, with binomial 95% CI",
+      title = paste0("Buoyant-polymer fraction — ", mat_label, " only")
+    ) +
+    ggplot2::theme_minimal(base_size = 14) +
+    ggplot2::theme(panel.border = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.4))
+  ggsave(p, filename = paste0("figures/m14_buoyant_plot_", tolower(mat_label), ".png"),
+         width = 5, height = 5.5, dpi = 300)
+  p
+}
+build_m14_buoyant_variant(c("River - surface", "River - subsurface"), "river")
+build_m14_buoyant_variant("Ocean water", "ocean")
+```
+
+```{r single-matrix-m14-depth-composition, fig.width=9, fig.height=6}
+build_m14_depth_composition_variant <- function(sel_panels, mat_label) {
+  dat <- dplyr::filter(m14_depth_composition, panel %in% sel_panels)
+  p <- ggplot2::ggplot(dat, ggplot2::aes(x = polymer_top5, y = fraction, fill = polymer_top5)) +
+    ggplot2::geom_col(width = 0.7) +
+    ggplot2::geom_text(ggplot2::aes(label = n), vjust = -0.4, size = 3.2) +
+    ggplot2::facet_wrap(
+      ~ panel, ncol = length(sel_panels),
+      labeller = ggplot2::as_labeller(function(x) paste0(x, "\n(n = ", dat$n_panel[match(x, dat$panel)], ")"))
+    ) +
+    ggplot2::scale_y_continuous(labels = scales::label_percent(), expand = ggplot2::expansion(mult = c(0, 0.15))) +
+    ggplot2::scale_fill_brewer(palette = "Set2", name = NULL) +
+    ggplot2::labs(
+      x = NULL, y = "Fraction of particles",
+      title = paste0("Top-5 polymer composition — ", mat_label, " only")
+    ) +
+    ggplot2::theme_minimal(base_size = 13) +
+    ggplot2::theme(
+      legend.position = "none", axis.text.x = ggplot2::element_text(angle = 40, hjust = 1),
+      panel.border = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.4),
+      strip.text = ggplot2::element_text(face = "bold")
+    )
+  ggsave(p, filename = paste0("figures/m14_depth_composition_plot_", tolower(mat_label), ".png"),
+         width = if (length(sel_panels) > 1) 9 else 5, height = 6, dpi = 300)
+  p
+}
+build_m14_depth_composition_variant(c("River water - surface", "River water - subsurface"), "river")
+build_m14_depth_composition_variant("Ocean water - depth not recorded", "ocean")
+```
+
+## 17.7 Figure S7 / alpha_comparison_plot (river/freshwater, ocean/marine)
+
+Sediment is not part of this literature comparison at all (Methods, Section 2.3), so only river (Freshwater) and ocean (Marine) variants are produced. Zhao et al. (2026)'s pooled freshwater+marine meta-analysis point is, by its own source paper, not separable into a matrix and so does not appear in either single-matrix variant -- consistent with the combined figure already labeling it "Mixed (unclassified)" rather than assigning it to one matrix.
+
+```{r single-matrix-alpha-forest, fig.width=10, fig.height=6}
+build_alpha_forest_variant <- function(mat, mat_label) {
+  dat <- alpha_forest_df |>
+    dplyr::filter(Matrix == mat) |>
+    dplyr::mutate(
+      Source = factor(as.character(Source), levels = intersect(source_levels_bottom_to_top, as.character(Source))),
+      x_pos  = as.numeric(Source) + offset
+    )
+  src_levels <- levels(dat$Source)
+
+  p <- ggplot2::ggplot(dat, ggplot2::aes(x = x_pos, y = alpha_abs)) +
+    ggplot2::geom_boxplot(
+      data = dplyr::filter(dat, is_boxplot_row),
+      ggplot2::aes(group = Source, fill = Matrix),
+      color = "#009E73", alpha = 0.12, width = 0.55, outlier.shape = NA
+    ) +
+    ggplot2::geom_errorbar(
+      data = dplyr::filter(dat, !is.na(se)),
+      ggplot2::aes(ymin = alpha_abs - ci_mult * se, ymax = alpha_abs + ci_mult * se, color = Matrix),
+      width = 0.10, linewidth = 0.6
+    ) +
+    ggplot2::geom_jitter(
+      data = dplyr::filter(dat, is_boxplot_row),
+      ggplot2::aes(color = Matrix, shape = Shape),
+      width = 0.24, height = 0, alpha = 0.35, size = 1.6
+    ) +
+    ggplot2::geom_point(
+      data = dplyr::filter(dat, !is_boxplot_row),
+      ggplot2::aes(color = Matrix, shape = Shape),
+      size = 3.2, alpha = 0.95
+    ) +
+    ggrepel::geom_text_repel(
+      data = dplyr::filter(dat, !is.na(point_label)),
+      ggplot2::aes(label = point_label),
+      size = 3.0, max.overlaps = Inf, show.legend = FALSE,
+      box.padding = 0.4, point.padding = 0.2, force = 2, force_pull = 0.5,
+      min.segment.length = 0, segment.size = 0.3, segment.alpha = 0.5, seed = 1
+    ) +
+    ggplot2::scale_color_manual(values = matrix_pal_forest, drop = FALSE, guide = "none") +
+    ggplot2::scale_fill_manual(values = matrix_pal_forest, drop = FALSE, guide = "none") +
+    ggplot2::scale_shape_manual(values = shape_pal_forest, name = "Shape", drop = FALSE) +
+    ggplot2::scale_x_continuous(
+      breaks = seq_along(src_levels),
+      labels = stringr::str_wrap(unname(source_labels_clean[src_levels]), width = 40),
+      expand = ggplot2::expansion(add = 0.6)
+    ) +
+    ggplot2::coord_flip() +
+    ggplot2::labs(
+      x = NULL,
+      y = expression("|" * italic(a)[psd] * "| from particle-length PSD"),
+      shape = "Shape",
+      title    = paste0(mat_label, "-only particle-length PSD slopes: this study vs. literature"),
+      subtitle = "This study retains the fragment/fiber/all shape distinction; error bars per source as in the combined figure (Figure S7)."
+    ) +
+    ggplot2::theme_minimal(base_size = 16) +
+    ggplot2::theme(
+      axis.text.y  = ggplot2::element_text(size = 14, face = "bold"),
+      legend.position = "right",
+      panel.border = ggplot2::element_rect(color = "gray82", fill = NA, linewidth = 0.4),
+      plot.title   = ggplot2::element_text(size = 15),
+      plot.subtitle = ggplot2::element_text(size = 10.5, color = "gray30")
+    )
+  ggsave(p, filename = paste0("figures/alpha_comparison_plot_", tolower(mat_label), ".png"),
+         width = 10, height = 6, dpi = 300)
+  p
+}
+build_alpha_forest_variant("Freshwater", "river")
+build_alpha_forest_variant("Marine",     "ocean")
+```
+
+# 18. Session Information
 
 ```{r session-info, echo=FALSE}
 sessionInfo()
