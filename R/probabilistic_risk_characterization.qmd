@@ -6622,6 +6622,146 @@ table_s3_species_ec <- dplyr::bind_rows(
 knitr::kable(table_s3_species_ec, caption = "Table S3: SSD species membership and most-sensitive-species EC values, by matrix and ERM")
 ```
 
+## 16.1 SI Tables S5–S8: particle properties and fit statistics for every PDF fit
+
+Supplementary tables reporting the particle properties underlying, and the fitted parameters and fit statistics of, every particle-size probability distribution fitted in this report, formatted after Kooi et al. (2021, *Water Research* 198:117011, SI Tables S3–S4). River water (freshwater) is reported separately (Tables S5, S7) from ocean water and beach sand (Tables S6, S8). Each C-PSD row reports the fitted window [x~min~, x~max~) selected by the Segur et al. (2026) two-step LOD algorithm (or fixed by the length/width-consistent volume bounds, Section 4.2.3; area fits use a fixed lower search bound, Section 4.2.2), the cumulative slope α~CPSD~ and log~10~ intercept *b* of log~10~ N(≥x) = *b* + α~CPSD~ log~10~ x (± OLS standard error), the differential BN-PSD slope a~PSD~ = α~CPSD~ − 1 (same SE; the Kooi et al. positive PDF exponent is α = |a~PSD~|), R², and the number of populated bins fitted. Lower/upper quartiles are the 25th/75th percentiles. Mass is volume × polymer-resolved density (Section 3.1.1), reported in µg. Fits are summarized from the fit objects above, not refit -- except the depth-stratified river length fits, which are deterministically refit here (identical call to Section 10.0) to retain intercepts and bin counts, and checked against `depth_shape_fits`.
+
+```{r si-pdf-fit-tables}
+source(file.path(proj_root, "R", "si_pdf_tables.R"))
+
+# ---- Particle properties (Kooi et al. 2021 Table S3 analogue) ----
+si_props_river <- si_particle_properties(raw_particles_river, "River water")
+si_props_ocean_sed <- dplyr::bind_rows(
+  si_particle_properties(raw_particles_ocean, "Ocean water"),
+  si_particle_properties(raw_particles_sed,   "Beach sand")
+)
+
+# ---- C-PSD fit parameters (Kooi et al. 2021 Table S4 analogue) ----
+metric_spec <- list(
+  Length = list(col = "length_um", bin = 5,          unit = "Length (µm)"),
+  Area   = list(col = "area_um2",  bin = 500,        unit = "Projected area (µm²)"),
+  Volume = list(col = "V_um3",     bin = vol_bin_um, unit = "Volume (µm³)")
+)
+pooled_rows <- function(fits_by_metric, df, matrix_label) {
+  dplyr::bind_rows(lapply(names(fits_by_metric), function(m) {
+    si_cpsd_fit_rows(fits_by_metric[[m]], df, metric_spec[[m]]$col, metric_spec[[m]]$bin,
+                     matrix_label, metric_spec[[m]]$unit, "Pooled (all sites)")
+  }))
+}
+
+# River: pooled, per-location (length/area/volume x shape), depth-stratified (length)
+si_depth_fits <- si_depth_stratified_fits(raw_particles_river, depth_levels)
+depth_check <- dplyr::bind_rows(lapply(names(si_depth_fits), function(d)
+  tibble::tibble(sample_depth_general = d, shape = names(si_depth_fits[[d]]),
+                 a_cpsd_si = vapply(si_depth_fits[[d]], `[[`, numeric(1), "a_cpsd")))) |>
+  dplyr::inner_join(depth_shape_fits, by = c("sample_depth_general", "shape"))
+stopifnot("SI depth-stratified refit must reproduce Section 10.0 slopes" =
+            nrow(depth_check) == nrow(depth_shape_fits) &&
+            max(abs(depth_check$a_cpsd_si - depth_check$a_cpsd)) < 1e-12)
+
+per_loc_fits <- list(Length = cpsd_loc_shape_length, Area = cpsd_loc_shape_area,
+                     Volume = cpsd_loc_shape_vol)
+si_fits_river <- dplyr::bind_rows(
+  pooled_rows(list(Length = cpsd_fits_river_length, Area = cpsd_fits_river_area,
+                   Volume = cpsd_fits_river_volume), raw_particles_river, "River water"),
+  dplyr::bind_rows(lapply(names(per_loc_fits), function(m) {
+    dplyr::bind_rows(lapply(names(per_loc_fits[[m]]), function(loc) {
+      si_cpsd_fit_rows(per_loc_fits[[m]][[loc]],
+                       dplyr::filter(raw_particles_river, sample_location == loc),
+                       metric_spec[[m]]$col, metric_spec[[m]]$bin,
+                       "River water", metric_spec[[m]]$unit, paste0("Site: ", loc))
+    }))
+  })),
+  dplyr::bind_rows(lapply(names(si_depth_fits), function(d) {
+    si_cpsd_fit_rows(si_depth_fits[[d]],
+                     dplyr::filter(raw_particles_river, sample_depth_general == d),
+                     "length_um", 5, "River water", "Length (µm)", paste0("Depth: ", d))
+  }))
+) |>
+  dplyr::mutate(Metric = factor(Metric, levels = vapply(metric_spec, `[[`, "", "unit"))) |>
+  dplyr::arrange(Metric) |>
+  dplyr::mutate(Metric = as.character(Metric))
+
+# Ocean water (pooled + per-coastal-site length) and beach sand (pooled)
+si_fits_ocean_sed <- dplyr::bind_rows(
+  pooled_rows(list(Length = cpsd_fits_ocean_length, Area = cpsd_fits_ocean_area,
+                   Volume = cpsd_fits_ocean_volume), raw_particles_ocean, "Ocean water"),
+  dplyr::bind_rows(lapply(names(cpsd_fits_ocean_by_loc), function(loc) {
+    si_cpsd_fit_rows(list(all = cpsd_fits_ocean_by_loc[[loc]]),
+                     dplyr::filter(raw_particles_ocean, sample_location == loc),
+                     "length_um", 5, "Ocean water", "Length (µm)", paste0("Site: ", loc))
+  })),
+  pooled_rows(list(Length = cpsd_fits_sed_length, Area = cpsd_fits_sed_area,
+                   Volume = cpsd_fits_sed_volume), raw_particles_sed, "Beach sand")
+)
+
+# ---- Alternative / structural models fitted to pooled particle length ----
+si_alt_models <- dplyr::bind_rows(
+  m13_fit_summary |>
+    dplyr::transmute(
+      Matrix, Model = "MLE power law (poweRlaw::conpl)",
+      `x_min or break (µm)` = xmin_um, `n (tail or total)` = n_tail,
+      Parameters = sprintf("α = %.3f", alpha_MLE),
+      `Fit statistics` = sprintf("KS D = %.4f; bootstrap GOF p = %.2f", KS_D, bootstrap_p)
+    ),
+  m13_fit_summary |>
+    dplyr::transmute(
+      Matrix, Model = "Lognormal at MLE x_min (poweRlaw::conlnorm)",
+      `x_min or break (µm)` = xmin_um, `n (tail or total)` = n_tail,
+      Parameters = sprintf("meanlog = %.3f; sdlog = %.3f", lognormal_meanlog, lognormal_sdlog),
+      `Fit statistics` = sprintf("Vuong R = %.3f; p = %.3f (vs. power law)", vuong_stat, vuong_p)
+    ),
+  critical_piecewise_tbl |>
+    dplyr::transmute(
+      Matrix, Model = "Two-segment C-PSD (piecewise OLS)",
+      `x_min or break (µm)` = piecewise_break_um,
+      `n (tail or total)` = NA_integer_,
+      Parameters = sprintf("α_CPSD,low = %.2f; α_CPSD,high = %.2f", piecewise_low_a_cpsd, piecewise_high_a_cpsd),
+      `Fit statistics` = sprintf("ΔAIC vs. single slope = %.1f", piecewise_delta_aic)
+    )
+)
+si_alt_models <- si_alt_models |>
+  dplyr::mutate(
+    Matrix = dplyr::recode(Matrix, "Sediment" = "Beach sand"),
+    `n (tail or total)` = ifelse(is.na(`n (tail or total)`), "–", as.character(`n (tail or total)`))
+  )
+si_alt_models_river     <- dplyr::filter(si_alt_models, Matrix == "River water")
+si_alt_models_ocean_sed <- dplyr::filter(si_alt_models, Matrix != "River water") |>
+  dplyr::arrange(factor(Matrix, levels = c("Ocean water", "Beach sand")))
+
+# Full-precision numeric versions (formatted versions go to the manuscript workbook)
+si_csv_dir <- file.path(proj_root, "data_output", "si_pdf_tables")
+dir.create(si_csv_dir, showWarnings = FALSE)
+for (nm in c("si_props_river", "si_props_ocean_sed", "si_fits_river", "si_fits_ocean_sed")) {
+  utils::write.csv(get(nm), file.path(si_csv_dir, paste0(nm, ".csv")), row.names = FALSE,
+                   fileEncoding = "UTF-8")
+}
+
+# Word version of Tables S5-S8, with a variable-definitions section
+si_docx_path <- si_write_docx(
+  file.path(proj_root, "docs", "SI_Tables_S5-S8_PDF_fits.docx"),
+  props_river = si_props_river, props_ocean_sed = si_props_ocean_sed,
+  fits_river = si_fits_river, fits_ocean_sed = si_fits_ocean_sed,
+  alt_river = si_alt_models_river, alt_ocean_sed = si_alt_models_ocean_sed,
+  n_river = nrow(raw_particles_river), n_ocean = nrow(raw_particles_ocean),
+  n_sed = nrow(raw_particles_sed)
+)
+
+# ---- Render ----
+knitr::kable(si_format_property_table(si_props_river),
+  caption = paste0("Table S5. Particle properties, river water (µFTIR, n = ", format(nrow(raw_particles_river), big.mark = ","), " particles), by shape: median, lower (Q25) and upper (Q75) quartiles, mean, and standard deviation."))
+knitr::kable(si_format_property_table(si_props_ocean_sed, include_matrix = TRUE),
+  caption = "Table S6. Particle properties, ocean water and beach sand, by shape: median, lower (Q25) and upper (Q75) quartiles, mean, and standard deviation.")
+knitr::kable(si_format_cpsd_table(si_fits_river),
+  caption = "Table S7a. C-PSD fits, river water: fitted window [x_min, x_max), cumulative slope α_CPSD and log10 intercept b (± SE), differential slope a_PSD = α_CPSD − 1, R², and populated bins fitted, for every river length, area, and volume PDF (pooled, per-site, and per-depth stratum). Bin width and x_min/x_max are in the units given in the Metric column.")
+knitr::kable(si_alt_models_river,
+  caption = "Table S7b. Alternative size-distribution models fitted to pooled river-water particle length (Sections 12.5.2 and 13.2). MLE α is the positive PDF exponent (comparable to |a_PSD|).")
+knitr::kable(si_format_cpsd_table(si_fits_ocean_sed, include_matrix = TRUE),
+  caption = "Table S8a. C-PSD fits, ocean water and beach sand (columns as in Table S7a). Sites with too few particles for a valid LOD window are listed as 'no fit'.")
+knitr::kable(si_alt_models_ocean_sed,
+  caption = "Table S8b. Alternative size-distribution models fitted to pooled ocean-water and beach-sand particle length (MLE/lognormal fitted for ocean water only; Section 12.5.2).")
+```
+
 ```{r manuscript-tables-workbook}
 if (!requireNamespace("openxlsx", quietly = TRUE)) install.packages("openxlsx")
 
@@ -6637,7 +6777,13 @@ manuscript_tables <- list(
   "S1_PolymerComposition"   = polymer_density_composition_tbl,
   "S2_CPSD_Validation"      = segur_python_compare,
   "S3_SpeciesMembership_EC" = table_s3_species_ec,
-  "S4_LiteratureAlphaComp"  = lit_alpha_df
+  "S4_LiteratureAlphaComp"  = lit_alpha_df,
+  "S5_ParticleProps_River"  = si_format_property_table(si_props_river),
+  "S6_ParticleProps_OceanSand" = si_format_property_table(si_props_ocean_sed, include_matrix = TRUE),
+  "S7a_CPSD_Fits_River"     = si_format_cpsd_table(si_fits_river),
+  "S7b_AltModels_River"     = si_alt_models_river,
+  "S8a_CPSD_Fits_OceanSand" = si_format_cpsd_table(si_fits_ocean_sed, include_matrix = TRUE),
+  "S8b_AltModels_OceanSand" = si_alt_models_ocean_sed
 )
 
 manuscript_table_index <- tibble::tribble(
@@ -6653,7 +6799,13 @@ manuscript_table_index <- tibble::tribble(
   "S1_PolymerComposition",     "Table S1", "Polymer density-group composition",
   "S2_CPSD_Validation",        "Table S2", "C-PSD implementation validation vs Segur PSD_fit.py",
   "S3_SpeciesMembership_EC",   "Table S3", "SSD species membership and most-sensitive-species EC values",
-  "S4_LiteratureAlphaComp",    "Table S4", "Power-law particle-length PSD slopes, this study vs. literature comparators"
+  "S4_LiteratureAlphaComp",    "Table S4", "Power-law particle-length PSD slopes, this study vs. literature comparators",
+  "S5_ParticleProps_River",    "Table S5", "River-water particle properties (median, Q25, Q75, mean, SD) by shape",
+  "S6_ParticleProps_OceanSand","Table S6", "Ocean-water and beach-sand particle properties (median, Q25, Q75, mean, SD) by shape",
+  "S7a_CPSD_Fits_River",       "Table S7", "River-water C-PSD fit parameters and statistics (all length/area/volume fits)",
+  "S7b_AltModels_River",       "Table S7", "River-water alternative PSD models (MLE power law, lognormal, two-segment)",
+  "S8a_CPSD_Fits_OceanSand",   "Table S8", "Ocean-water and beach-sand C-PSD fit parameters and statistics",
+  "S8b_AltModels_OceanSand",   "Table S8", "Ocean-water and beach-sand alternative PSD models"
 )
 
 wb <- openxlsx::createWorkbook()

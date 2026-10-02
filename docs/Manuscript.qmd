@@ -217,6 +217,10 @@ Microplastic risk assessments that rescale monitoring data to a common size rang
 
 • **Table S4.** Power-law particle-length PSD slopes, this study vs. literature comparators (Wang et al. 2026, Segur et al. 2026, Kooi et al. 2021, Zhao et al. 2026), with reported sign convention and the converted differential a_psd value for each source. _\[HTML: lit_alpha_df / alpha-literature-comparison-table.\]_
 
+• **Table S5.** River-water particle properties (length, width, width-to-length ratio, projected area, volume, mass, density) by shape: median, lower/upper quartiles, mean, SD. **Table S6.** As Table S5, for ocean water and beach sand. _\[HTML: Section 16.1, si-pdf-fit-tables.\]_
+
+• **Table S7.** Fit parameters and statistics for every river-water PDF fitted: (a) C-PSD fits for length, projected area, and volume (pooled, per-site, and per-depth stratum), giving the fitted window x_min–x_max, α_CPSD and log₁₀ intercept ± SE, a_psd, R², and bins fitted; (b) alternative models for pooled particle length (MLE power law, lognormal, two-segment C-PSD). **Table S8.** As Table S7, for ocean water and beach sand. _\[HTML: Section 16.1, si-pdf-fit-tables.\]_
+
 • **Appendix B.** C-PSD implementation validation (bit-identical reconciliation). Reproducible R/Quarto code and helper functions (R/mp_risk_utils.R, R/cpsd_plotting.R, R/risk_plotting.R) accompany the SI.
 
 _Author contributions, funding, and competing interests: \[to complete\]._
