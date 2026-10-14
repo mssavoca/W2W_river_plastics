@@ -6878,9 +6878,9 @@ table_s3_species_ec <- dplyr::bind_rows(
 knitr::kable(table_s3_species_ec, caption = "Table S3: SSD species membership and most-sensitive-species EC values, by matrix and ERM")
 ```
 
-## 16.1 SI Tables S5–S8: particle properties and fit statistics for every PDF fit
+## 16.1 SI Tables S5–S10: particle properties, fit statistics, and concentration rescaling
 
-Supplementary tables reporting the particle properties underlying, and the fitted parameters and fit statistics of, every particle-size probability distribution fitted in this report, formatted after Kooi et al. (2021, *Water Research* 198:117011, SI Tables S3–S4). River water (freshwater) is reported separately (Tables S5, S7) from ocean water and beach sand (Tables S6, S8). Each C-PSD row reports the fitted window [x~min~, x~max~) selected by the Segur et al. (2026) two-step LOD algorithm (or fixed by the length/width-consistent volume bounds, Section 4.2.3; area fits use a fixed lower search bound, Section 4.2.2), the cumulative slope α~CPSD~ and log~10~ intercept *b* of log~10~ N(≥x) = *b* + α~CPSD~ log~10~ x (± OLS standard error), the differential BN-PSD slope a~PSD~ = α~CPSD~ − 1 (same SE; the Kooi et al. positive PDF exponent is α = |a~PSD~|), R², and the number of populated bins fitted. Lower/upper quartiles are the 25th/75th percentiles. Mass is volume × polymer-resolved density (Section 3.1.1), reported in µg. Fits are summarized from the fit objects above, not refit -- except the depth-stratified river length fits, which are deterministically refit here (identical call to Section 10.0) to retain intercepts and bin counts, and checked against `depth_shape_fits`.
+Supplementary tables reporting the particle properties underlying, the fitted parameters and fit statistics of every particle-size probability distribution fitted in this report, and the production concentration rescaling for every monitoring sample, formatted after Kooi et al. (2021, *Water Research* 198:117011, SI Tables S3–S4). River water (freshwater) is reported separately (Tables S5, S7) from ocean water and beach sand (Tables S6, S8). Tables S9 and S10 summarize the existing rescaling outputs: river samples use their river-specific single-slope C-PSD fit by default, while ocean-water and beach-sand samples use their pooled matrix single-slope fit. Each C-PSD row reports the fitted window [x~min~, x~max~) selected by the Segur et al. (2026) two-step LOD algorithm (or fixed by the length/width-consistent volume bounds, Section 4.2.3; area fits use a fixed lower search bound, Section 4.2.2), the cumulative slope α~CPSD~ and log~10~ intercept *b* of log~10~ N(≥x) = *b* + α~CPSD~ log~10~ x (± OLS standard error), the differential BN-PSD slope a~PSD~ = α~CPSD~ − 1 (same SE; the Kooi et al. positive PDF exponent is α = |a~PSD~|), R², and the number of populated bins fitted. Lower/upper quartiles are the 25th/75th percentiles. Mass is volume × polymer-resolved density (Section 3.1.1), reported in µg. Fits are summarized from the fit objects above, not refit -- except the depth-stratified river length fits, which are deterministically refit here (identical call to Section 10.0) to retain intercepts and bin counts, and checked against `depth_shape_fits`.
 
 ```{r si-pdf-fit-tables}
 source(file.path(proj_root, "R", "si_pdf_tables.R"))
@@ -6985,20 +6985,61 @@ si_alt_models_river     <- dplyr::filter(si_alt_models, Matrix == "River water")
 si_alt_models_ocean_sed <- dplyr::filter(si_alt_models, Matrix != "River water") |>
   dplyr::arrange(factor(Matrix, levels = c("Ocean water", "Beach sand")))
 
+# ---- Existing production concentration-rescaling outputs (Tables S9-S10) ----
+monitoring_river_si <- monitoring |>
+  dplyr::mutate(
+    a_psd_default = if (use_river_slopes) {
+      vapply(as.character(river), function(location) {
+        cpsd_fits_by_loc[[location]]$a_psd
+      }, numeric(1))
+    } else {
+      rep(cpsd_fit_all$a_psd, dplyr::n())
+    }
+  )
+monitoring_sed_si <- monitoring_sed |>
+  dplyr::mutate(a_psd_default = cpsd_fit_sed_all$a_psd)
+monitoring_ocean_si <- monitoring_ocean |>
+  dplyr::mutate(a_psd_default = cpsd_fit_ocean_all$a_psd)
+
+si_rescaling_samples <- dplyr::bind_rows(
+  si_rescaling_sample_rows(
+    monitoring_river_si, C_corrected_draws, "C_measured_pL", "River water",
+    "particles/L"
+  ),
+  si_rescaling_sample_rows(
+    monitoring_ocean_si, C_corrected_draws_ocean, "C_measured_pL", "Ocean water",
+    "particles/L"
+  ),
+  si_rescaling_sample_rows(
+    monitoring_sed_si, C_corrected_draws_sed, "C_measured_pkg", "Beach sand",
+    "particles/L-equivalent (illustrative; not particles/kg dry weight)"
+  )
+)
+stopifnot(
+  nrow(si_rescaling_samples) == nrow(monitoring) + nrow(monitoring_ocean) + nrow(monitoring_sed),
+  all(is.finite(si_rescaling_samples$`CF (median)`)),
+  all(is.finite(si_rescaling_samples$`Measured concentration (median)`)),
+  all(is.finite(si_rescaling_samples$`Rescaled concentration (median)`))
+)
+si_rescaling_summary <- si_rescaling_matrix_summary(si_rescaling_samples)
+
 # Full-precision numeric versions (formatted versions go to the manuscript workbook)
 si_csv_dir <- file.path(proj_root, "data_output", "si_pdf_tables")
 dir.create(si_csv_dir, showWarnings = FALSE)
-for (nm in c("si_props_river", "si_props_ocean_sed", "si_fits_river", "si_fits_ocean_sed")) {
+for (nm in c("si_props_river", "si_props_ocean_sed", "si_fits_river", "si_fits_ocean_sed",
+             "si_rescaling_samples", "si_rescaling_summary")) {
   utils::write.csv(get(nm), file.path(si_csv_dir, paste0(nm, ".csv")), row.names = FALSE,
                    fileEncoding = "UTF-8")
 }
 
-# Word version of Tables S5-S8, with a variable-definitions section
+# Word version of Tables S5-S10, with a variable-definitions section
 si_docx_path <- si_write_docx(
-  file.path(proj_root, "docs", "SI_Tables_S5-S8_PDF_fits.docx"),
+  file.path(proj_root, "docs", "SI_Tables_S5-S10_PDF_fits_and_rescaling.docx"),
   props_river = si_props_river, props_ocean_sed = si_props_ocean_sed,
   fits_river = si_fits_river, fits_ocean_sed = si_fits_ocean_sed,
   alt_river = si_alt_models_river, alt_ocean_sed = si_alt_models_ocean_sed,
+  rescaling_samples = si_rescaling_samples,
+  rescaling_summary = si_rescaling_summary,
   n_river = nrow(raw_particles_river), n_ocean = nrow(raw_particles_ocean),
   n_sed = nrow(raw_particles_sed)
 )
@@ -7016,6 +7057,10 @@ knitr::kable(si_format_cpsd_table(si_fits_ocean_sed, include_matrix = TRUE),
   caption = "Table S8a. C-PSD fits, ocean water and beach sand (columns as in Table S7a). Sites with too few particles for a valid LOD window are listed as 'no fit'.")
 knitr::kable(si_alt_models_ocean_sed,
   caption = "Table S8b. Alternative size-distribution models fitted to pooled ocean-water and beach-sand particle length (MLE/lognormal fitted for ocean water only; Section 12.5.2).")
+knitr::kable(si_format_rescaling_sample_table(si_rescaling_samples),
+  caption = "Table S9. Sample-level median measured and 1–5,000 µm rescaled concentrations, with reported mesh-size limits, the default production PSD slope, correction factor, and C-PSD-clipped LOD limits. CF and rescaled concentrations are medians across production Monte Carlo draws.")
+knitr::kable(si_format_rescaling_summary_table(si_rescaling_summary),
+  caption = "Table S10. Matrix-level mean, median, minimum, maximum, and interquartile range of the sample-level median measured and rescaled concentrations in Table S9.")
 ```
 
 ```{r manuscript-tables-workbook}
@@ -7039,7 +7084,9 @@ manuscript_tables <- list(
   "S7a_CPSD_Fits_River"     = si_format_cpsd_table(si_fits_river),
   "S7b_AltModels_River"     = si_alt_models_river,
   "S8a_CPSD_Fits_OceanSand" = si_format_cpsd_table(si_fits_ocean_sed, include_matrix = TRUE),
-  "S8b_AltModels_OceanSand" = si_alt_models_ocean_sed
+  "S8b_AltModels_OceanSand" = si_alt_models_ocean_sed,
+  "S9_SampleRescaling"      = si_format_rescaling_sample_table(si_rescaling_samples),
+  "S10_RescalingSummary"    = si_format_rescaling_summary_table(si_rescaling_summary)
 )
 
 manuscript_table_index <- tibble::tribble(
@@ -7061,7 +7108,9 @@ manuscript_table_index <- tibble::tribble(
   "S7a_CPSD_Fits_River",       "Table S7", "River-water C-PSD fit parameters and statistics (all length/area/volume fits)",
   "S7b_AltModels_River",       "Table S7", "River-water alternative PSD models (MLE power law, lognormal, two-segment)",
   "S8a_CPSD_Fits_OceanSand",   "Table S8", "Ocean-water and beach-sand C-PSD fit parameters and statistics",
-  "S8b_AltModels_OceanSand",   "Table S8", "Ocean-water and beach-sand alternative PSD models"
+  "S8b_AltModels_OceanSand",   "Table S8", "Ocean-water and beach-sand alternative PSD models",
+  "S9_SampleRescaling",        "Table S9", "Sample-level measured and rescaled concentrations with applied slope, CF, and LOD limits",
+  "S10_RescalingSummary",      "Table S10", "Matrix-level summary statistics for measured and rescaled concentrations"
 )
 
 wb <- openxlsx::createWorkbook()
