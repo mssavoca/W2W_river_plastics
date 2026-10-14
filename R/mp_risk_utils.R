@@ -200,10 +200,19 @@ fit_cpsd_segur_r <- function(x_um, bin_um = 10, fit_range_um = c(NA_real_, NA_re
 
   fit_mode <- if (is.null(lod$fit)) "no_fit" else "ok"
 
+  # SPEC Q1: N_ge (cumulative count at/above each bin's L_low) is computed over
+  # the full uniform bin_um grid so its *values* are unaffected by empty bins,
+  # but the regression itself must be restricted to populated (n > 0) bins only
+  # -- exactly mirroring PSD_fit.py, whose input CSV never contains zero-count
+  # bins to begin with (segur_bins_from_fit() filters n > 0 before export, and
+  # Python's __main__ re-filters `Bin_concentration != 0`). Without the `n > 0`
+  # filter here, R silently regresses over every empty 5-um grid cell inside
+  # the LOD window (flat N_ge step-function points), inflating n_bins and
+  # biasing a_cpsd relative to Python's populated-bins-only fit.
   df_full <- bins |>
     dplyr::arrange(L_low) |>
     dplyr::mutate(N_ge = rev(cumsum(rev(n)))) |>
-    dplyr::filter(L_low > 0, N_ge > 0)
+    dplyr::filter(L_low > 0, N_ge > 0, n > 0)
 
   df_fit <- df_full |>
     dplyr::filter(L_low >= lod$lod_low, L_low < lod$lod_high)
@@ -232,6 +241,47 @@ fit_cpsd_segur_r <- function(x_um, bin_um = 10, fit_range_um = c(NA_real_, NA_re
     r2                = fit_summ$r.squared,
     n_bins            = nrow(df_fit),
     fit_mode          = fit_mode
+  )
+}
+
+#' Cochran's Q heterogeneity test for a set of independently fitted slopes
+#'
+#' Tests whether K independently fitted C-PSD slope estimates (e.g. one per
+#' river location, each from its own `fit_cpsd_segur_r()` call with its own
+#' LOD window) are consistent with a single common slope, using inverse-
+#' variance weighting -- the standard fixed-effect meta-analysis heterogeneity
+#' test (Cochran 1954). This is the appropriate test here (rather than a
+#' pooled interaction-term regression) because each location's fit uses its
+#' own independently selected LOD window, so the underlying per-bin data are
+#' not on a common x-range that a single pooled regression could use.
+#'
+#' @param a Numeric vector of K slope estimates (a_cpsd or a_psd; any
+#'   consistent convention, since Q is scale/shift-invariant to a common
+#'   linear transform of a within a single call).
+#' @param se Numeric vector of K standard errors, same length/order as `a`.
+#' @param labels Optional character vector of length K (e.g. location names),
+#'   carried through to `weights` for reporting.
+#' @return List with `Q` (Cochran's Q statistic), `df` (= K-1), `p_value`,
+#'   `i2` (I-squared, % of total variation attributable to heterogeneity
+#'   rather than sampling error; Higgins & Thompson 2002), `weighted_mean`
+#'   (inverse-variance-weighted mean slope), and `weights` (a tibble of
+#'   labels/estimates/weights for reporting).
+slope_heterogeneity_test <- function(a, se, labels = NULL) {
+  stopifnot(length(a) == length(se), length(a) >= 2, all(se > 0, na.rm = TRUE))
+  k <- length(a)
+  w <- 1 / se^2
+  weighted_mean <- sum(w * a) / sum(w)
+  Q  <- sum(w * (a - weighted_mean)^2)
+  df <- k - 1
+  p_value <- stats::pchisq(Q, df = df, lower.tail = FALSE)
+  i2 <- max(0, (Q - df) / Q * 100)
+  list(
+    Q = Q, df = df, p_value = p_value, i2 = i2,
+    weighted_mean = weighted_mean,
+    weights = tibble::tibble(
+      label = if (is.null(labels)) seq_len(k) else labels,
+      estimate = a, se = se, weight = w
+    )
   )
 }
 
@@ -387,19 +437,19 @@ correction_factor <- function(a, L_meas_min, L_meas_max, L_tar_min, L_tar_max,
 polymer_density_lookup <- function() {
   tibble::tribble(
     ~pattern, ~polymer_group, ~density_g_cm3, ~source_note,
-    "poly\\(ethylene\\)|polyethylene", "polyethylene", 0.94, "TODO(cite): polymer density handbook/default table",
-    "poly\\(propylene\\)|polypropylene", "polypropylene", 0.90, "TODO(cite): polymer density handbook/default table",
-    "polystyrene|styrene", "styrenic polymers", 1.05, "TODO(cite): polymer density handbook/default table",
-    "poly\\(tetrafluoroethylene\\)|ptfe", "PTFE", 2.20, "TODO(cite): polymer density handbook/default table",
-    "poly\\(esters|terephthalate|polyester", "polyester/PET", 1.38, "TODO(cite): polymer density handbook/default table",
-    "polycarbonates", "polycarbonate", 1.20, "TODO(cite): polymer density handbook/default table",
-    "polyurethanes", "polyurethane", 1.20, "TODO(cite): polymer density handbook/default table",
-    "polyamides|poly\\(acrylamide", "polyamide/acrylamide", 1.14, "TODO(cite): polymer density handbook/default table",
-    "polyacryl|polymethacryl", "acrylic polymers", 1.18, "TODO(cite): polymer density handbook/default table",
-    "polyvinylalcohol|polyvinyl", "vinyl polymers", 1.25, "TODO(cite): polymer density handbook/default table",
-    "polyhaloolefins|vinylhalides", "halogenated vinyl polymers", 1.35, "TODO(cite): polymer density handbook/default table",
-    "polysiloxanes", "silicone polymers", 1.05, "TODO(cite): polymer density handbook/default table",
-    "cellulose", "cellulose derivatives", 1.50, "TODO(cite): polymer density handbook/default table"
+    "poly\\(ethylene\\)|polyethylene", "polyethylene", 0.94, "Hidalgo-Ruz et al. (2012) Table 2, doi:10.1021/es2031505",
+    "poly\\(propylene\\)|polypropylene", "polypropylene", 0.90, "Hidalgo-Ruz et al. (2012) Table 2, doi:10.1021/es2031505",
+    "polystyrene|styrene", "styrenic polymers", 1.05, "Hidalgo-Ruz et al. (2012) Table 2, doi:10.1021/es2031505",
+    "poly\\(tetrafluoroethylene\\)|ptfe", "PTFE", 2.20, "Hidalgo-Ruz et al. (2012) Table 2, doi:10.1021/es2031505",
+    "poly\\(esters|terephthalate|polyester", "polyester/PET", 1.38, "Hidalgo-Ruz et al. (2012) Table 2, doi:10.1021/es2031505",
+    "polycarbonates", "polycarbonate", 1.20, "Hidalgo-Ruz et al. (2012) Table 2, doi:10.1021/es2031505",
+    "polyurethanes", "polyurethane", 1.20, "Hidalgo-Ruz et al. (2012) Table 2, doi:10.1021/es2031505",
+    "polyamides|poly\\(acrylamide", "polyamide/acrylamide", 1.14, "Hidalgo-Ruz et al. (2012) Table 2, doi:10.1021/es2031505",
+    "polyacryl|polymethacryl", "acrylic polymers", 1.18, "Hidalgo-Ruz et al. (2012) Table 2, doi:10.1021/es2031505",
+    "polyvinylalcohol|polyvinyl", "vinyl polymers", 1.25, "Hidalgo-Ruz et al. (2012) Table 2, doi:10.1021/es2031505",
+    "polyhaloolefins|vinylhalides", "halogenated vinyl polymers", 1.35, "Hidalgo-Ruz et al. (2012) Table 2, doi:10.1021/es2031505",
+    "polysiloxanes", "silicone polymers", 1.05, "Hidalgo-Ruz et al. (2012) Table 2, doi:10.1021/es2031505",
+    "cellulose", "cellulose derivatives", 1.50, "Hidalgo-Ruz et al. (2012) Table 2, doi:10.1021/es2031505"
   )
 }
 
@@ -488,6 +538,62 @@ piecewise_cpsd_diagnostic <- function(cpsd_fit, min_bins_per_segment = 3) {
     aic_single = stats::AIC(cpsd_fit$fit),
     delta_aic = aic_piecewise - aic_single
   )
+}
+
+#' Piecewise (dual-slope) power-law rescaling correction factor
+#'
+#' Bounding-sensitivity counterpart to correction_factor() (SPEC 2b). Rather
+#' than extrapolating a single power-law slope across the full target range,
+#' integrates dN/dL = k * L^a using the fine-size segment's slope below
+#' `break_um` and the coarse-size segment's slope at/above `break_um`, with
+#' the coarse segment's density scaled so dN/dL is continuous at `break_um`
+#' (i.e., the two segments meet exactly at the break, not just piecewise in
+#' isolation). Both the target-range and measured-range integrals are
+#' evaluated with this same piecewise density, so segments that straddle
+#' `break_um` are split automatically and segments that fall entirely on one
+#' side reduce to a single-slope integral.
+#'
+#' The 1 um-to-LOD_low sub-window below the fitted C-PSD window is
+#' unconstrained by data in both the single-slope and piecewise case; the
+#' piecewise result is a labeled bounding sensitivity that quantifies
+#' structural (model-form) uncertainty in how that sub-window is
+#' extrapolated (Hoffman et al. 2026), not a replacement for the single-slope
+#' production correction factor.
+#'
+#' @param a_low,a_high Fine- and coarse-segment slopes (numeric scalar or
+#'   vector; must be < -1 after conversion to the differential convention).
+#' @param break_um Break point between the fine and coarse segments (um).
+#' @param L_meas_min,L_meas_max Measured size range in um.
+#' @param L_tar_min,L_tar_max Target size range in um.
+#' @param slope_convention "differential" (default; a_low/a_high are already
+#'   BN-PSD slopes) or "cumulative" (a_low/a_high are C-PSD slopes and will be
+#'   converted via a_psd = a_cpsd - 1 before integrating).
+#' @return Correction factor (same length as a_low/a_high).
+correction_factor_piecewise <- function(a_low, a_high, break_um,
+                                        L_meas_min, L_meas_max,
+                                        L_tar_min, L_tar_max,
+                                        slope_convention = c("differential", "cumulative")) {
+  slope_convention <- match.arg(slope_convention)
+  if (identical(slope_convention, "cumulative")) {
+    a_low  <- cpsd_to_differential_slope(a_low)
+    a_high <- cpsd_to_differential_slope(a_high)
+  }
+  stopifnot(all(a_low < -1, na.rm = TRUE), all(a_high < -1, na.rm = TRUE), all(break_um > 0, na.rm = TRUE))
+
+  k_low  <- 1
+  k_high <- k_low * break_um^(a_low - a_high)   # density-continuity at break_um
+
+  seg_integral <- function(lo, hi, a, k) k * (hi^(a + 1) - lo^(a + 1)) / (a + 1)
+
+  integrate_window <- function(lo, hi) {
+    lo_low  <- pmin(lo, break_um); hi_low  <- pmin(hi, break_um)
+    lo_high <- pmax(lo, break_um); hi_high <- pmax(hi, break_um)
+    seg_integral(lo_low, hi_low, a_low, k_low) + seg_integral(lo_high, hi_high, a_high, k_high)
+  }
+
+  num <- integrate_window(L_tar_min, L_tar_max)
+  den <- integrate_window(L_meas_min, L_meas_max)
+  num / den
 }
 
 
@@ -601,18 +707,34 @@ mc2d_risk <- function(monitoring_df,
                       haz_df,
                       n_uncertainty = 300,
                       n_variability = 1000,
-                      seed = 1) {
+                      seed = 1,
+                      cf_by_group = NULL,
+                      group_col = "river") {
   if (!is.null(seed)) set.seed(seed)
-  measured <- monitoring_df$C_measured_pL
-  measured <- measured[is.finite(measured) & measured > 0]
+  keep <- is.finite(monitoring_df$C_measured_pL) & monitoring_df$C_measured_pL > 0
+  measured <- monitoring_df$C_measured_pL[keep]
   stopifnot(length(measured) >= 5)
+  grouped <- !is.null(cf_by_group)
+  if (grouped) {
+    grp <- as.character(monitoring_df[[group_col]][keep])
+    stopifnot(all(unique(grp) %in% names(cf_by_group)))
+    # Outer loop: one independent CF draw per group (independent river fits).
+    cf_unc_g <- lapply(cf_by_group, function(x) sample(x, size = n_uncertainty, replace = TRUE))
+  }
 
-  cf_unc     <- sample(combined_cf, size = n_uncertainty, replace = TRUE)
+  cf_unc     <- if (grouped) rep(NA_real_, n_uncertainty) else sample(combined_cf, size = n_uncertainty, replace = TRUE)
   haz_groups <- haz_df |> dplyr::group_by(ERM, HCx) |> dplyr::group_split()
 
   dplyr::bind_rows(lapply(seq_len(n_uncertainty), function(i) {
     cf_i  <- cf_unc[i]
-    E_var <- sample(measured, size = n_variability, replace = TRUE) * cf_i
+    idx   <- sample.int(length(measured), size = n_variability, replace = TRUE)
+    E_var <- if (grouped) {
+      cf_rows <- vapply(cf_unc_g, `[`, numeric(1), i)[grp[idx]]
+      measured[idx] * cf_rows
+    } else {
+      measured[idx] * cf_i
+    }
+    if (grouped) cf_i <- stats::median(E_var / measured[idx])
     dplyr::bind_rows(lapply(haz_groups, function(hg) {
       H_i <- sample(hg$PNEC, size = 1)
       rq  <- E_var / H_i
@@ -715,15 +837,26 @@ fit_cpsd_by_shape <- function(df, value_col, shape_col = "shape", config) {
 #' @param n_draws Monte Carlo draws per monitoring sample (default 3000).
 #' @param n_boot Bootstrap replicates for bootstrap_eed().
 #' @param probs Quantile levels for bootstrap_eed() (default c(0.5, 0.95)).
+#' @param group_col,cpsd_fit_by_group,alpha_draws_by_group Optional group-specific
+#'   slopes (e.g. river-specific C-PSD fits). When supplied, each monitoring row
+#'   is rescaled with its own group's slope draws and that group's LOD window
+#'   (the same convention as the by-river analysis); `cpsd_fit`/`alpha_draws`
+#'   then only define the pooled L_meas_min_use/L_meas_max_use returned for
+#'   pooled-model sensitivities.
 #' @return List: monitoring (with bias-corrected LOD columns), combined_cf,
 #'   C_corrected_draws (with a generic $C_corrected column), C_sample_median,
-#'   eed_boot, L_meas_min_use, L_meas_max_use.
+#'   eed_boot, L_meas_min_use, L_meas_max_use. With groups, also
+#'   combined_cf_by_group and L_meas_by_group, and combined_cf is the mixture of
+#'   the per-row CF draws actually applied.
 correct_and_bootstrap_eed <- function(monitoring, conc_col, cpsd_fit, alpha_draws,
                                        L_tar_min = 1, L_tar_max = 5000,
                                        n_draws = 3000, n_boot, probs = c(0.5, 0.95),
-                                       slope_convention = c("differential", "cumulative")) {
+                                       slope_convention = c("differential", "cumulative"),
+                                       group_col = NULL, cpsd_fit_by_group = NULL,
+                                       alpha_draws_by_group = NULL) {
   stopifnot(is.data.frame(monitoring), conc_col %in% names(monitoring))
   slope_convention <- match.arg(slope_convention)
+  grouped <- !is.null(group_col)
 
   monitoring <- monitoring |>
     dplyr::mutate(
@@ -734,22 +867,52 @@ correct_and_bootstrap_eed <- function(monitoring, conc_col, cpsd_fit, alpha_draw
   L_meas_min_use <- stats::median(monitoring$Lmin_biascorr_um, na.rm = TRUE)
   L_meas_max_use <- stats::median(monitoring$Lmax_biascorr_um, na.rm = TRUE)
 
-  combined_cf <- correction_factor(
-    a          = alpha_draws,
-    L_meas_min = L_meas_min_use,
-    L_meas_max = L_meas_max_use,
-    L_tar_min  = L_tar_min,
-    L_tar_max  = L_tar_max,
-    slope_convention = slope_convention
-  )
+  cf_fun <- function(a, lo, hi) correction_factor(
+    a = a, L_meas_min = lo, L_meas_max = hi, L_tar_min = L_tar_min, L_tar_max = L_tar_max,
+    slope_convention = slope_convention)
+
+  combined_cf <- cf_fun(alpha_draws, L_meas_min_use, L_meas_max_use)
+  combined_cf_by_group <- NULL
+  L_meas_by_group <- NULL
+
+  if (grouped) {
+    stopifnot(group_col %in% names(monitoring),
+              all(unique(monitoring[[group_col]]) %in% names(cpsd_fit_by_group)),
+              all(unique(monitoring[[group_col]]) %in% names(alpha_draws_by_group)))
+    groups <- sort(unique(monitoring[[group_col]]))
+    # Each group's own LOD window, clipped to the measured window.
+    monitoring <- monitoring |>
+      dplyr::mutate(
+        lod_lo = vapply(.data[[group_col]], function(g) cpsd_fit_by_group[[g]]$lower_lod_um, numeric(1)),
+        lod_hi = vapply(.data[[group_col]], function(g) cpsd_fit_by_group[[g]]$upper_lod_um, numeric(1)),
+        Lmin_biascorr_um = pmax(Lmin_measured_um, .data$lod_lo, na.rm = TRUE),
+        Lmax_biascorr_um = pmin(Lmax_measured_um, .data$lod_hi, na.rm = TRUE)
+      ) |>
+      dplyr::select(-"lod_lo", -"lod_hi")
+    L_meas_by_group <- monitoring |>
+      dplyr::group_by(group = .data[[group_col]]) |>
+      dplyr::summarise(L_meas_min = stats::median(.data$Lmin_biascorr_um, na.rm = TRUE),
+                       L_meas_max = stats::median(.data$Lmax_biascorr_um, na.rm = TRUE), .groups = "drop")
+    combined_cf_by_group <- stats::setNames(lapply(groups, function(g) {
+      w <- L_meas_by_group[L_meas_by_group$group == g, ]
+      cf_fun(alpha_draws_by_group[[g]], w$L_meas_min, w$L_meas_max)
+    }), groups)
+  }
 
   C_corrected_draws <- monitoring |>
     dplyr::mutate(idx = dplyr::row_number()) |>
-    tidyr::crossing(draw = seq_len(n_draws)) |>
-    dplyr::mutate(
-      cf          = sample(combined_cf, size = dplyr::n(), replace = TRUE),
-      C_corrected = .data[[conc_col]] * cf
-    )
+    tidyr::crossing(draw = seq_len(n_draws))
+  if (grouped) {
+    C_corrected_draws$cf <- NA_real_
+    for (g in names(combined_cf_by_group)) {
+      hit <- C_corrected_draws[[group_col]] == g
+      C_corrected_draws$cf[hit] <- sample(combined_cf_by_group[[g]], size = sum(hit), replace = TRUE)
+    }
+    combined_cf <- C_corrected_draws$cf
+  } else {
+    C_corrected_draws$cf <- sample(combined_cf, size = nrow(C_corrected_draws), replace = TRUE)
+  }
+  C_corrected_draws$C_corrected <- C_corrected_draws[[conc_col]] * C_corrected_draws$cf
 
   C_sample_median <- C_corrected_draws |>
     dplyr::group_by(sample_id) |>
@@ -758,14 +921,27 @@ correct_and_bootstrap_eed <- function(monitoring, conc_col, cpsd_fit, alpha_draw
   eed_boot <- bootstrap_eed(C_sample_median$C_corr_med, n_boot = n_boot, probs = probs)
 
   list(
-    monitoring        = monitoring,
-    combined_cf       = combined_cf,
-    C_corrected_draws = C_corrected_draws,
-    C_sample_median   = C_sample_median,
-    eed_boot          = eed_boot,
-    L_meas_min_use    = L_meas_min_use,
-    L_meas_max_use    = L_meas_max_use
+    monitoring           = monitoring,
+    combined_cf          = combined_cf,
+    combined_cf_by_group = combined_cf_by_group,
+    C_corrected_draws    = C_corrected_draws,
+    C_sample_median      = C_sample_median,
+    eed_boot             = eed_boot,
+    L_meas_min_use       = L_meas_min_use,
+    L_meas_max_use       = L_meas_max_use,
+    L_meas_by_group      = L_meas_by_group
   )
+}
+
+#' River- (group-) specific differential-slope draws
+#'
+#' One alpha_dist() vector per group from each group's C-PSD fit, each with its
+#' own local seed so adding/removing a group does not shift the others.
+alpha_draws_by_group <- function(fits, n, structural_sd = 0, seed = 8101) {
+  stats::setNames(lapply(seq_along(fits), function(i) {
+    withr::with_seed(seed + i, alpha_dist(mu = fits[[i]]$a_psd, sd = fits[[i]]$se_a_psd,
+                                          n = n, structural_sd = structural_sd))
+  }), names(fits))
 }
 
 #' Run the MC_sim_align_parallel() + make_all_pSSDs() pipeline for one matrix
@@ -784,28 +960,57 @@ correct_and_bootstrap_eed <- function(monitoring, conc_col, cpsd_fit, alpha_draw
 #'   subdirectory names, to keep matrices' caches separate.
 #' @param dose_unit "L" (particles/L; river, ocean) or "kg" (particles/kg; sediment).
 #' @param n_sim Size of param_matrix / MC_sim_align_parallel's n_sim.
-#' @param num_cores Worker count (default parallel::detectCores() - 2).
+#' @param num_cores Worker count (default parallel::detectCores() - 2). Ignored
+#'   internally as of the C1 reproducibility fix (see `seed`) -- execution is
+#'   forced sequential (num_cores = 1 / make_all_pSSDs(parallel = FALSE)) so the
+#'   run is bit-reproducible under `seed`. PSSDplusplus::MC_sim_align_parallel()'s
+#'   `%dopar%` path spins up its own PSOCK cluster with no clusterSetRNGStream(),
+#'   so unseeded parallel workers produce non-reproducible hazard draws (HC5,
+#'   HC10, and everything downstream) across separate renders; the sequential
+#'   `lapply()` path inside MC_sim_align_parallel() (and make_all_pSSDs()) draws
+#'   from R's ordinary global RNG stream instead, which `seed` controls exactly.
 #' @param sim,cv_uf,rmore_method Passed through to make_all_pSSDs().
 #' @param base_tempdir Base directory for cache/output subfolders (default tempdir()).
+#' @param seed If not NULL, set.seed(seed) immediately before the Monte Carlo
+#'   alignment + pSSD fit, for reproducibility independent of call order.
+#' @param x1D_set Lower size-integration bound (um) passed to
+#'   MC_sim_align_parallel(). Default 1 preserves prior behavior for every
+#'   existing call site; M1.2 passes L_tar_min here to match the exposure-side
+#'   extrapolation floor tested in that sensitivity (must be moved together
+#'   with the exposure CF's L_tar_min and the tox-record size filter, or
+#'   exposure and hazard are no longer on the same size basis).
 #' @return List: MC_sim_df, erm_registry, pSSDs.
 run_pssd_pipeline <- function(tox_data, param_matrix, environments, cache_suffix,
                                dose_unit = c("L", "kg"),
                                n_sim, num_cores = parallel::detectCores() - 2,
                                sim = 30, cv_uf = 0.5, rmore_method = "lognormal",
-                               base_tempdir = tempdir()) {
+                               base_tempdir = tempdir(), seed = NULL, x1D_set = 1) {
   dose_unit <- match.arg(dose_unit)
   food_col   <- paste0("particles_", dose_unit, "_food_dilution")
   tissue_col <- paste0("particles_", dose_unit, "_ox_stress")
   dose_col   <- paste0("dose_new_particles_", dose_unit)
 
-  MC_sim_df <- PSSDplusplus::MC_sim_align_parallel(
-    tox_data     = tox_data,
-    param_matrix = param_matrix,
-    n_sim        = n_sim,
-    x1D_set      = 1,
-    x2D_set      = 5000,
-    num_cores    = num_cores
-  )
+  if (!is.null(seed)) set.seed(seed)
+
+  # PSSDplusplus::MC_sim_align_parallel() writes per-step status via cat()
+  # (not message(), so message=FALSE chunk options don't suppress it) --
+  # capture.output(..., type="output") swallows that; suppressMessages()
+  # covers its separate message()-based lines. The expression is evaluated
+  # in this function's own frame (capture.output()'s default behavior), so
+  # the assignment below is unaffected.
+  invisible(utils::capture.output(
+    suppressMessages({
+      MC_sim_df <- PSSDplusplus::MC_sim_align_parallel(
+        tox_data     = tox_data,
+        param_matrix = param_matrix,
+        n_sim        = n_sim,
+        x1D_set      = x1D_set,
+        x2D_set      = 5000,
+        num_cores    = 1L
+      )
+    }),
+    type = "output"
+  ))
 
   results_df_food <- dplyr::filter(
     MC_sim_df,
@@ -835,21 +1040,58 @@ run_pssd_pipeline <- function(tox_data, param_matrix, environments, cache_suffix
     "Tissue Translocation" = list(base = results_df_tissue, t3_t4 = results_df_tissue_t3_t4)
   )
 
-  pSSDs <- PSSDplusplus::make_all_pSSDs(
-    MC_sim_df        = MC_sim_df,
-    environments     = environments,
-    erm_registry     = erm_registry,
-    sim              = sim,
-    cv_uf            = cv_uf,
-    rmore_method     = rmore_method,
-    parallel         = TRUE,
-    workers          = num_cores,
-    base_cache_dir   = file.path(base_tempdir, paste0("pssd_cache_",   cache_suffix)),
-    base_output_path = file.path(base_tempdir, paste0("pssd_figures_", cache_suffix)),
-    overwrite_cache  = TRUE
-  )
+  # Same rationale as MC_sim_align_parallel() above: make_all_pSSDs() prints
+  # one cat() line per matrix x ERM x HCx combination (Skipping/Completed/
+  # ERROR status, a per-combination progress stream) regardless of
+  # `progress` (that argument only controls an optional progressr bar on
+  # top of this, not this base status stream).
+  invisible(utils::capture.output(
+    suppressMessages({
+      pSSDs <- PSSDplusplus::make_all_pSSDs(
+        MC_sim_df        = MC_sim_df,
+        environments     = environments,
+        erm_registry     = erm_registry,
+        sim              = sim,
+        cv_uf            = cv_uf,
+        rmore_method     = rmore_method,
+        parallel         = FALSE,
+        workers          = 1L,
+        base_cache_dir   = file.path(base_tempdir, paste0("pssd_cache_",   cache_suffix)),
+        base_output_path = file.path(base_tempdir, paste0("pssd_figures_", cache_suffix)),
+        overwrite_cache  = TRUE
+      )
+    }),
+    type = "output"
+  ))
 
   list(MC_sim_df = MC_sim_df, erm_registry = erm_registry, pSSDs = pSSDs)
+}
+
+#' Build a "legacy" (cumulative-slope) copy of a param_values row (SPEC 1b)
+#'
+#' Returns a copy of `param_values` with the `a.v.<suffix>`, `a.sa.<suffix>`,
+#' and `a.m.<suffix>` fields overwritten with the (incorrect) cumulative C-PSD
+#' slope `$a_cpsd`, instead of the differential `$a_psd` used by the corrected
+#' pipeline. All other parameters (length slope, R.ave, etc.) are left as-is,
+#' isolating the volume/area-slope convention as the only difference between
+#' the legacy and corrected hazard alignment — used to build the SPEC 1b
+#' before/after Food Dilution RQ decomposition table.
+#'
+#' @param param_values A param_default_values-shaped one-row data frame/tibble
+#'   already carrying the corrected (differential) overrides.
+#' @param suffix PSSDplusplus environment suffix, e.g. "freshwater", "marine",
+#'   "sediment.freshwater".
+#' @param cpsd_fit_volume,cpsd_fit_area fit_cpsd_segur_r() outputs for volume/area.
+#' @return Copy of param_values with legacy (cumulative-slope) a.v/a.sa/a.m.
+legacy_cumulative_av_params <- function(param_values, suffix, cpsd_fit_volume, cpsd_fit_area) {
+  pv <- param_values
+  pv[[paste0("a.v.", suffix)]]        <- -cpsd_fit_volume$a_cpsd
+  pv[[paste0("a.v.", suffix, ".sd")]] <- cpsd_fit_volume$se_a_cpsd
+  pv[[paste0("a.sa.", suffix)]]        <- -cpsd_fit_area$a_cpsd
+  pv[[paste0("a.sa.", suffix, ".sd")]] <- cpsd_fit_area$se_a_cpsd
+  pv[[paste0("a.m.", suffix)]]        <- -cpsd_fit_volume$a_cpsd
+  pv[[paste0("a.m.", suffix, ".sd")]] <- cpsd_fit_volume$se_a_cpsd
+  pv
 }
 
 #' Build combined HC5/HC10 hazard data frame for one matrix/environment
@@ -875,4 +1117,297 @@ build_haz_df <- function(pSSDs, environment_key) {
   haz_HC10_tissue <- pSSDs[[tissue_key]]$summary_10$df |> dplyr::mutate(HCx = 10, ERM = "Tissue Translocation")
 
   dplyr::bind_rows(haz_HC5_food, haz_HC10_food, haz_HC5_tissue, haz_HC10_tissue)
+}
+
+
+# ── SPEC 1e: sediment temporal-fragmentation screens ──────────────────────────
+
+#' Most-sensitive-species screen (SPEC 1e-iv)
+#'
+#' For each ERM in an erm_registry (as returned by run_pssd_pipeline()), groups
+#' the aligned MC records by Species and identifies the single species with the
+#' lowest median aligned effect dose -- the most sensitive species -- alongside
+#' the number of species considered. Per Thuy-Dung, Groenenberg & Koelmans
+#' (2026), individual-species risk can precede a derivable community SSD signal
+#' by roughly a decade, so this screen is reported *alongside*, not instead of,
+#' the community HC5 (which remains build_haz_df()'s job).
+#'
+#' @param erm_registry List as returned by run_pssd_pipeline()$erm_registry:
+#'   list(`Food Dilution` = list(base=..., t3_t4=...), `Tissue Translocation` = list(...)).
+#' @param dose_col Column holding the aligned dose, e.g. "dose_new_particles_kg"
+#'   (sediment) or "dose_new_particles_L" (river/ocean) -- matches the
+#'   `dose_col` naming already constructed by run_pssd_pipeline().
+#' @param records_subset Which erm_registry tier to summarize: "base" (all
+#'   aligned records passing the ingestible/translocatable + dose>0 filters) or
+#'   "t3_t4" (further restricted to risk.13 tier-3/4, Organism/Population). Default "base".
+#' @return Tibble, one row per ERM: ERM, Species (most sensitive), n_records
+#'   (records for that species), median_EC (its median aligned dose), n_species
+#'   (total distinct species considered for that ERM).
+most_sensitive_species <- function(erm_registry, dose_col, records_subset = "base") {
+  empty_row <- function(erm_name) {
+    tibble::tibble(ERM = erm_name, Species = NA_character_, n_records = 0L,
+                   median_EC = NA_real_, n_species = 0L)
+  }
+  rows <- lapply(names(erm_registry), function(erm_name) {
+    df <- erm_registry[[erm_name]][[records_subset]]
+    if (is.null(df) || nrow(df) == 0 || !dose_col %in% names(df) || !"Species" %in% names(df)) {
+      return(empty_row(erm_name))
+    }
+    by_species <- df |>
+      dplyr::filter(is.finite(.data[[dose_col]]), .data[[dose_col]] > 0) |>
+      dplyr::group_by(Species) |>
+      dplyr::summarise(median_EC = stats::median(.data[[dose_col]]), n_records = dplyr::n(), .groups = "drop")
+    if (nrow(by_species) == 0) return(empty_row(erm_name))
+    most_sensitive <- by_species |> dplyr::slice_min(median_EC, n = 1, with_ties = FALSE)
+    tibble::tibble(
+      ERM       = erm_name,
+      Species   = most_sensitive$Species,
+      n_records = most_sensitive$n_records,
+      median_EC = most_sensitive$median_EC,
+      n_species = nrow(by_species)
+    )
+  })
+  dplyr::bind_rows(rows)
+}
+
+#' Individual-species risk characterization ratio (SPEC 1e-iv, early-warning companion)
+#'
+#' RCR = EED / lowest-species EC, as a companion to the community-HC5 RQ. Only
+#' meaningful where the exposure concentration (EED) is quantitative (river,
+#' ocean) -- deliberately not applied to sediment, whose exposure concentration
+#' is non-quantitative (SPEC 1d).
+#'
+#' @param eed_draws Numeric vector of bootstrap EED draws (e.g. eed_boot$q50).
+#' @param lowest_species_EC Single numeric value from most_sensitive_species()$median_EC.
+#' @return List: RCR_p50, RCR_p95, P_exceed (fraction of draws with RCR > 1).
+individual_species_rcr <- function(eed_draws, lowest_species_EC) {
+  if (length(lowest_species_EC) != 1 || !is.finite(lowest_species_EC) || lowest_species_EC <= 0) {
+    return(list(RCR_p50 = NA_real_, RCR_p95 = NA_real_, P_exceed = NA_real_))
+  }
+  rcr_draws <- eed_draws / lowest_species_EC
+  list(
+    RCR_p50  = stats::median(rcr_draws, na.rm = TRUE),
+    RCR_p95  = unname(stats::quantile(rcr_draws, 0.95, na.rm = TRUE)),
+    P_exceed = mean(rcr_draws > 1, na.rm = TRUE)
+  )
+}
+
+#' Sediment PSD-shift sensitivity (SPEC 1e-ii)
+#'
+#' Illustrative, methods-demonstration sensitivity (gated on
+#' `quantitative_flag`): re-runs the full sediment hazard alignment
+#' (matrix_function() -> run_pssd_pipeline() -> build_haz_df()) across a grid
+#' of progressively finer sediment PSDs, representing continued in-situ
+#' fragmentation of deposited microplastics over residence time (Thuy-Dung,
+#' Groenenberg & Koelmans 2026). Each grid point is an explicit, cited
+#' assumption -- an added shift to the differential length/area/volume/mass
+#' slopes -- NOT a fitted fragmentation kinetic rate: Thuy-Dung's k_frag/
+#' shell-geometry model is calibrated to polymer-coated-fertilizer prills with
+#' 7-year field data and is not transplanted to heterogeneous mixed-polymer
+#' sediment MPs of unknown age.
+#'
+#' A genuine (not merely cosmetic) hazard-side response requires re-running
+#' MC_sim_align_parallel()/make_all_pSSDs(), because steepening the PSD shifts
+#' the simulated particle-size population that PSSDplusplus's ingestible/
+#' translocatable size-gating operates on -- i.e. it can change *which*
+#' species clear the bioaccessibility threshold and enter the SSD, not just
+#' rescale an existing exposure number. This is why the sensitivity re-runs
+#' the full alignment rather than only shifting the CF/EED exposure side.
+#'
+#' @param param_values_base Baseline param_values_sed (already alpha/a.v/a.sa/
+#'   a.m.sediment.freshwater-populated, as built in Section 11.2).
+#' @param slope_shift_grid Numeric vector of *added* shifts (positive = finer/
+#'   steeper, on the same positive-alpha convention as
+#'   param_values_sed$alpha.sediment.freshwater) applied identically to alpha,
+#'   a.v, a.sa, and a.m (simplifying assumption: fragmentation shifts all four
+#'   size-metric slopes proportionally; noted as such wherever reported).
+#' @param tox_data_sed,n_boot,cv_uf,rmore_method,sim,num_cores Passed through
+#'   to matrix_function()/run_pssd_pipeline() using the *same* values as the
+#'   production sediment call (Section 11.2/11.3) -- no analytical-budget change.
+#' @param quantitative_flag The sediment_concentration_is_quantitative flag;
+#'   every returned row carries this as `is_quantitative` so callers can label
+#'   the table/plot as illustrative (FALSE) vs. production (TRUE) without
+#'   re-deriving that decision downstream.
+#' @return Tibble: one row per grid point x ERM x HCx, with columns
+#'   slope_shift, alpha_sediment_freshwater (post-shift), ERM, HCx, HC5/HC10
+#'   value (PNEC, particles/kg dw), and is_quantitative.
+sediment_psd_shift_sensitivity <- function(param_values_base, slope_shift_grid,
+                                            tox_data_sed, n_boot, cv_uf = 0.5,
+                                            rmore_method = "lognormal", sim = 30,
+                                            num_cores = parallel::detectCores() - 2,
+                                            quantitative_flag = FALSE,
+                                            seed_base = 6000) {
+  rows <- lapply(seq_along(slope_shift_grid), function(i) {
+    delta <- slope_shift_grid[i]
+    set.seed(seed_base + i)
+
+    pv <- param_values_base
+    pv$alpha.sediment.freshwater <- pv$alpha.sediment.freshwater + delta
+    pv$a.v.sediment.freshwater   <- pv$a.v.sediment.freshwater   + delta
+    pv$a.sa.sediment.freshwater  <- pv$a.sa.sediment.freshwater  + delta
+    pv$a.m.sediment.freshwater   <- pv$a.m.sediment.freshwater   + delta
+
+    param_matrix_shift <- PSSDplusplus::matrix_function(
+      n = n_boot,
+      params = pv,
+      upper.tissue.truncation.limit = 500,
+      x1M_set = 1,
+      x2D_set = 5000,
+      include_marine_surface_water = FALSE,
+      include_freshwater_surface_water = FALSE,
+      include_marine_sediment = FALSE,
+      include_freshwater_sediment = TRUE
+    )
+
+    pssd_shift <- run_pssd_pipeline(
+      tox_data     = tox_data_sed,
+      param_matrix = param_matrix_shift,
+      environments = c("Freshwater Sediment"),
+      cache_suffix = paste0("sediment_psd_shift_", i),
+      dose_unit    = "kg",
+      n_sim        = n_boot,
+      num_cores    = num_cores,
+      sim          = sim,
+      cv_uf        = cv_uf,
+      rmore_method = rmore_method
+    )
+
+    haz_shift <- build_haz_df(pssd_shift$pSSDs, "Freshwater Sediment")
+
+    haz_shift |>
+      dplyr::group_by(ERM, HCx) |>
+      dplyr::summarise(HC_value_particles_kg = stats::median(PNEC), .groups = "drop") |>
+      dplyr::mutate(
+        slope_shift                 = delta,
+        alpha_sediment_freshwater   = pv$alpha.sediment.freshwater,
+        is_quantitative             = quantitative_flag
+      )
+  })
+
+  dplyr::bind_rows(rows) |>
+    dplyr::relocate(slope_shift, alpha_sediment_freshwater, ERM, HCx, HC_value_particles_kg, is_quantitative)
+}
+
+#' Filter ToMEx toxicity records to match an exposure-side size floor (M1.2)
+#'
+#' PSSDplusplus::align_data() (called inside MC_sim_align_parallel()) sizes-
+#' aligns each dose using `size.length.um.used.for.conversions` for
+#' monodisperse records, or the min/max pair for polydisperse records --
+#' confirmed by inspecting align_data()'s source. This filter uses the same
+#' field so a record is excluded from a given L_tar_min floor exactly when
+#' its own tested size basis would fall below that floor, keeping exposure
+#' (the CF's L_tar_min) and hazard (this filter + x1M_set/x1D_set) on a
+#' consistent size basis at every floor -- the entire point of M1.2.
+#'
+#' Filtering rule (documented assumption, per M1.2's spec): monodisperse
+#' records are excluded if their single characteristic size is below the
+#' floor; polydisperse records are excluded only if their ENTIRE tested range
+#' (up to size.length.max.um.used.for.conversions) falls below the floor --
+#' i.e. kept if the tested range overlaps or exceeds the floor. Records with
+#' a missing/NA characteristic size are excluded (flagged, not imputed).
+#'
+#' @param tox_data Toxicity data frame (must have polydispersity,
+#'   size.length.um.used.for.conversions, size.length.max.um.used.for.conversions).
+#' @param L_tar_min Lower size floor (um) to filter to.
+#' @return Filtered tox_data (same columns, fewer rows).
+filter_tox_by_size_floor <- function(tox_data, L_tar_min) {
+  stopifnot(all(c("polydispersity", "size.length.um.used.for.conversions",
+                   "size.length.max.um.used.for.conversions") %in% names(tox_data)))
+  tox_data |>
+    dplyr::mutate(
+      .char_size_um = dplyr::case_when(
+        polydispersity == "polydisperse" & !is.na(size.length.max.um.used.for.conversions) ~
+          size.length.max.um.used.for.conversions,
+        polydispersity == "monodisperse" & !is.na(size.length.um.used.for.conversions) ~
+          size.length.um.used.for.conversions,
+        TRUE ~ NA_real_
+      )
+    ) |>
+    dplyr::filter(!is.na(.char_size_um), .char_size_um >= L_tar_min) |>
+    dplyr::select(-.char_size_um)
+}
+
+#' Locally patched PSSDplusplus::matrix_function() (M1.2 workaround)
+#'
+#' PSSDplusplus::matrix_function() draws `nrow(mat) * 1.4` candidate values
+#' for `upper.tissue.trans.size.um` (via sim_X50 = -sim_beta_0/sim_beta_1),
+#' filters to those within (x1M_set, min(x2D_set, upper.tissue.truncation.limit)),
+#' and takes the first nrow(mat) survivors with dplyr::slice() -- with no
+#' check that enough survived. Production always calls it with x1M_set = 1,
+#' where the 1.4x oversample comfortably covers the quota. M1.2 varies
+#' x1M_set up to 100 um, which narrows the acceptance window enough that
+#' fewer than nrow(mat) values survive; slice() silently returns a short
+#' vector, and the subsequent `mat[, upper.tissue.trans.size.um := ...]`
+#' errors with a length mismatch ("Supplied N items to be assigned to M
+#' items"). Confirmed by direct inspection of matrix_function()'s body
+#' (deparse(body(PSSDplusplus::matrix_function))) and by reproducing the
+#' failure in isolation at x1M_set = 20-100 with both package defaults and
+#' this analysis's real river parameters.
+#'
+#' Root cause: the 1.4x multiplier is a fixed ratio of nrow(mat), which
+#' itself scales with n_sobol * n_params -- so increasing n_sobol does not
+#' change the accept/reject *ratio* at all (numerator and denominator scale
+#' together). No caller-supplied argument can fix this from the outside.
+#'
+#' Local-only workaround per user direction (do not modify the installed
+#' PSSDplusplus package or its GitHub repo): this function is a full COPY of
+#' matrix_function()'s body (via deparse/parse of the installed function,
+#' captured once at first call) with only the fixed-oversample block
+#' replaced by an iterative draw-until-quota-met loop using the exact same
+#' rnorm() parameters and filter conditions -- same statistical model, just
+#' guaranteed enough valid draws. The original PSSDplusplus::matrix_function
+#' is never altered; this is an independent function object.
+#'
+#' @param ... Passed through with the same names/semantics as
+#'   PSSDplusplus::matrix_function() (n_sobol, params, upper.tissue.truncation.limit,
+#'   x1M_set, x2D_set, include_marine_surface_water, include_freshwater_surface_water,
+#'   include_marine_sediment, include_freshwater_sediment).
+#' @return Same structure as PSSDplusplus::matrix_function()'s output.
+.matrix_function_patched_cache <- NULL
+
+matrix_function_safe <- function(...) {
+  if (is.null(.matrix_function_patched_cache)) {
+    orig_text <- deparse(body(PSSDplusplus::matrix_function))
+
+    broken_start <- grep("sim_beta_0 <- stats::rnorm\\(nrow\\(mat\\) \\* 1\\.4", orig_text)
+    broken_end   <- grep("upper\\.tissue\\.trans\\.size\\.um_samples <- as\\.numeric", orig_text)
+    stopifnot(
+      "matrix_function_safe(): could not locate the expected broken block in PSSDplusplus::matrix_function() -- the package source may have changed; re-inspect deparse(body(PSSDplusplus::matrix_function)) before trusting this patch" =
+        length(broken_start) == 1 && length(broken_end) == 1 && broken_end > broken_start
+    )
+
+    patched_block <- c(
+      "    .mf_target_n <- nrow(mat)",
+      "    .mf_samples <- numeric(0)",
+      "    .mf_mult <- 1.4",
+      "    .mf_attempts <- 0",
+      "    while (length(.mf_samples) < .mf_target_n && .mf_attempts < 25) {",
+      "      .mf_attempts <- .mf_attempts + 1",
+      "      .mf_draw_n <- ceiling(max(.mf_target_n, (.mf_target_n - length(.mf_samples))) * .mf_mult)",
+      "      .mf_b0 <- stats::rnorm(.mf_draw_n, mean = params$beta_0, sd = params$se_beta_0)",
+      "      .mf_b1 <- stats::rnorm(.mf_draw_n, mean = params$beta_1, sd = params$se_beta_1)",
+      "      .mf_x50 <- -.mf_b0 / .mf_b1",
+      "      .mf_valid <- .mf_x50[.mf_x50 > x1M_set & .mf_x50 < x2D_set & .mf_x50 < upper.tissue.truncation.limit]",
+      "      .mf_samples <- c(.mf_samples, .mf_valid)",
+      "      .mf_mult <- .mf_mult * 3",
+      "    }",
+      "    if (length(.mf_samples) < .mf_target_n) {",
+      "      stop(\"matrix_function_safe(): could not draw enough valid upper.tissue.trans.size.um samples after 25 attempts (got \", length(.mf_samples), \" of \", .mf_target_n, \" needed) -- x1M_set may be too close to upper.tissue.truncation.limit for this parameter set.\")",
+      "    }",
+      "    upper.tissue.trans.size.um_samples <- .mf_samples[seq_len(.mf_target_n)]"
+    )
+
+    new_text <- c(orig_text[seq_len(broken_start - 1)], patched_block, orig_text[(broken_end + 1):length(orig_text)])
+
+    new_fn <- eval(parse(text = c("function(n_sobol = 10, params = PSSDplusplus::param_default_values,",
+                                   "upper.tissue.truncation.limit = 500, x1M_set = 1, x2D_set = 5000,",
+                                   "include_marine_surface_water = TRUE, include_freshwater_surface_water = TRUE,",
+                                   "include_marine_sediment = TRUE, include_freshwater_sediment = TRUE)",
+                                   new_text)))
+    environment(new_fn) <- asNamespace("PSSDplusplus")
+    .matrix_function_patched_cache <<- new_fn
+    message("matrix_function_safe(): local patched copy of PSSDplusplus::matrix_function() built ",
+            "(installed package untouched); see R/mp_risk_utils.R for the diff.")
+  }
+  .matrix_function_patched_cache(...)
 }

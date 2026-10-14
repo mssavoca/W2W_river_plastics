@@ -1,0 +1,54 @@
+"study","technique","river","sample_id","location","water_type","LLm","ULm","reported_conc_m3","conc_excl_rubber_m3","exclusion_reason","included"
+"Mintenig et al. 2020","FTIR","Meuse","AfgMaas","Afgedamde Maas","Surface water",20,5000,876,453,NA,TRUE
+"Mintenig et al. 2020","FTIR","Dommel","Berkel&Schaft","Berkel & Schaft","Surface water",20,5000,309,234,NA,TRUE
+"Mintenig et al. 2020","FTIR","Meuse","Biesbosch1","Biesbosch1 (De Gijster)","Surface water",20,5000,607,274,NA,TRUE
+"Mintenig et al. 2020","FTIR","Meuse","Biesbosch2","Biesbosch2 (Petrusplaat)","Surface water",20,5000,67,51,NA,TRUE
+"Mintenig et al. 2020","FTIR","Meuse","Cuijk","Cuijk","Surface water",20,5000,177,162,NA,TRUE
+"Mintenig et al. 2020","FTIR","Dommel","DeVleut-DS","De Vleut","Surface water",20,5000,360,178,NA,TRUE
+"Mintenig et al. 2020","FTIR","Meuse","Drimmelen","Drimmelen","Surface water",20,5000,789,459,NA,TRUE
+"Mintenig et al. 2020","FTIR","Meuse","Eijsden-13-2","Eijsden 13-feb","Surface water",20,5000,1228,791,NA,TRUE
+"Mintenig et al. 2020","FTIR","Meuse","Eijsden-19-10","Eijsden 19-okt","Surface water",20,5000,849,637,NA,TRUE
+"Mintenig et al. 2020","FTIR","Meuse","Eijsden-6-6","Eijsden 6-jun","Surface water",20,5000,1160,838,NA,TRUE
+"Mintenig et al. 2020","FTIR","Dommel","Eindhoven","Eindhoven (WWTP)","Effluent WWTP",20,5000,1741,1648,"WWTP effluent (not surface water)",FALSE
+"Mintenig et al. 2020","FTIR","Dommel","Eindhoven-DS","Eindhoven DS","Surface water, downstream WWTP effluent discharge",20,5000,8450,5431,NA,TRUE
+"Mintenig et al. 2020","FTIR","Dommel","Eindhoven-US","Eindhoven US","Surface water, upstream WWTP effluent discharge",20,5000,2678,1897,NA,TRUE
+"Mintenig et al. 2020","FTIR","Meuse","Haringvliet","Haringvliet","Surface water",20,5000,468,244,NA,TRUE
+"Mintenig et al. 2020","FTIR","Dommel","HetBroek","Het Broek","Surface water",20,5000,277,242,NA,TRUE
+"Mintenig et al. 2020","FTIR","Dommel","KlDommel","Kleine Dommel","Surface water",20,5000,160,126,NA,TRUE
+"Mintenig et al. 2020","FTIR","Dommel","Klotputten-DS","Klotputten DS","Surface water",20,5000,587,436,NA,TRUE
+"Mintenig et al. 2020","FTIR","Dommel","Klotputten-US","Klotputten US","Surface water",20,5000,460,359,NA,TRUE
+"Mintenig et al. 2020","FTIR","Meuse","Maasbommel","Maasbommel*","Effluent WWTP",300,5000,NA,NA,"WWTP effluent (not surface water); LLm = 300 um (no total in Corrected_concentrations_total)",FALSE
+"Mintenig et al. 2020","FTIR","Meuse","Maasbommel-DS","Maasbommel-DS*","Surface water, downstream WWTP effluent discharge",300,5000,NA,NA,"LLm = 300 um (no total in Corrected_concentrations_total)",FALSE
+"Mintenig et al. 2020","FTIR","Meuse","Maasbommel-US","Maasbommel-US*","Surface water, upstream WWTP effluent discharge",300,5000,NA,NA,"LLm = 300 um (no total in Corrected_concentrations_total)",FALSE
+"Mintenig et al. 2020","FTIR","Dommel","Nijnsel","Nijnsel","Surface water",20,5000,331,285,NA,TRUE
+"Mintenig et al. 2020","FTIR","Meuse","Oijen","Oijen*","Effluent WWTP",300,5000,NA,NA,"WWTP effluent (not surface water); LLm = 300 um (no total in Corrected_concentrations_total)",FALSE
+"Mintenig et al. 2020","FTIR","Meuse","Oijen-DS","Oijen-DS*","Surface water, downstream WWTP effluent discharge",300,5000,NA,NA,"LLm = 300 um (no total in Corrected_concentrations_total)",FALSE
+"Mintenig et al. 2020","FTIR","Meuse","Oijen-R1","Oijen-R1*","Surface water",300,5000,NA,NA,"LLm = 300 um (no total in Corrected_concentrations_total)",FALSE
+"Mintenig et al. 2020","FTIR","Meuse","Oijen-R2","Oijen-R2*","Surface water",300,5000,NA,NA,"LLm = 300 um (no total in Corrected_concentrations_total)",FALSE
+"Mintenig et al. 2020","FTIR","Meuse","Oijen-R3","Oijen-R3*","Surface water",300,5000,NA,NA,"LLm = 300 um (no total in Corrected_concentrations_total)",FALSE
+"Mintenig et al. 2020","FTIR","Meuse","Oijen-US","Oijen-US*","Surface water, upstream WWTP effluent discharge",300,5000,NA,NA,"LLm = 300 um (no total in Corrected_concentrations_total)",FALSE
+"Mintenig et al. 2020","FTIR","Meuse","Roermond","Roermond (WWTP)","Effluent WWTP",20,5000,1024,900,"WWTP effluent (not surface water)",FALSE
+"Mintenig et al. 2020","FTIR","Meuse","Roermond-DS","Roermond DS","Surface water, downstream WWTP effluent discharge",20,5000,942,767,NA,TRUE
+"Mintenig et al. 2020","FTIR","Meuse","Roermond-US","Roermond US","Surface water, upstream WWTP effluent discharge",20,5000,1381,1181,NA,TRUE
+"Mintenig et al. 2020","FTIR","Dommel","Run","Run","Surface water",20,5000,270,141,NA,TRUE
+"Mintenig et al. 2020","FTIR","Dommel","Son","Son","Surface water",20,5000,354,281,NA,TRUE
+"Mintenig et al. 2020","FTIR","Dommel","StOedenrode-21-8-R1","St Oedenrode  21-8-R1","Surface water",20,5000,1192,1048,NA,TRUE
+"Mintenig et al. 2020","FTIR","Dommel","StOedenrode-21-8-R2","St Oedenrode  21-8-R2","Surface water",20,5000,1636,1444,NA,TRUE
+"Mintenig et al. 2020","FTIR","Dommel","StOedenrode-21-8-R3","St Oedenrode  21-8-R3","Surface water",20,5000,1531,1235,NA,TRUE
+"Mintenig et al. 2020","FTIR","Dommel","StOedenrode-US","St Oedenrode  US","Surface water, upstream WWTP effluent discharge",20,5000,11532,7806,NA,TRUE
+"Mintenig et al. 2020","FTIR","Dommel","StOedenrode","St Oedenrode (WWTP)","Effluent WWTP",20,5000,941,866,"WWTP effluent (not surface water)",FALSE
+"Mintenig et al. 2020","FTIR","Dommel","StOedenrode-13-2","St Oedenrode 13-feb","Surface water",20,5000,6859,3953,NA,TRUE
+"Mintenig et al. 2020","FTIR","Dommel","StOedenrode-6-6","St Oedenrode 6-jun","Surface water",20,5000,1859,1612,NA,TRUE
+"Mintenig et al. 2020","FTIR","Dommel","StOedenrode-DS","St Oedenrode DS","Surface water, downstream WWTP effluent discharge",20,5000,721,533,NA,TRUE
+"Mughini-Gras et al. 2021","LDIR","Rhine","LobithA-summer","Lobith","Surface water",10,500,314933,283999,NA,TRUE
+"Mughini-Gras et al. 2021","LDIR","Rhine","LobithA-Winter","Lobith","Surface water",10,500,135303,109488,NA,TRUE
+"Mughini-Gras et al. 2021","LDIR","Rhine","LobithB-summer","Lobith","Surface water",10,500,NA,NA,"No total concentration reported",FALSE
+"Mughini-Gras et al. 2021","LDIR","Rhine","LobithB-Winter","Lobith","Surface water",10,500,NA,NA,"No total concentration reported",FALSE
+"Mughini-Gras et al. 2021","LDIR","Lek canal","VianenA-summer","Vianen","Surface water",10,500,334667,310400,NA,TRUE
+"Mughini-Gras et al. 2021","LDIR","Lek canal","VianenA-Winter","Vianen","Surface water",10,500,102708,84695,NA,TRUE
+"Mughini-Gras et al. 2021","LDIR","Lek canal","VianenB-summer","Vianen","Surface water",10,500,NA,NA,"No total concentration reported",FALSE
+"Mughini-Gras et al. 2021","LDIR","Lek canal","VianenB-Winter","Vianen","Surface water",10,500,NA,NA,"No total concentration reported",FALSE
+"Mintenig et al. 2025","FTIR","Dommel","BS","Borkel & Schaft","Surface water",20,5000,31071,24498,NA,TRUE
+"Mintenig et al. 2025","FTIR","Dommel","EDS","Eindhoven DS","Surface water",20,5000,1353,1176,NA,TRUE
+"Mintenig et al. 2025","FTIR","Dommel","EUS","Eindhoven US","Surface water",20,5000,11752,9683,NA,TRUE
+"Mintenig et al. 2025","FTIR","Dommel","N","Nijnsel","Surface water",20,5000,9878,9383,NA,TRUE

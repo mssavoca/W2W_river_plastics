@@ -5,6 +5,15 @@
 # never be produced without stating which environmental matrix it represents.
 # Requires: ggplot2, dplyr, tibble
 
+# ── ERM (exposure route model) color palette ───────────────────────────────────
+# Single source of truth for Food Dilution / Tissue Translocation colors across
+# every figure in the report. Reference ERM_PALETTE by name; never hardcode
+# these hex values directly in a plotting call.
+ERM_PALETTE <- c(
+  "Food Dilution"        = "#FCB714",
+  "Tissue Translocation" = "#70B0E0"
+)
+
 # ── Risk quotient histogram ────────────────────────────────────────────────────
 
 #' Plot a 1D Monte Carlo risk quotient (RQ) histogram
@@ -19,6 +28,7 @@ plot_rq_hist <- function(risk_draws, matrix_label) {
     ggplot2::geom_vline(xintercept = 1, linetype = "dashed", color = "red") +
     ggplot2::facet_grid(HCx ~ ERM, scales = "free_y",
                         labeller = ggplot2::labeller(HCx = function(x) paste0("HC", x))) +
+    ggplot2::scale_fill_manual(values = ERM_PALETTE, name = "ERM") +
     ggplot2::labs(
       x        = "Risk Quotient (Exposure / Hazard) [log10 scale]",
       y        = "count",
@@ -83,6 +93,7 @@ plot_hazard_threshold <- function(haz_df, matrix_label) {
     ggplot2::facet_wrap(~ HCx + ERM, ncol = 2, scales = "free_y",
                         labeller = ggplot2::labeller(HCx = function(x) paste0("HC", x))) +
     ggplot2::scale_x_log10() +
+    ggplot2::scale_fill_manual(values = ERM_PALETTE, name = "ERM") +
     ggplot2::labs(
       x        = "HC5 (particles/L)",
       y        = "count",
@@ -158,19 +169,29 @@ plot_ecdf_overlap <- function(eed_vals, haz_df, matrix_label, n_boot, grid_n = 2
                    length.out = grid_n)
 
   eed_band <- ecdf_bands(eed_vals, grid_x, n_boot = n_boot) |>
-    dplyr::mutate(source = "EED")
+    dplyr::mutate(source = "EED", ERM = NA_character_, HCx = NA_real_)
 
+  # Keep HC5 and HC10 as distinct groups (not merged by ERM alone) so each
+  # gets its own visible ribbon, matching the EED's ribbon treatment.
   haz_band <- haz_df |>
     dplyr::group_by(ERM, HCx) |>
     dplyr::group_modify(~{
       ecdf_bands(.x$PNEC, grid_x, n_boot = n_boot) |>
-        dplyr::mutate(source = .y$ERM)
+        dplyr::mutate(source = paste0(.y$ERM, " HC", .y$HCx))
     }) |>
     dplyr::ungroup()
 
-  erm_levels  <- sort(unique(haz_df$ERM))
-  erm_colors  <- stats::setNames(c("#1F78B4", "#FF7F00")[seq_along(erm_levels)], erm_levels)
-  source_colors <- c("EED" = "forestgreen", erm_colors)
+  source_colors <- c("EED" = "forestgreen", ERM_PALETTE)
+  line_colors <- stats::setNames(
+    ERM_PALETTE[haz_band$ERM][!duplicated(haz_band$source)],
+    haz_band$source[!duplicated(haz_band$source)]
+  )
+  line_colors <- c("EED" = "forestgreen", line_colors)
+
+  # Trim the displayed x-range to the 0.5-99.5 percentile of the underlying
+  # data (not the ecdf_bands() grid, which is unchanged) so the long
+  # near-0/near-1 tails don't dominate the plot.
+  x_trim <- stats::quantile(all_x, probs = c(0.005, 0.995), na.rm = TRUE)
 
   ggplot2::ggplot() +
     ggplot2::geom_ribbon(
@@ -185,7 +206,7 @@ plot_ecdf_overlap <- function(eed_vals, haz_df, matrix_label, n_boot, grid_n = 2
     ) +
     ggplot2::geom_ribbon(
       data = haz_band,
-      ggplot2::aes(x = x, ymin = cdf_lo, ymax = cdf_hi, fill = source),
+      ggplot2::aes(x = x, ymin = cdf_lo, ymax = cdf_hi, fill = ERM, group = source),
       alpha = 0.12
     ) +
     ggplot2::geom_line(
@@ -197,8 +218,9 @@ plot_ecdf_overlap <- function(eed_vals, haz_df, matrix_label, n_boot, grid_n = 2
       labels = scales::label_log(),
       name   = "Concentration (particles/L, log₁₀ scale)"
     ) +
-    ggplot2::scale_color_manual(values = source_colors, breaks = names(source_colors), name = "Distribution") +
-    ggplot2::scale_fill_manual(values  = source_colors, breaks = names(source_colors), guide = "none") +
+    ggplot2::coord_cartesian(xlim = x_trim) +
+    ggplot2::scale_color_manual(values = line_colors, breaks = names(line_colors), name = "Distribution") +
+    ggplot2::scale_fill_manual(values  = source_colors, breaks = names(source_colors), name = "Distribution") +
     ggplot2::scale_linetype_manual(
       values = c("EED" = "solid", "HC5" = "dashed", "HC10" = "dotted"),
       name   = "Threshold / percentile"
@@ -207,7 +229,7 @@ plot_ecdf_overlap <- function(eed_vals, haz_df, matrix_label, n_boot, grid_n = 2
       y        = "Cumulative probability",
       title    = "Overlap of Exposure and Hazard distributions",
       subtitle = paste0(matrix_label, " — EED = Environmental Exposure Distribution; HC5/HC10 = Hazard Concentration (5th/10th percentile of SSD)"),
-      caption  = paste0("Shaded bands = bootstrap 95% CI (n = ", n_boot, " replicates). Log₁₀ x-axis.")
+      caption  = paste0("Shaded bands = bootstrap 95% CI (n = ", n_boot, " replicates). Log₁₀ x-axis, trimmed to the 0.5-99.5 percentile range.")
     ) +
     ggplot2::theme_minimal(base_size = 20) +
     ggplot2::theme(
@@ -237,6 +259,7 @@ plot_mc2d_diagnostic <- function(mc2d_df, matrix_label,
         ggplot2::geom_histogram(bins = 30, alpha = 0.6, position = "identity") +
         ggplot2::facet_grid(HCx ~ ERM, scales = "free_y",
                             labeller = ggplot2::labeller(HCx = function(x) paste0("HC", x))) +
+        ggplot2::scale_fill_manual(values = ERM_PALETTE, name = "ERM") +
         ggplot2::labs(x = "P(RQ > 1) across uncertainty", y = "count",
                       title = "MC2D uncertainty distribution for exceedance probability",
                       subtitle = matrix_label) +
@@ -250,6 +273,7 @@ plot_mc2d_diagnostic <- function(mc2d_df, matrix_label,
       ggplot2::ggplot(mc2d_df, ggplot2::aes(x = as.factor(HCx), y = P_exceed, fill = ERM)) +
         ggplot2::geom_boxplot(alpha = 0.7, outlier.alpha = 0.4) +
         ggplot2::scale_x_discrete(labels = function(x) paste0("HC", x)) +
+        ggplot2::scale_fill_manual(values = ERM_PALETTE, name = "ERM") +
         ggplot2::labs(x = "HCx", y = "P(RQ > 1)",
                       title = "MC2D uncertainty spread in exceedance probability",
                       subtitle = matrix_label) +
@@ -264,6 +288,7 @@ plot_mc2d_diagnostic <- function(mc2d_df, matrix_label,
         ggplot2::geom_smooth(method = "loess", se = FALSE) +
         ggplot2::facet_wrap(~HCx, scales = "free_y",
                             labeller = ggplot2::labeller(HCx = function(x) paste0("HC", x))) +
+        ggplot2::scale_color_manual(values = ERM_PALETTE, name = "ERM") +
         ggplot2::labs(x = "Correction factor draw", y = "P(RQ > 1)",
                       title = "Relationship between correction factor and exceedance",
                       subtitle = matrix_label) +
@@ -281,6 +306,7 @@ plot_mc2d_diagnostic <- function(mc2d_df, matrix_label,
     ggplot2::facet_grid(stat ~ HCx, scales = "free",
                         labeller = ggplot2::labeller(HCx = function(x) paste0("HC", x))) +
     ggplot2::scale_x_log10() +
+    ggplot2::scale_fill_manual(values = ERM_PALETTE, name = "ERM") +
     ggplot2::labs(x = "Risk Quotient", y = "density",
                   title = "MC2D uncertainty distribution for RQ summaries (log10 scale)",
                   subtitle = matrix_label) +

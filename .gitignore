@@ -2,3 +2,18 @@
 .Rhistory
 .RData
 .Ruserdata
+
+# Quarto knitr-engine intermediate file (regenerated every render; normally
+# auto-deleted on a clean render, but lingers if a render is interrupted)
+*.rmarkdown
+
+# knitr chunk cache (cache=TRUE chunks): large, regenerable, binary-diff-unfriendly.
+# Kept local for fast re-renders; never committed. A fresh clone rebuilds it on
+# the first render (which will be as slow as an uncached render).
+*_cache/
+
+# RIVM MicroplasticsERA_water clone (EUPL-1.2; Git LFS). Raw third-party files
+# are NOT redistributed here -- only derived summaries in
+# data_input/external/rivm/derived/ are committed. See
+# data_input/external/rivm/PROVENANCE.md for how to re-fetch.
+data_input/external/rivm/MicroplasticsERA_water/
