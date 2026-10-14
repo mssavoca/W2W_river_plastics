@@ -1,0 +1,57 @@
+"dataset","group","technique","method_variant","scenario","rubber_treatment","window","value_type","n","median","q25","q75","min","max","cf_p50_median"
+"Dutch rivers","Dommel (FTIR)","FTIR","harmonised","primary","as reported","W1","reconstructed",22,73288.7329874737,20409.4800186849,336279.976825859,9190.283162346,1792078.56065869,57.6140609689234
+"Dutch rivers","Dommel (FTIR)","FTIR","harmonised","primary","as reported","W2","reconstructed",22,352.232872317895,98.489357461156,1607.39040386525,44.3209441956578,8597.20931704438,0.276777557896985
+"Dutch rivers","Dommel (FTIR)","FTIR","published","primary","as reported","W1","reconstructed",22,73573.1757140362,20539.3875148529,335076.259778075,9259.38955077875,1791907.05186694,57.7217386338975
+"Dutch rivers","Dommel (FTIR)","FTIR","published","primary","as reported","W2","reconstructed",22,351.963865060813,98.2979671476666,1607.16565538816,44.2752797331077,8590.34205782135,0.276531830446458
+"Dutch rivers","Dommel (FTIR)","FTIR","published","rubber excluded","excl. rubber","W1","reconstructed",22,64293.6823015368,16292.1764016164,198213.077710653,7291.76927123827,1412833.15492377,57.7217386338975
+"Dutch rivers","Dommel (FTIR)","FTIR","published","rubber excluded","excl. rubber","W2","reconstructed",22,307.57113121284,77.9974977908341,950.718333461566,34.8667827898223,6773.07456253444,0.276531830446458
+"Dutch rivers","Dommel (FTIR)","FTIR","published_rivm","primary","as reported","W1","published",22,73543.9704044467,20474.1633616972,334336.948662826,9250.25800709298,1785860.27576765,57.7382380903887
+"Dutch rivers","Lek canal (LDIR)","LDIR","harmonised","primary","as reported","W1","reconstructed",2,126225509.137731,92893787.5368069,159557230.738656,59562065.9358826,192888952.33958,578.138678652984
+"Dutch rivers","Lek canal (LDIR)","LDIR","harmonised","primary","as reported","W2","reconstructed",2,2564.51688859759,1882.50550136691,3246.52827582826,1200.49411413624,3928.53966305894,0.0117135357006353
+"Dutch rivers","Lek canal (LDIR)","LDIR","published","LDIR LLm = 20 um","as reported","W1","reconstructed",2,586456719.63135,428752107.708091,744161331.554608,271047495.784832,901865943.477867,2666.91321211337
+"Dutch rivers","Lek canal (LDIR)","LDIR","published","LDIR LLm = 20 um","as reported","W2","reconstructed",2,19641.6908583523,14449.1138510729,24834.2678656316,9256.53684379357,30026.844872911,0.0899231739051686
+"Dutch rivers","Lek canal (LDIR)","LDIR","published","primary","as reported","W1","reconstructed",2,93993738.3096224,69129566.3741022,118857910.245143,44265394.4385819,143722082.180663,430.21547586198
+"Dutch rivers","Lek canal (LDIR)","LDIR","published","primary","as reported","W2","reconstructed",2,3152.57616365994,2318.19742334968,3986.9549039702,1483.81868303942,4821.33364428046,0.0144266620762991
+"Dutch rivers","Lek canal (LDIR)","LDIR","published","rubber excluded","excl. rubber","W1","reconstructed",2,84901382.9687645,60701740.9740797,109101024.963449,36502098.9793949,133300666.958134,430.21547586198
+"Dutch rivers","Lek canal (LDIR)","LDIR","published","rubber excluded","excl. rubber","W2","reconstructed",2,2847.66000857567,2035.62277291357,3659.69724423778,1223.58553725147,4471.73447989988,0.0144266620762991
+"Dutch rivers","Lek canal (LDIR)","LDIR","published_rivm","primary","as reported","W1","published",2,92461693.2388375,68266906.0442972,116656480.433378,44072118.849757,140851267.627918,424.985516152057
+"Dutch rivers","Meuse (FTIR)","FTIR","harmonised","primary","as reported","W1","reconstructed",11,41166.9607665067,25868.3739483742,50716.6014890938,3234.89412634106,66911.5302467825,48.2820018856875
+"Dutch rivers","Meuse (FTIR)","FTIR","harmonised","primary","as reported","W2","reconstructed",11,246.146658431667,156.146124000431,305.103844911455,19.447144213054,400.469044304568,0.290255883776925
+"Dutch rivers","Meuse (FTIR)","FTIR","published","primary","as reported","W1","reconstructed",11,38599.1954775883,24484.159473653,47883.1702288556,3044.65289767847,62992.8432544658,45.519672816248
+"Dutch rivers","Meuse (FTIR)","FTIR","published","primary","as reported","W2","reconstructed",11,251.113131493965,158.586982930855,310.58913422461,19.7905214365772,407.662874447685,0.295420487480002
+"Dutch rivers","Meuse (FTIR)","FTIR","published","rubber excluded","excl. rubber","W1","reconstructed",11,20871.641441104,11795.5618079332,35410.4738967266,2317.57160868063,53870.0563964693,45.519672816248
+"Dutch rivers","Meuse (FTIR)","FTIR","published","rubber excluded","excl. rubber","W2","reconstructed",11,135.922805164581,76.4229359598523,230.180388944199,15.0644267651558,348.624080175754,0.295420487480002
+"Dutch rivers","Meuse (FTIR)","FTIR","published_rivm","primary","as reported","W1","published",11,38049.8778907136,24372.6881058427,47648.3030916449,3025.26092562146,62847.4770209177,45.4093750720484
+"Dutch rivers","Rhine (LDIR)","LDIR","harmonised","primary","as reported","W1","reconstructed",2,21221110.4867278,17091011.0384374,25351209.9350182,12960911.5901471,29481309.3833085,94.7015613002902
+"Dutch rivers","Rhine (LDIR)","LDIR","harmonised","primary","as reported","W2","reconstructed",2,9292.10519293949,7407.56347738233,11176.6469084966,5523.02176182518,13061.1886240538,0.0411462834774102
+"Dutch rivers","Rhine (LDIR)","LDIR","published","LDIR LLm = 20 um","as reported","W1","reconstructed",2,87228692.2822918,69812540.9850471,104644843.579536,52396389.6878025,122060994.876781,387.414948971209
+"Dutch rivers","Rhine (LDIR)","LDIR","published","LDIR LLm = 20 um","as reported","W2","reconstructed",2,36101.7618505288,28875.0546459788,43328.4690550788,21648.3474414288,50555.1762596288,0.160262893559259
+"Dutch rivers","Rhine (LDIR)","LDIR","published","primary","as reported","W1","reconstructed",2,21918301.9381372,17530985.2189239,26305618.6573506,13143668.4997105,30692935.376564,97.3005479457543
+"Dutch rivers","Rhine (LDIR)","LDIR","published","primary","as reported","W2","reconstructed",2,9043.61122049482,7251.97690059078,10835.2455403989,5460.34258068674,12626.8798603029,0.0402251325809856
+"Dutch rivers","Rhine (LDIR)","LDIR","published","rubber excluded","excl. rubber","W1","reconstructed",2,19157042.9566197,14896489.2125667,23417596.7006727,10635935.4685137,27678150.4447257,97.3005479457543
+"Dutch rivers","Rhine (LDIR)","LDIR","published","rubber excluded","excl. rubber","W2","reconstructed",2,7902.57918622366,6160.56059402914,9644.59777841818,4418.54200183462,11386.6163706127,0.0402251325809856
+"Dutch rivers","Rhine (LDIR)","LDIR","published_rivm","primary","as reported","W1","published",2,21902355.6351162,17498105.3718834,26306605.8983489,13093855.1086507,30710856.1615817,97.1449188062487
+"This study","Carmel","µFTIR","piecewise","primary","as reported (no rubber class)","W1","reconstructed",15,105128.726276814,44420.5885676678,245793.923407762,31094.4119973674,1317810.79417414,296.137257117785
+"This study","Carmel","µFTIR","piecewise","primary","as reported (no rubber class)","W2","measured",15,355,150,830,105,4450,1
+"This study","Carmel","µFTIR","pooled","primary","as reported (no rubber class)","W1","reconstructed",15,655585.363847846,277007.9002174,1532777.04786961,193905.53015218,8217901.03978286,1846.71933478266
+"This study","Carmel","µFTIR","pooled","primary","as reported (no rubber class)","W2","measured",15,355,150,830,105,4450,1
+"This study","Carmel","µFTIR","river","primary","as reported (no rubber class)","W1","reconstructed",15,131105.6665183,55396.7605006903,306528.741437153,38777.7323504832,1643437.22818715,369.311736671269
+"This study","Carmel","µFTIR","river","primary","as reported (no rubber class)","W2","measured",15,355,150,830,105,4450,1
+"This study","Pajaro","µFTIR","piecewise","primary","as reported (no rubber class)","W1","reconstructed",14,119195.245989908,42199.5591392844,417553.532536077,13326.1765703003,1605063.9335784,296.137257117785
+"This study","Pajaro","µFTIR","piecewise","primary","as reported (no rubber class)","W2","measured",14,402.5,142.5,1410,45,5420,1
+"This study","Pajaro","µFTIR","pooled","primary","as reported (no rubber class)","W1","reconstructed",14,743304.532250023,263157.50520653,2603874.26204356,83102.3700652199,10009218.794522,1846.71933478266
+"This study","Pajaro","µFTIR","pooled","primary","as reported (no rubber class)","W2","measured",14,402.5,142.5,1410,45,5420,1
+"This study","Pajaro","µFTIR","river","primary","as reported (no rubber class)","W1","reconstructed",14,16245141.0446155,5751385.33877691,56908444.4047399,1816226.94908744,218754445.867865,40360.5988686098
+"This study","Pajaro","µFTIR","river","primary","as reported (no rubber class)","W2","measured",14,402.5,142.5,1410,45,5420,1
+"This study","Salinas","µFTIR","piecewise","primary","as reported (no rubber class)","W1","reconstructed",17,93283.2359921023,44420.5885676678,207296.07998245,11845.4902847114,464935.493674923,296.137257117785
+"This study","Salinas","µFTIR","piecewise","primary","as reported (no rubber class)","W2","measured",17,315,150,700,40,1570,1
+"This study","Salinas","µFTIR","pooled","primary","as reported (no rubber class)","W1","reconstructed",17,581716.590456539,277007.9002174,1292703.53434787,73868.7733913066,2899349.35560878,1846.71933478266
+"This study","Salinas","µFTIR","pooled","primary","as reported (no rubber class)","W2","measured",17,315,150,700,40,1570,1
+"This study","Salinas","µFTIR","river","primary","as reported (no rubber class)","W1","reconstructed",17,112365.460735239,53507.3622548756,249701.023856086,14268.6299346335,560043.724934365,356.715748365838
+"This study","Salinas","µFTIR","river","primary","as reported (no rubber class)","W2","measured",17,315,150,700,40,1570,1
+"This study","San Lorenzo","µFTIR","piecewise","primary","as reported (no rubber class)","W1","reconstructed",14,182124.413127438,92913.0644207051,618986.629583534,7403.43142794463,1406651.97130948,296.137257117785
+"This study","San Lorenzo","µFTIR","piecewise","primary","as reported (no rubber class)","W2","measured",14,615,313.75,2090.20180577056,25,4750,1
+"This study","San Lorenzo","µFTIR","pooled","primary","as reported (no rubber class)","W1","reconstructed",14,1135732.39089134,579408.191288061,3860016.08831413,46167.9833695666,8771916.84021766,1846.71933478266
+"This study","San Lorenzo","µFTIR","pooled","primary","as reported (no rubber class)","W2","measured",14,615,313.75,2090.20180577056,25,4750,1
+"This study","San Lorenzo","µFTIR","river","primary","as reported (no rubber class)","W1","reconstructed",14,1422656.18457316,725785.980341189,4835184.59509834,57831.5522184214,10987994.9215001,2313.26208873686
+"This study","San Lorenzo","µFTIR","river","primary","as reported (no rubber class)","W2","measured",14,615,313.75,2090.20180577056,25,4750,1

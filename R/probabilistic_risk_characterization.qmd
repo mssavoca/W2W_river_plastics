@@ -95,6 +95,12 @@ source(file.path(proj_root, "R", "risk_plotting.R"))    # matrix-aware risk plot
 # Hoffman et al. (2026)-motivated sensitivity controls. These are explicit
 # assumptions so they can be changed without editing hidden model logic.
 slope_structural_sd <- 0.25
+# River-water exposure rescaling: apply each river's own C-PSD slope (and LOD
+# window) to that river's samples ("river", default), or one pooled slope to
+# all samples ("pooled", retained as a sensitivity). River slopes differ
+# significantly (Cochran's Q, Section 4.2.2), so pooling is not the default.
+# Hazard-side alignment (pSSD++) still uses the pooled slope (alpha_mu/alpha_se).
+slope_application   <- "river"
 hoffman_delta_m     <- 0.10
 hoffman_K_m2_s      <- 1e-5
 polymer_density_tbl <- polymer_density_lookup()
@@ -428,14 +434,14 @@ cpsd_location_slope_plot
 fits_by_shape <- list(fragment = cpsd_fit_frag, fiber = cpsd_fit_fiber, all = cpsd_fit_all)
 fits_by_shape <- fits_by_shape[names(MP_PALETTE)[names(MP_PALETTE) %in% names(fits_by_shape)]]
 
-alpha_cpsh_plot <- plot_cpsd_multi(
+river_length_cpsd_plot <- plot_cpsd_multi(
   fits_by_shape,
   title     = "C-PSD length fits by shape",
   attribute = "Length"
 )
 
-ggsave(alpha_cpsh_plot, filename = "figures/alpha_cpsh_plot.png", width =11.5, height = 7, dpi = 300)
-alpha_cpsh_plot
+ggsave(river_length_cpsd_plot, filename = "figures/river_length_cpsd_plot.png", width =11.5, height = 7, dpi = 300)
+river_length_cpsd_plot
 ```
 
 #### 4.2.1.2 Literature comparison of power-law size distribution slopes
@@ -965,9 +971,25 @@ alpha    <- alpha_dist(mu = cpsd_fit_all$a_psd, sd = cpsd_fit_all$se_a_psd, n = 
 alpha_mu <- mean(alpha)
 alpha_se <- sd(alpha)
 summary(alpha)
+
+# River-specific differential-slope draws (default exposure application; see
+# slope_application in setup). Each river has its own local seed.
+alpha_by_river <- alpha_draws_by_group(cpsd_fits_by_loc, n = n_mc, structural_sd = slope_structural_sd, seed = 8101)
+knitr::kable(
+  tibble::tibble(
+    river = names(cpsd_fits_by_loc),
+    a_psd = vapply(cpsd_fits_by_loc, `[[`, numeric(1), "a_psd"),
+    se_a_psd = vapply(cpsd_fits_by_loc, `[[`, numeric(1), "se_a_psd"),
+    LOD_um = vapply(cpsd_fits_by_loc, function(f) sprintf("%.0f–%.0f", f$lower_lod_um, f$upper_lod_um), character(1)),
+    draw_mean = vapply(alpha_by_river, mean, numeric(1)),
+    draw_sd = vapply(alpha_by_river, sd, numeric(1))
+  ),
+  digits = 3,
+  caption = "River-specific differential slopes and Monte Carlo draws (fit SE plus structural SD) used for exposure rescaling"
+)
 ```
 
-The resulting differential slope distribution has mean `r round(alpha_mu, 3)` and SD `r round(alpha_se, 3)`. Fit-only draws are retained as `alpha_fit_only` so the Hoffman structural-uncertainty sensitivity can report before/after effects without changing the fitted C-PSD itself.
+The pooled differential slope distribution has mean `r round(alpha_mu, 3)` and SD `r round(alpha_se, 3)`; it is used for hazard-side alignment and for the pooled-slope sensitivities. Because the four rivers' slopes differ significantly (Section 4.2.2), exposure rescaling applies each river's own slope draws (`alpha_by_river`) to that river's samples by default (`slope_application = "`r slope_application`"`). Fit-only draws are retained as `alpha_fit_only` so the Hoffman structural-uncertainty sensitivity can report before/after effects without changing the fitted C-PSD itself.
 
 ## 4.4 Length-to-width ratio distribution
 
@@ -1034,6 +1056,8 @@ The equivalent check is also encoded as an automated `testthat` guard in `tests/
 # correction, the power-law correction_factor() rescale, the Monte Carlo corrected-
 # concentration draws, and the EED bootstrap into one shared step used identically
 # across river/sediment/ocean.
+stopifnot(slope_application %in% c("river", "pooled"))
+use_river_slopes <- identical(slope_application, "river")
 set.seed(9101)
 river_corr <- correct_and_bootstrap_eed(
   monitoring  = monitoring,
@@ -1045,23 +1069,47 @@ river_corr <- correct_and_bootstrap_eed(
   n_draws     = 3000,
   n_boot      = n_boot,
   probs       = c(0.5, 0.95),
-  slope_convention = "differential"
+  slope_convention = "differential",
+  group_col            = if (use_river_slopes) "river" else NULL,
+  cpsd_fit_by_group    = if (use_river_slopes) cpsd_fits_by_loc else NULL,
+  alpha_draws_by_group = if (use_river_slopes) alpha_by_river else NULL
 )
 monitoring         <- river_corr$monitoring
+# Pooled-window scalars, used by the pooled-model sensitivities (piecewise
+# bound, floor sensitivity, model selection) regardless of slope_application.
 L_meas_min_use     <- river_corr$L_meas_min_use
 L_meas_max_use     <- river_corr$L_meas_max_use
 combined_cf        <- river_corr$combined_cf
+combined_cf_by_river <- river_corr$combined_cf_by_group   # NULL when pooled
 C_corrected_draws  <- river_corr$C_corrected_draws
 C_sample_median    <- river_corr$C_sample_median
 eed_boot           <- river_corr$eed_boot
 
 quantile(combined_cf, c(0.05, 0.5, 0.95))
 
+# Production CF by river (river-specific) next to the pooled-slope CF it replaces.
+cf_pooled_ref <- correction_factor(alpha, L_meas_min_use, L_meas_max_use, 1, 5000, slope_convention = "differential")
+cf_by_river_tbl <- if (use_river_slopes) {
+  dplyr::bind_rows(lapply(names(combined_cf_by_river), function(r) {
+    w <- river_corr$L_meas_by_group[river_corr$L_meas_by_group$group == r, ]
+    tibble::tibble(river = r, a_psd = cpsd_fits_by_loc[[r]]$a_psd,
+                   L_meas_um = sprintf("%.0f–%.0f", w$L_meas_min, w$L_meas_max),
+                   CF_p05 = stats::quantile(combined_cf_by_river[[r]], 0.05),
+                   CF_p50 = stats::median(combined_cf_by_river[[r]]),
+                   CF_p95 = stats::quantile(combined_cf_by_river[[r]], 0.95))
+  }))
+} else NULL
+pooled_ref_row <- tibble::tibble(river = "Pooled slope (sensitivity)", a_psd = cpsd_fit_all$a_psd,
+                                 L_meas_um = sprintf("%.0f–%.0f", L_meas_min_use, L_meas_max_use),
+                                 CF_p05 = stats::quantile(cf_pooled_ref, 0.05), CF_p50 = stats::median(cf_pooled_ref),
+                                 CF_p95 = stats::quantile(cf_pooled_ref, 0.95))
+knitr::kable(dplyr::bind_rows(cf_by_river_tbl, pooled_ref_row), digits = 3,
+             caption = "Rescaling correction factor (measured window -> 1-5000 µm) by river, with the pooled-slope factor for reference")
 ```
 
 The differential-slope convention (length, area, volume, mass) is the current basis; Appendix A quantifies the effect of each prior convention error.
 
-The median rescaling factor is `r round(median(combined_cf), 2)` (90% CI: `r round(quantile(combined_cf, 0.05), 2)` – `r round(quantile(combined_cf, 0.95), 2)`), applied to convert concentrations measured over `r round(L_meas_min_use)` – `r round(L_meas_max_use)` µm to the target range of 1 – 5000 µm. This is a model-based count correction: `correction_factor()` integrates the differential PSD exponent directly as `L^(a + 1)`, and no internal conversion is applied when `slope_convention = "differential"`.
+Exposure rescaling uses `r if (use_river_slopes) "each river's own C-PSD slope and LOD window (river-specific; default)" else "the pooled C-PSD slope and LOD window"`. Across all applied draws the median rescaling factor is `r round(median(combined_cf), 2)` (90% CI: `r round(quantile(combined_cf, 0.05), 2)` – `r round(quantile(combined_cf, 0.95), 2)`), converting concentrations to the target range of 1 – 5000 µm; the table above gives the factor for each river and, for reference, the pooled-slope factor (median `r round(median(cf_pooled_ref), 2)`, measured window `r round(L_meas_min_use)` – `r round(L_meas_max_use)` µm). The measured-window convention (LOD window vs. sieve window) is unchanged here and remains under review (G1/G2). This is a model-based count correction: `correction_factor()` integrates the differential PSD exponent directly as `L^(a + 1)`, and no internal conversion is applied when `slope_convention = "differential"`.
 
 ## 5.2 Optional additional bias terms as probability distributions
 
@@ -1093,8 +1141,8 @@ We treat each monitoring sample's corrected concentration as:
 This yields a **distribution per monitoring sample**, and a pooled exposure distribution across samples.
 
 ```{r}
-# For simplicity, assume the same CF distribution applies to each sample.
-# If CF depends on site/method/shape, build CF distributions per strata and apply accordingly.
+# With slope_application = "river" (default), each sample's CF draws come from its
+# own river's slope; with "pooled", one CF distribution applies to every sample.
 # C_corrected_draws was already computed above (Section 5.1, via correct_and_bootstrap_eed()).
 
 C_corrected_draws |>
@@ -1396,7 +1444,9 @@ mc2d_results <- mc2d_risk(
   haz_df        = haz,
   n_uncertainty = 300,
   n_variability = 1000,
-  seed          = 1
+  seed          = 1,
+  cf_by_group   = combined_cf_by_river,   # river-specific CF per sample (NULL = pooled)
+  group_col     = "river"
 )
 
 mc2d_summary <- mc2d_results |>
@@ -3690,7 +3740,7 @@ The piecewise fits are diagnostic only. A fit window that straddles the assumed 
 
 ### 13.2.1 Single-slope vs. two-segment fits with binned data (particle length only)
 
-Visualizes the two competing exposure-side models directly against the binned C-PSD data, using the same visual grammar as `plot_cpsd_multi()` (Section 4.2.1.1/Figure `alpha_cpsh_plot`): points outside the fitted LOD window shown at reduced opacity, dotted vertical lines marking the LOD window boundaries, and a 95% CI ribbon around each regression line. Restricted to particle length (the metric the piecewise bounding sensitivity, Section 13.3, actually uses); the analogous area/volume comparison is not produced, since the piecewise model is not fit for those metrics. Colors distinguish matrix (river/sediment/ocean); the two-segment panel's break point for each matrix (Section 13.2 table above) is visible directly as the bend in that matrix's line rather than marked separately, since the gap between the two fitted panels already makes the two-segment shape distinguishable from the single-slope one.
+Visualizes the two competing exposure-side models directly against the binned C-PSD data, using the same visual grammar as `plot_cpsd_multi()` (Section 4.2.1.1/Figure `river_length_cpsd_plot`): points outside the fitted LOD window shown at reduced opacity, dotted vertical lines marking the LOD window boundaries, and a 95% CI ribbon around each regression line. Restricted to particle length (the metric the piecewise bounding sensitivity, Section 13.3, actually uses); the analogous area/volume comparison is not produced, since the piecewise model is not fit for those metrics. Colors distinguish matrix (river/sediment/ocean); the two-segment panel's break point for each matrix (Section 13.2 table above) is visible directly as the bend in that matrix's line rather than marked separately, since the gap between the two fitted panels already makes the two-segment shape distinguishable from the single-slope one.
 
 ```{r cpsd-single-vs-piecewise-plot, fig.width=13, fig.height=7}
 # Reuses the already-computed pooled "all"-shape length fits (no new fitting):
@@ -4019,6 +4069,9 @@ rq_bounding_plot
 ```
 
 **Bounding range interpretation.** The table above states, per matrix, the single-slope production RQ alongside the piecewise-sensitivity RQ; whichever is larger sets the upper bound of the sensitivity range and whichever is smaller sets the lower bound. Because the fine-size (sub-break) slope from the §13.2 diagnostic is shallower than the coarse-size slope for the matrices where the two-segment model is favored, the piecewise CF is expected to sit *below* the single-slope CF (less extrapolated mass assigned to the unconstrained 1 um-LOD_low zone) — i.e., the piecewise bound is expected to **narrow** the exposure (and therefore RQ) estimate relative to the single-slope production value, not widen it, for this dataset. This is stated as an expectation to be read against the rendered numbers above, not assumed; if a matrix's piecewise CF instead exceeds the single-slope CF, that reversal is itself informative about how sensitive the conclusion is to the extrapolation model and should be flagged rather than averaged away. Regardless of direction, the single-slope CF remains the production default per the guardrails in the corrective-revision spec; the piecewise result is reported here strictly as a labeled sensitivity bound. **Sediment caveat (SPEC 1d):** the Sediment column/row above is illustrative only, for the same reason noted in Section 13.1/11.3.0 — its exposure concentration is not a genuine particles/kg-dry-weight value.
+
+```{r rivm-benchmark-child, child = file.path(proj_root, "R", "rivm_benchmark.qmd")}
+```
 
 
 # 14. Combined risk quotient comparison across matrices

@@ -707,18 +707,34 @@ mc2d_risk <- function(monitoring_df,
                       haz_df,
                       n_uncertainty = 300,
                       n_variability = 1000,
-                      seed = 1) {
+                      seed = 1,
+                      cf_by_group = NULL,
+                      group_col = "river") {
   if (!is.null(seed)) set.seed(seed)
-  measured <- monitoring_df$C_measured_pL
-  measured <- measured[is.finite(measured) & measured > 0]
+  keep <- is.finite(monitoring_df$C_measured_pL) & monitoring_df$C_measured_pL > 0
+  measured <- monitoring_df$C_measured_pL[keep]
   stopifnot(length(measured) >= 5)
+  grouped <- !is.null(cf_by_group)
+  if (grouped) {
+    grp <- as.character(monitoring_df[[group_col]][keep])
+    stopifnot(all(unique(grp) %in% names(cf_by_group)))
+    # Outer loop: one independent CF draw per group (independent river fits).
+    cf_unc_g <- lapply(cf_by_group, function(x) sample(x, size = n_uncertainty, replace = TRUE))
+  }
 
-  cf_unc     <- sample(combined_cf, size = n_uncertainty, replace = TRUE)
+  cf_unc     <- if (grouped) rep(NA_real_, n_uncertainty) else sample(combined_cf, size = n_uncertainty, replace = TRUE)
   haz_groups <- haz_df |> dplyr::group_by(ERM, HCx) |> dplyr::group_split()
 
   dplyr::bind_rows(lapply(seq_len(n_uncertainty), function(i) {
     cf_i  <- cf_unc[i]
-    E_var <- sample(measured, size = n_variability, replace = TRUE) * cf_i
+    idx   <- sample.int(length(measured), size = n_variability, replace = TRUE)
+    E_var <- if (grouped) {
+      cf_rows <- vapply(cf_unc_g, `[`, numeric(1), i)[grp[idx]]
+      measured[idx] * cf_rows
+    } else {
+      measured[idx] * cf_i
+    }
+    if (grouped) cf_i <- stats::median(E_var / measured[idx])
     dplyr::bind_rows(lapply(haz_groups, function(hg) {
       H_i <- sample(hg$PNEC, size = 1)
       rq  <- E_var / H_i
@@ -821,15 +837,26 @@ fit_cpsd_by_shape <- function(df, value_col, shape_col = "shape", config) {
 #' @param n_draws Monte Carlo draws per monitoring sample (default 3000).
 #' @param n_boot Bootstrap replicates for bootstrap_eed().
 #' @param probs Quantile levels for bootstrap_eed() (default c(0.5, 0.95)).
+#' @param group_col,cpsd_fit_by_group,alpha_draws_by_group Optional group-specific
+#'   slopes (e.g. river-specific C-PSD fits). When supplied, each monitoring row
+#'   is rescaled with its own group's slope draws and that group's LOD window
+#'   (the same convention as the by-river analysis); `cpsd_fit`/`alpha_draws`
+#'   then only define the pooled L_meas_min_use/L_meas_max_use returned for
+#'   pooled-model sensitivities.
 #' @return List: monitoring (with bias-corrected LOD columns), combined_cf,
 #'   C_corrected_draws (with a generic $C_corrected column), C_sample_median,
-#'   eed_boot, L_meas_min_use, L_meas_max_use.
+#'   eed_boot, L_meas_min_use, L_meas_max_use. With groups, also
+#'   combined_cf_by_group and L_meas_by_group, and combined_cf is the mixture of
+#'   the per-row CF draws actually applied.
 correct_and_bootstrap_eed <- function(monitoring, conc_col, cpsd_fit, alpha_draws,
                                        L_tar_min = 1, L_tar_max = 5000,
                                        n_draws = 3000, n_boot, probs = c(0.5, 0.95),
-                                       slope_convention = c("differential", "cumulative")) {
+                                       slope_convention = c("differential", "cumulative"),
+                                       group_col = NULL, cpsd_fit_by_group = NULL,
+                                       alpha_draws_by_group = NULL) {
   stopifnot(is.data.frame(monitoring), conc_col %in% names(monitoring))
   slope_convention <- match.arg(slope_convention)
+  grouped <- !is.null(group_col)
 
   monitoring <- monitoring |>
     dplyr::mutate(
@@ -840,22 +867,52 @@ correct_and_bootstrap_eed <- function(monitoring, conc_col, cpsd_fit, alpha_draw
   L_meas_min_use <- stats::median(monitoring$Lmin_biascorr_um, na.rm = TRUE)
   L_meas_max_use <- stats::median(monitoring$Lmax_biascorr_um, na.rm = TRUE)
 
-  combined_cf <- correction_factor(
-    a          = alpha_draws,
-    L_meas_min = L_meas_min_use,
-    L_meas_max = L_meas_max_use,
-    L_tar_min  = L_tar_min,
-    L_tar_max  = L_tar_max,
-    slope_convention = slope_convention
-  )
+  cf_fun <- function(a, lo, hi) correction_factor(
+    a = a, L_meas_min = lo, L_meas_max = hi, L_tar_min = L_tar_min, L_tar_max = L_tar_max,
+    slope_convention = slope_convention)
+
+  combined_cf <- cf_fun(alpha_draws, L_meas_min_use, L_meas_max_use)
+  combined_cf_by_group <- NULL
+  L_meas_by_group <- NULL
+
+  if (grouped) {
+    stopifnot(group_col %in% names(monitoring),
+              all(unique(monitoring[[group_col]]) %in% names(cpsd_fit_by_group)),
+              all(unique(monitoring[[group_col]]) %in% names(alpha_draws_by_group)))
+    groups <- sort(unique(monitoring[[group_col]]))
+    # Each group's own LOD window, clipped to the measured window.
+    monitoring <- monitoring |>
+      dplyr::mutate(
+        lod_lo = vapply(.data[[group_col]], function(g) cpsd_fit_by_group[[g]]$lower_lod_um, numeric(1)),
+        lod_hi = vapply(.data[[group_col]], function(g) cpsd_fit_by_group[[g]]$upper_lod_um, numeric(1)),
+        Lmin_biascorr_um = pmax(Lmin_measured_um, .data$lod_lo, na.rm = TRUE),
+        Lmax_biascorr_um = pmin(Lmax_measured_um, .data$lod_hi, na.rm = TRUE)
+      ) |>
+      dplyr::select(-"lod_lo", -"lod_hi")
+    L_meas_by_group <- monitoring |>
+      dplyr::group_by(group = .data[[group_col]]) |>
+      dplyr::summarise(L_meas_min = stats::median(.data$Lmin_biascorr_um, na.rm = TRUE),
+                       L_meas_max = stats::median(.data$Lmax_biascorr_um, na.rm = TRUE), .groups = "drop")
+    combined_cf_by_group <- stats::setNames(lapply(groups, function(g) {
+      w <- L_meas_by_group[L_meas_by_group$group == g, ]
+      cf_fun(alpha_draws_by_group[[g]], w$L_meas_min, w$L_meas_max)
+    }), groups)
+  }
 
   C_corrected_draws <- monitoring |>
     dplyr::mutate(idx = dplyr::row_number()) |>
-    tidyr::crossing(draw = seq_len(n_draws)) |>
-    dplyr::mutate(
-      cf          = sample(combined_cf, size = dplyr::n(), replace = TRUE),
-      C_corrected = .data[[conc_col]] * cf
-    )
+    tidyr::crossing(draw = seq_len(n_draws))
+  if (grouped) {
+    C_corrected_draws$cf <- NA_real_
+    for (g in names(combined_cf_by_group)) {
+      hit <- C_corrected_draws[[group_col]] == g
+      C_corrected_draws$cf[hit] <- sample(combined_cf_by_group[[g]], size = sum(hit), replace = TRUE)
+    }
+    combined_cf <- C_corrected_draws$cf
+  } else {
+    C_corrected_draws$cf <- sample(combined_cf, size = nrow(C_corrected_draws), replace = TRUE)
+  }
+  C_corrected_draws$C_corrected <- C_corrected_draws[[conc_col]] * C_corrected_draws$cf
 
   C_sample_median <- C_corrected_draws |>
     dplyr::group_by(sample_id) |>
@@ -864,14 +921,27 @@ correct_and_bootstrap_eed <- function(monitoring, conc_col, cpsd_fit, alpha_draw
   eed_boot <- bootstrap_eed(C_sample_median$C_corr_med, n_boot = n_boot, probs = probs)
 
   list(
-    monitoring        = monitoring,
-    combined_cf       = combined_cf,
-    C_corrected_draws = C_corrected_draws,
-    C_sample_median   = C_sample_median,
-    eed_boot          = eed_boot,
-    L_meas_min_use    = L_meas_min_use,
-    L_meas_max_use    = L_meas_max_use
+    monitoring           = monitoring,
+    combined_cf          = combined_cf,
+    combined_cf_by_group = combined_cf_by_group,
+    C_corrected_draws    = C_corrected_draws,
+    C_sample_median      = C_sample_median,
+    eed_boot             = eed_boot,
+    L_meas_min_use       = L_meas_min_use,
+    L_meas_max_use       = L_meas_max_use,
+    L_meas_by_group      = L_meas_by_group
   )
+}
+
+#' River- (group-) specific differential-slope draws
+#'
+#' One alpha_dist() vector per group from each group's C-PSD fit, each with its
+#' own local seed so adding/removing a group does not shift the others.
+alpha_draws_by_group <- function(fits, n, structural_sd = 0, seed = 8101) {
+  stats::setNames(lapply(seq_along(fits), function(i) {
+    withr::with_seed(seed + i, alpha_dist(mu = fits[[i]]$a_psd, sd = fits[[i]]$se_a_psd,
+                                          n = n, structural_sd = structural_sd))
+  }), names(fits))
 }
 
 #' Run the MC_sim_align_parallel() + make_all_pSSDs() pipeline for one matrix
