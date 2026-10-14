@@ -159,5 +159,55 @@ trk.comment_markers(ins0, ins0, 811)
 ia = pa.find(qn("w:ins"))
 trk.comment_markers(ia, ia, 812)
 
+# ── PSD numbers and regenerated pipeline figures (psd_rescaling_params.json) ──
+P = vals.PARAMS
+assert P is not None, "run the pipeline first (psd_rescaling_params.json)"
+pooled = P["pooled"]; sw = P["sieve_window"]
+p56 = find_p("The microplastic concentration associated with the operational 50-500")
+trk.tracked_replace(p56, "-1.920 ± 0.035 SE", [f"{pooled['a_cum']:.3f} ± {pooled['a_cum_SE']:.3f} SE"])
+trk.tracked_replace(p56, "a = -2.92,", [f"a = {pooled['a_diff']:.2f},"])
+trk.tracked_replace(p56, "", [
+    " In the final analysis, each river’s samples were rescaled with that river’s own fitted slope (primary), with slope uncertainty propagated by Monte Carlo "
+    "(fit standard error plus a structural standard deviation of " + str(P["meta"]["slope_structural_sd"]) + "); the pooled slope above is retained for comparison. "
+    "River-specific slopes and rescaled concentrations are given in Table S-A."])
+# Held sentence (G1/G2): annotate rather than change.
+p66 = find_p("The piecewise model produced a substantially smaller correction factor")
+r66 = [r for r in p66.iter(qn("w:r")) if r.find(qn("w:t")) is not None and "22,465" in (r.find(qn("w:t")).text or "")]
+if r66:
+    trk.comment_markers(r66[0], r66[0], 813)
+SI_CF_NOTE = ("These are LOD-window (165-385 um) factors from the risk pipeline; the measured-window decision (G1/G2) is on hold. "
+              "On the 50-500 um sieve window used in the main text: single pooled slope CF = %s, two-segment CF = %s."
+              % (vals.sig(sw["CF_single_pooled"], 3), vals.sig(sw["CF_two"], 3)))
+
+from PIL import Image
+def swap_image(caption_start, fig_path, cid):
+    pcap = find_p(caption_start)
+    pimg = pcap.getprevious()
+    while pimg is not None and not list(pimg.iter("{http://schemas.openxmlformats.org/drawingml/2006/main}blip")):
+        pimg = pimg.getprevious()
+    blip = list(pimg.iter("{http://schemas.openxmlformats.org/drawingml/2006/main}blip"))[0]
+    part = doc.part.related_parts[blip.get(qn("r:embed"))]
+    part._blob = open(fig_path, "rb").read()
+    w, h = Image.open(fig_path).size
+    for ext in pimg.iter("{http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing}extent"):
+        ext.set("cy", str(int(int(ext.get("cx")) * h / w)))
+    for ext in pimg.iter("{http://schemas.openxmlformats.org/drawingml/2006/main}ext"):
+        if ext.get("cx"):
+            ext.set("cy", str(int(int(ext.get("cx")) * h / w)))
+    for src in pimg.iter("{http://schemas.openxmlformats.org/drawingml/2006/main}srcRect"):
+        src.getparent().remove(src)
+    runs = [r for r in pcap.iter(qn("w:r")) if r.find(qn("w:t")) is not None]
+    trk.comment_markers(runs[0], runs[0], cid)
+
+SI_FIGS = [
+    ("Figure SX. C-PSD power law fits for particle lengths for different", "cpsd_single_vs_piecewise_plot_river.png"),
+    ("Figure SX. Buoyant-polymer (PP + PE) fraction", "m14_buoyant_plot_river.png"),
+    ("Figure SX. C-PSD power-law fits by matrix", "cpsd_river_ocean_facet_plot_river.png"),
+    ("Figure SX. C-PSD power law fits by particle attribute", "cpsd_slopes_all_metrics_plot_river.png"),
+    ("Figure SX. Particle-length PSD slopes (a), this study vs.", "alpha_comparison_plot_river.png"),
+]
+for k, (cap, fn) in enumerate(SI_FIGS):
+    swap_image(cap, os.path.join(FIG, fn), 814 + k)
+
 doc.save(dst)
 print("counts:", dict(incl=n_incl, eff=n_eff, l300=n_300, l300_noneff=n_300_noneff, mg=(n_mg_tot, n_mg), m25=n_m25, pct=pct_txt))

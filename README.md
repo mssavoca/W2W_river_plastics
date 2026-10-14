@@ -18,6 +18,26 @@ All reusable computational functions are documented with roxygen2-style headers 
 
 ---
 
+## Mandatory rule: exposure-hazard alignment
+
+**Hazard thresholds must ALWAYS be aligned with the identical power-law slopes and environment-specific particle parameters as the concentrations they are compared with.** This applies to every risk quotient in this repository: headline results, per-river results and every sensitivity analysis.
+
+- **One particle population per comparison.** The length-slope draws that rescale an exposure concentration are the same draws that set `alpha.<env>` / `alpha.<env>.sd` in that hazard's pSSD++ parameter matrix. The surface-area (`a.sa`) and volume/mass (`a.v`, `a.m`) slopes and the width:length ratio (`R.ave`, `H_W_ratio`) come from the same particles. The particle-size window (`x1M_set`/`x2D_set`) matches the exposure target window.
+- **River water uses river-specific slopes by default** (`slope_application = "river"`). Each river therefore has its own aligned hazard (`haz_by_river`, Section 7.5), and each river's exposure is divided only by its own river's HCx. Rivers are weighted equally in the pooled headline RQ.
+- **Pooled-slope exposures use only the pooled-slope hazard** (`haz_pooled`). Sensitivities that change the slope or its uncertainty (structural-SD grid, depth strata) re-derive the hazard with the changed slopes.
+- **Enforced in code.** `aligned_freshwater_hazard()` builds the hazard from the exposure's own fits and tags it with a `psd_key`. `draw_rq_aligned()` refuses to pair an exposure and a hazard with different keys. `mc2d_risk()` refuses group-specific CFs without group-aligned hazards (`haz_by_group`).
+- **Documented exceptions** (labelled as such where they occur):
+  - The two-segment (piecewise) and lognormal/MLE exposure comparators are paired with the single-slope hazard, because PSSDplusplus cannot represent a two-segment or lognormal PSD.
+  - The `spec1b-legacy-*` runs deliberately reproduce historical convention errors for before/after comparison.
+
+Any new analysis that pairs an exposure with a hazard must follow this rule, or be listed here as an exception with its justification.
+
+## Canonical monitoring data
+
+`data_input/Part_dets_summ_final.rds` is the data owner's final QC'd per-sample summary. It reproduces manuscript Table 1 exactly (57 river samples, 3,777 particles), and the pipeline asserts this. `monitoring` is collapsed to one row per sample (the sum over polymer classes) before rescaling. The canonical river manifest is written to `data_output/sample_manifest_river_v1.csv`. The earlier `Part_dets_summ.rds` is kept only to list the samples excluded from the canonical set. Render budget: `quarto render R/probabilistic_risk_characterization.qmd -P budget:quick` for fast iteration (n_boot = 100); the default `production` budget uses n_boot = 1000.
+
+---
+
 ## Repository Structure
 
 ```

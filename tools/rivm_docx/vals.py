@@ -49,3 +49,23 @@ def fix_citations(text, mapping):
     for k, v in mapping.items():
         text = text.replace(k, v)
     return text
+
+
+# Pipeline parameter export (R/probabilistic_risk_characterization.qmd, Appendix M).
+import json as _json
+_pp = os.path.join(OUT, "psd_rescaling_params.json")
+PARAMS = _json.load(open(_pp, encoding="utf-8")) if os.path.exists(_pp) else None
+
+
+def sig(x, n=2):
+    """Round to n significant figures and format with thousands separators."""
+    from math import log10, floor
+    if x == 0:
+        return "0"
+    d = n - 1 - floor(log10(abs(x)))
+    v = round(x, d)
+    return f"{v:,.{max(d, 0)}f}" if d > 0 else f"{int(round(v)):,}"
+
+
+def num3(x):
+    return f"{x:.3f}".replace("-", "-")

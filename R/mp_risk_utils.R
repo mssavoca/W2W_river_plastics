@@ -709,8 +709,16 @@ mc2d_risk <- function(monitoring_df,
                       n_variability = 1000,
                       seed = 1,
                       cf_by_group = NULL,
-                      group_col = "river") {
+                      group_col = "river",
+                      haz_by_group = NULL) {
   if (!is.null(seed)) set.seed(seed)
+  # ALIGNMENT RULE: group-specific exposures (cf_by_group) must be paired with
+  # hazards aligned to the same groups (haz_by_group); a single pooled haz_df
+  # may only be used with a single pooled CF.
+  if (!is.null(cf_by_group) && is.null(haz_by_group)) {
+    stop("mc2d_risk(): group-specific CFs require group-aligned hazards (haz_by_group)", call. = FALSE)
+  }
+  if (!is.null(haz_by_group)) stopifnot(setequal(names(haz_by_group), names(cf_by_group)))
   keep <- is.finite(monitoring_df$C_measured_pL) & monitoring_df$C_measured_pL > 0
   measured <- monitoring_df$C_measured_pL[keep]
   stopifnot(length(measured) >= 5)
@@ -723,7 +731,8 @@ mc2d_risk <- function(monitoring_df,
   }
 
   cf_unc     <- if (grouped) rep(NA_real_, n_uncertainty) else sample(combined_cf, size = n_uncertainty, replace = TRUE)
-  haz_groups <- haz_df |> dplyr::group_by(ERM, HCx) |> dplyr::group_split()
+  haz_groups <- (if (grouped) haz_by_group[[1]] else haz_df) |>
+    dplyr::group_by(ERM, HCx) |> dplyr::group_split()
 
   dplyr::bind_rows(lapply(seq_len(n_uncertainty), function(i) {
     cf_i  <- cf_unc[i]
@@ -736,8 +745,18 @@ mc2d_risk <- function(monitoring_df,
     }
     if (grouped) cf_i <- stats::median(E_var / measured[idx])
     dplyr::bind_rows(lapply(haz_groups, function(hg) {
-      H_i <- sample(hg$PNEC, size = 1)
-      rq  <- E_var / H_i
+      if (grouped) {
+        erm <- unique(hg$ERM); hcx <- unique(hg$HCx)
+        H_g <- vapply(haz_by_group, function(h) {
+          pn <- h$PNEC[h$ERM == erm & h$HCx == hcx]
+          pn[sample.int(length(pn), size = 1)]
+        }, numeric(1))
+        rq  <- E_var / H_g[grp[idx]]
+        H_i <- stats::median(H_g)
+      } else {
+        H_i <- sample(hg$PNEC, size = 1)
+        rq  <- E_var / H_i
+      }
       tibble::tibble(
         ERM      = unique(hg$ERM),
         HCx      = unique(hg$HCx),
@@ -931,6 +950,123 @@ correct_and_bootstrap_eed <- function(monitoring, conc_col, cpsd_fit, alpha_draw
     L_meas_max_use       = L_meas_max_use,
     L_meas_by_group      = L_meas_by_group
   )
+}
+
+# ── Exposure-hazard alignment (ALIGNMENT RULE; see README) ────────────────────
+#
+# Hazard thresholds must ALWAYS be aligned with the same power-law slopes and
+# other environment-specific particle parameters as the concentrations they are
+# compared with: the length slope draws used to rescale the exposure, plus that
+# same population's surface-area and volume/mass slopes and aspect ratio. A
+# hazard derived from one particle population must never be divided into an
+# exposure rescaled with another population's PSD. The helpers below build the
+# aligned hazard and tag both sides with a shared `psd_key`; draw_rq_aligned()
+# refuses to pair mismatched keys.
+
+#' Freshwater pSSD++ parameter values aligned to an exposure-side particle population
+#'
+#' @param alpha_draws Differential length-slope draws used for the exposure rescaling.
+#' @param R_ave_mean,R_ave_sd Bootstrap mean/SD of width:length ratio for the same particles.
+#' @param fit_volume,fit_area fit_cpsd_segur_r() fits (all shapes) for the same particles.
+freshwater_param_values <- function(alpha_draws, R_ave_mean, R_ave_sd, fit_volume, fit_area,
+                                    base = PSSDplusplus::param_default_values) {
+  stopifnot(isTRUE(fit_volume$valid %||% TRUE), isTRUE(fit_area$valid %||% TRUE),
+            is.finite(fit_volume$a_psd), is.finite(fit_area$a_psd))
+  base |>
+    dplyr::mutate(
+      alpha.freshwater = -mean(alpha_draws),          # positive magnitude of differential a_psd
+      alpha.freshwater.sd = stats::sd(alpha_draws),
+      R.ave.water.freshwater = R_ave_mean,
+      R.ave.water.freshwater.sd = R_ave_sd,
+      a.v.freshwater = -fit_volume$a_psd,             # SPEC 1b: differential, not cumulative
+      a.v.freshwater.sd = fit_volume$se_a_psd,
+      a.m.freshwater = -fit_volume$a_psd,             # mass ~ volume at constant density
+      a.m.freshwater.sd = fit_volume$se_a_psd,
+      a.sa.freshwater = -fit_area$a_psd,
+      a.sa.freshwater.sd = fit_area$se_a_psd
+    )
+}
+
+`%||%` <- function(a, b) if (is.null(a)) b else a
+
+#' Derive a freshwater hazard (HC5/HC10 x ERM) aligned to one particle population
+#'
+#' @param psd_key Label shared with the exposure it will be paired with
+#'   (e.g. "river:Carmel"); stored as attr(haz, "psd_key").
+#' @return list(haz, param_values, alignment (one-row tibble), pSSDs)
+aligned_freshwater_hazard <- function(tox_data, alpha_draws, aspect_ratio_vec, fit_volume, fit_area,
+                                      n, seed, psd_key, num_cores = parallel::detectCores() - 2,
+                                      x1M_set = 1, x2D_set = 5000) {
+  ar <- withr::with_seed(seed, bootstrap_aspect_ratio(aspect_ratio_vec, n_boot = n))
+  pv <- freshwater_param_values(alpha_draws, ar$boot_mean, ar$boot_sd, fit_volume, fit_area)
+  stopifnot(abs(pv$a.v.freshwater - pv$a.m.freshwater) < 0.3)
+  pm <- withr::with_seed(seed + 1, {
+    PSSDplusplus::matrix_function(n = n, params = pv, upper.tissue.truncation.limit = 500,
+                                  x1M_set = x1M_set, x2D_set = x2D_set) |>
+      dplyr::mutate(R.ave.water.freshwater = sample(ar$vals, size = dplyr::n(), replace = TRUE),
+                    H_W_ratio.freshwater   = sample(ar$vals, size = dplyr::n(), replace = TRUE))
+  })
+  pssd <- run_pssd_pipeline(tox_data = tox_data, param_matrix = pm, environments = c("Freshwater"),
+                            cache_suffix = gsub("[^A-Za-z0-9]", "_", psd_key), dose_unit = "L",
+                            n_sim = n, num_cores = num_cores, sim = 30, cv_uf = 0.5,
+                            rmore_method = "lognormal", seed = seed + 2, x1D_set = x1M_set)
+  haz <- build_haz_df(pssd$pSSDs, "Freshwater")
+  attr(haz, "psd_key") <- psd_key
+  list(haz = haz, param_values = pv, pSSDs = pssd$pSSDs,
+       alignment = tibble::tibble(psd_key = psd_key,
+                                  alpha_freshwater = pv$alpha.freshwater, alpha_freshwater_sd = pv$alpha.freshwater.sd,
+                                  a_sa = pv$a.sa.freshwater, a_v = pv$a.v.freshwater, a_m = pv$a.m.freshwater,
+                                  R_ave = pv$R.ave.water.freshwater, n_particles_aspect = length(ar$vals)))
+}
+
+#' Tag an exposure vector/object with the psd_key of the slopes used to rescale it
+with_psd_key <- function(x, psd_key) { attr(x, "psd_key") <- psd_key; x }
+
+#' 1D Monte Carlo RQ draws for exposure/hazard pairs that must share a psd_key
+#'
+#' @param haz_by_group Named list of hazard data frames (attr psd_key).
+#' @param exposure_by_group Named list of exposure draw vectors (attr psd_key),
+#'   same names. Each group contributes n_risk draws (equal weighting).
+draw_rq_aligned <- function(haz_by_group, exposure_by_group, n_risk = 1000, seed = NULL) {
+  stopifnot(setequal(names(haz_by_group), names(exposure_by_group)))
+  dplyr::bind_rows(lapply(seq_along(haz_by_group), function(i) {
+    g <- names(haz_by_group)[i]
+    hk <- attr(haz_by_group[[g]], "psd_key"); ek <- attr(exposure_by_group[[g]], "psd_key")
+    if (is.null(hk) || is.null(ek) || !identical(hk, ek)) {
+      stop(sprintf("ALIGNMENT RULE violated for '%s': hazard psd_key '%s' vs exposure psd_key '%s'",
+                   g, hk %||% "<none>", ek %||% "<none>"), call. = FALSE)
+    }
+    draws <- if (is.null(seed)) draw_rq_mc1d(haz_by_group[[g]], exposure_by_group[[g]], n_risk = n_risk)
+             else withr::with_seed(seed + i, draw_rq_mc1d(haz_by_group[[g]], exposure_by_group[[g]], n_risk = n_risk))
+    dplyr::mutate(draws, group = g)
+  }))
+}
+
+#' Collapse a per-sample x polymer-class monitoring table to sample totals
+#'
+#' `Part_dets_summ.rds` has one row per sample per polymer class. Exposure must
+#' be the sample's total plastic concentration (sum over classes); treating each
+#' polymer row as a sample understates exposure by roughly the number of
+#' classes per sample. Count/concentration columns are summed; every other
+#' column must be constant within a sample (asserted) and is kept as-is.
+collapse_to_sample_totals <- function(df, sum_cols = c("count", "extrap_count", "extrap_conc_PPL"),
+                                      id_col = "sample_id", drop_cols = c("material_class", "sample_prop")) {
+  sum_cols <- intersect(sum_cols, names(df))
+  keep <- setdiff(names(df), c(sum_cols, drop_cols, id_col))
+  varying <- df |>
+    dplyr::group_by(.data[[id_col]]) |>
+    dplyr::summarise(dplyr::across(dplyr::all_of(keep), ~ dplyr::n_distinct(.x) > 1), .groups = "drop") |>
+    dplyr::select(-dplyr::all_of(id_col)) |>
+    vapply(any, logical(1))
+  if (any(varying)) {
+    stop("Columns vary within a sample and cannot be collapsed: ",
+         paste(names(varying)[varying], collapse = ", "), call. = FALSE)
+  }
+  df |>
+    dplyr::group_by(.data[[id_col]]) |>
+    dplyr::summarise(dplyr::across(dplyr::all_of(sum_cols), ~ sum(.x, na.rm = TRUE)),
+                     dplyr::across(dplyr::all_of(keep), dplyr::first),
+                     n_polymer_classes = dplyr::n(), .groups = "drop")
 }
 
 #' River- (group-) specific differential-slope draws

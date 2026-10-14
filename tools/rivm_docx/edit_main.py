@@ -29,22 +29,36 @@ CITE_MAIN = {
     "Mintenig et al. (2020) and Mintenig et al. (2025)": "refs. 52 and 54",
 }
 
-# ── Checks behind every interpretive word (fail loudly rather than overstate) ──
+# ── Interpretive wording is derived from the data (never asserted by hand) ──
 import vals
+P = vals.PARAMS
+assert P is not None, "run R/probabilistic_risk_characterization.qmd first (psd_rescaling_params.json)"
 ours = vals.VALS["ours_allrivers_river_W2"]
 ours_q25, ours_q75 = float(ours["q25"]), float(ours["q75"])
-for g in ("Meuse (FTIR)", "Dommel (FTIR)"):
+def overlaps(g):
     gg = group(g, "published", "W2")
-    assert float(gg["q25"]) <= ours_q75 and float(gg["q75"]) >= ours_q25, g + " IQR does not overlap ours"
-for g in ("Rhine (LDIR)", "Lek canal (LDIR)"):
-    assert min(sample_medians(g, "published", "W2")) > ours_q75, g + " not all above our upper quartile"
-    assert len(sample_medians(g, "published", "W2")) == 2
+    return float(gg["q25"]) <= ours_q75 and float(gg["q75"]) >= ours_q25
+ftir_overlap = [g for g in ("Meuse (FTIR)", "Dommel (FTIR)") if overlaps(g)]
+ldir_above = [g for g in ("Rhine (LDIR)", "Lek canal (LDIR)") if min(sample_medians(g, "published", "W2")) > ours_q75]
+nm = {"Meuse (FTIR)": "Meuse", "Dommel (FTIR)": "Dommel", "Rhine (LDIR)": "Rhine", "Lek canal (LDIR)": "Lek canal"}
+def join_names(gs):
+    n = [nm[g] for g in gs]
+    return n[0] if len(n) == 1 else " and ".join(n)
+w2_sentences = []
+if ftir_overlap:
+    w2_sentences.append("The interquartile range of our samples overlapped that of the FTIR-measured %s" % join_names(ftir_overlap))
+if ldir_above:
+    w2_sentences.append("every LDIR sample from the %s exceeded our upper quartile" % join_names(ldir_above))
+w2_phrase = (", whereas ".join(w2_sentences) + "; ") if w2_sentences else ""
 s_ours = vals.num("slope_ours_rivers"); s_ftir = vals.num("slope_dutch_FTIR_waterbodies"); s_ldir = vals.num("slope_dutch_LDIR_waterbodies")
-assert s_ldir < s_ours < s_ftir, "ours median slope not between Dutch FTIR and LDIR medians"
+frag_a = P["fragment"]["a_diff"]
+frag_txt = f"{frag_a:.2f}".replace("-", "\u2212")
+wang_lo, wang_hi = -3.89, -3.19   # Wang et al. (2026) site means (literature values, ref. 23)
+frag_rel = "lies within that range" if wang_lo <= frag_a <= wang_hi else ("is steeper than that range" if frag_a < wang_lo else "is shallower than that range")
 w1 = {g: float(group(g, "published", "W1")["median"]) for g in ("Meuse (FTIR)", "Dommel (FTIR)", "Rhine (LDIR)", "Lek canal (LDIR)")}
 w1_min_g = min(w1, key=w1.get); w1_max_g = max(w1, key=w1.get)
 key_of = {"Meuse (FTIR)": "Meuse", "Dommel (FTIR)": "Dommel", "Rhine (LDIR)": "Rhine", "Lek canal (LDIR)": "Lekcanal"}
-name_of = {"Meuse (FTIR)": "Meuse", "Dommel (FTIR)": "Dommel", "Rhine (LDIR)": "Rhine", "Lek canal (LDIR)": "Lek canal"}
+name_of = nm
 
 # ── 5a. Methods: "Benchmark against Dutch river data" ─────────────────────────
 methods_text = [
@@ -77,7 +91,7 @@ new = [
     f("slope_dutch_LDIR_waterbodies"), " for LDIR fits to Dutch river water", ("51", SUP),
     " (Fig. 8). Because the Dutch slopes were fitted by maximum likelihood above an estimated lower size limit rather than by C-PSD, this comparison is indicative only. "
     "These water-column data differ from particle-resolved µFTIR measurements of Dutch river suspended solids (per mass of sediment), whose site-mean slopes ranged from −3.89 to −3.19; our fragment slope (",
-    ("a", IT), " = −3.74) lies within that range",
+    ("a", IT), " = " + frag_txt + ") " + frag_rel,
 ]
 trk.tracked_replace(p72, old, new)
 
@@ -87,8 +101,7 @@ conc = [
     f("dutch_Meuse_published_W2"), " (Meuse), ", f("dutch_Dommel_published_W2"), " (Dommel), ",
     f("dutch_Rhine_published_W2"), " (Rhine) and ", f("dutch_Lekcanal_published_W2"),
     " (Lek canal) particles m⁻³, versus ", f("ours_allrivers_river_W2"), " particles m⁻³ measured here (Fig. 7a). "
-    "The interquartile range of our samples overlapped those of the FTIR-measured Meuse and Dommel, whereas every LDIR sample from the Rhine and Lek canal exceeded our upper quartile; "
-    "with two LDIR samples per water body and different analytical techniques, these differences should not be generalized. "
+    w2_phrase + "with two LDIR samples per water body and different analytical techniques, these differences should not be generalized. "
     "Extrapolated to 1–5000 µm, Dutch medians ranged from ", headline("dutch_%s_published_W1" % key_of[w1_min_g]), " (", name_of[w1_min_g], ") to ",
     headline("dutch_%s_published_W1" % key_of[w1_max_g]), " (", name_of[w1_max_g], ") particles m⁻³, versus ",
     headline("ours_allrivers_river_W1"), " with each river’s own single slope (", headline("ours_allrivers_pooled_W1"), " with one pooled slope) and ", headline("ours_allrivers_piecewise_W1"),
@@ -98,8 +111,6 @@ conc = [
 ]
 pconc = trk.new_paragraph(p72, conc, rpr_from=p72.find(qn("w:r")))
 p72.addnext(pconc)
-ins_el = pconc.find(qn("w:ins"))
-trk.comment_markers(ins_el, ins_el, 801)
 
 # ── Figures 7 and 8 after Fig. 6 caption ──────────────────────────────────────
 p_fig6cap = find_p("Fig. 6. C-PSD particle length fits")
@@ -154,6 +165,94 @@ ref_run = [r for r in p72.iter(qn("w:r")) if r.find(qn("w:commentReference")) is
            and r.find(qn("w:commentReference")).get(qn("w:id")) == "25"][0]
 rr = trk.OxmlElement("w:r"); cr = trk.OxmlElement("w:commentReference"); cr.set(qn("w:id"), "803"); rr.append(cr)
 ref_run.addnext(rr)
+
+# ── PSD / extrapolation numbers from the production pipeline (psd_rescaling_params.json) ──
+sw = P["sieve_window"]; pooled = P["pooled"]; br = P["by_river"]; het = P["heterogeneity"]; two = P["two_segment"]
+d3 = lambda x: f"{x:.3f}"
+sigL = lambda x: vals.sig(x, 2)
+cf3 = lambda x: vals.sig(x, 3)
+W1r, W1p, W1t, W2 = sw["C_W1_river"], sw["C_W1_single_pooled"], sw["C_W1_two"], sw["C_W2"]
+assert het["p_value"] < 0.001, "Cochran P no longer < 0.001; update wording"
+
+# Abstract
+p_abs = find_p("Intermittent rivers may deliver microplastics")
+trk.tracked_replace(p_abs, "approximately 600 particles L⁻¹ (slope-derived 95% CI: 460-790 particles L⁻¹)",
+                    ["a median of approximately " + sigL(W1r["median_L"]) + " particles L⁻¹ (river-specific power-law slopes; "
+                     + sigL(W1t["median_L"]) + " particles L⁻¹ under a two-segment size distribution)"])
+r01 = [r for r in p_abs.iter(qn("w:r")) if (r.find(qn("w:t")) is not None and "0.33 microplastics" in (r.find(qn("w:t")).text or ""))]
+if r01:
+    trk.comment_markers(r01[0], r01[0], 801)
+
+# Methods: river-specific rescaling, MC uncertainty, pooled LOD window
+p_cf = find_p("To estimate microplastic concentrations across the full 1-5000")
+trk.tracked_replace(p_cf, "Uncertainty in the extrapolated concentration was estimated by propagating the 95% confidence interval of the fitted differential PSD slope through the same integration.",
+                    ["Because slopes differed significantly among rivers (Results), each river’s samples were rescaled with that river’s own fitted slope; the pooled slope and a two-segment model are reported for comparison. "
+                     "Slope uncertainty was propagated by Monte Carlo sampling of each fitted slope (fit standard error plus a structural standard deviation of " + str(P["meta"]["slope_structural_sd"]) + ")."])
+lo, hi = pooled["window_LOD_um"]
+trk.tracked_replace(p_cf, "165-385", [f"{lo:.0f}-{hi:.0f}"]) if f"{lo:.0f}-{hi:.0f}" != "165-385" else None
+
+# Results: pooled / shape slopes
+p71 = find_p("As in numerous other studies, our microplastic abundance")
+fr, fi = P["fragment"], P["fiber"]
+for old, new in [("-1.920 ± 0.035 SE, R² = 0.988", f"{d3(pooled['a_cum'])} ± {d3(pooled['a_cum_SE'])} SE, R² = {d3(pooled['R2'])}"),
+                 ("-2.739 ± 0.038, R² = 0.993", f"{d3(fr['a_cum'])} ± {d3(fr['a_cum_SE'])}, R² = {d3(fr['R2'])}"),
+                 ("-1.671 ± 0.046, R² = 0.970", f"{d3(fi['a_cum'])} ± {d3(fi['a_cum_SE'])}, R² = {d3(fi['R2'])}"),
+                 ("(a = -3.74)", f"(a = {fr['a_diff']:.2f})"), ("(a = -2.67)", f"(a = {fi['a_diff']:.2f})")]:
+    if old.replace(" ", "") != new.replace(" ", ""):
+        trk.tracked_replace(p71, old, [new])
+
+# Results: river slopes and heterogeneity
+rv = sorted(br.items(), key=lambda kv: -kv[1]["a_cum"])     # shallowest first
+fmt_r = lambda kv: f"{d3(kv[1]['a_cum'])} ± {d3(kv[1]['a_cum_SE'])} in the {kv[0]} River"
+trk.tracked_replace(p72, "-1.493 ± 0.068 in the Salinas River and -1.503 ± 0.074 in the Carmel River to -1.975 ± 0.050 in the San Lorenzo River and -2.711 ± 0.063 in the Pajaro River",
+                    [f"{fmt_r(rv[0])} and {fmt_r(rv[1])} to {fmt_r(rv[2])} and {fmt_r(rv[3])}"])
+trk.tracked_replace(p72, " = 227.4, ", [f" = {het['Q']:.1f}, "])
+trk.tracked_replace(p72, " = 98.7%)", [f" = {het['i2']:.1f}%)"])
+
+# Results: extrapolation paragraph
+p73 = find_p("The steep river-water PSD indicates")
+cf_r = sw["CF_single_by_river"]
+trk.tracked_replace(p73,
+    "Using the pooled differential PSD slope (a = -2.920 ± 0.035 SE), integration of the fitted power law yielded a correction factor of approximately 1,850 from the 50-500 µm fraction to the full 1-5000 µm range. "
+    "Applying this correction to the empirically measured mean concentration of 0.33 particles L⁻¹ yielded a model-derived estimate of approximately 600 microplastics L⁻¹ (slope-derived 95% CI: 460–790 microplastics L⁻¹) across 1-5000 µm.",
+    ["Because slopes differed among rivers, each river’s samples were rescaled with its own fitted differential slope, giving correction factors from the 50-500 µm fraction to the full 1-5000 µm range of "
+     + ", ".join(f"{cf3(cf_r[r])} ({r})" for r in sorted(cf_r))
+     + f"; the pooled slope (a = {pooled['a_diff']:.3f} ± {pooled['a_diff_SE']:.3f} SE) gives {cf3(sw['CF_single_pooled'])}. "
+     f"Applied to the per-sample concentrations, this yielded a model-derived median of approximately {sigL(W1r['median_L'])} microplastics L⁻¹ "
+     f"(IQR {sigL(W1r['q25_L'])}–{sigL(W1r['q75_L'])}; n = {W1r['n']}) across 1-5000 µm, compared with {sigL(W1p['median_L'])} microplastics L⁻¹ using the pooled slope."])
+trk.tracked_replace(p73, "The fitted slope was estimated over the empirically supported 165-385 µm C-PSD window",
+                    [f"The fitted slopes were estimated over each river’s empirically supported C-PSD window ({lo:.0f}-{hi:.0f} µm for the pooled fit)"])
+trk.tracked_replace(p73, "(ΔAIC = -44.0)",
+                    [f"(ΔAIC = {two['dAIC']:.1f}; breakpoint {two['breakpoint_um']:.0f} µm; differential slopes {two['a_fine_diff']:.2f} below and {two['a_coarse_diff']:.2f} above), "
+                     f"giving a correction factor of {cf3(sw['CF_two'])} and a median of {sigL(W1t['median_L'])} microplastics L⁻¹ ({sw['ratio_W1_river_over_two']:.1f}-fold lower than with river-specific single slopes)"])
+
+# Conclusions
+p77 = find_p("Our results also demonstrate how environmental microplastic abundance")
+trk.tracked_replace(p77, "approximately 600 particles L⁻¹ across the full 1-5000 µm microplastic size range, compared with 0.33 microplastics L⁻¹ measured",
+                    [f"a median of approximately {sigL(W1r['median_L'])} particles L⁻¹ ({sigL(W1t['median_L'])} under a two-segment model) across the full 1-5000 µm microplastic size range, "
+                     f"compared with a median of {W2['median_L']:.2f} microplastics L⁻¹ measured"])
+
+# Regenerated pipeline figure(s): swap image bytes, keep width, correct aspect ratio.
+from PIL import Image
+def swap_image(caption_start, fig_path, cid):
+    pcap = find_p(caption_start)
+    pimg = pcap.getprevious()
+    while pimg is not None and not list(pimg.iter("{http://schemas.openxmlformats.org/drawingml/2006/main}blip")):
+        pimg = pimg.getprevious()
+    blip = list(pimg.iter("{http://schemas.openxmlformats.org/drawingml/2006/main}blip"))[0]
+    part = doc.part.related_parts[blip.get(qn("r:embed"))]
+    part._blob = open(fig_path, "rb").read()
+    w, h = Image.open(fig_path).size
+    for ext in pimg.iter("{http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing}extent"):
+        ext.set("cy", str(int(int(ext.get("cx")) * h / w)))
+    for ext in pimg.iter("{http://schemas.openxmlformats.org/drawingml/2006/main}ext"):
+        if ext.get("cx"):
+            ext.set("cy", str(int(int(ext.get("cx")) * h / w)))
+    for src in pimg.iter("{http://schemas.openxmlformats.org/drawingml/2006/main}srcRect"):
+        src.getparent().remove(src)
+    runs = [r for r in pcap.iter(qn("w:r")) if r.find(qn("w:t")) is not None]
+    trk.comment_markers(runs[0], runs[0], cid)
+swap_image("Fig. 6. C-PSD particle length fits", os.path.join(FIG, "cpsd_river_length_facet_plot.png"), 804)
 
 doc.save(dst)
 print("methods words:", n_words)

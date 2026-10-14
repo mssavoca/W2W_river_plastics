@@ -17,6 +17,8 @@ format:
       - text: Risk Utilities Code
         icon: file-code
         href: mp_risk_utils.R
+params:
+  budget: "production"   # "production" (n_boot = 1000) or "quick" (n_boot = 100); quarto render ... -P budget:quick
 ---
 
 ```{r setup, include=FALSE}
@@ -53,8 +55,12 @@ knitr::opts_knit$set(root.dir = proj_root)
 getwd()
 
 # ── Global Monte Carlo settings (change here to scale up/down) ──
-n_boot <- 1000   # bootstrap replicates (increase to ≥ 1000 for publication)
-n_mc   <- 20000 # alpha Monte Carlo draws
+# Budget is a document parameter: "production" for publication numbers,
+# "quick" for fast iteration (everything self-labels via is_production_budget).
+run_budget <- if (exists("params") && !is.null(params$budget)) params$budget else Sys.getenv("W2W_BUDGET", "production")
+stopifnot(run_budget %in% c("production", "quick"))
+n_boot <- if (identical(run_budget, "quick")) 100  else 1000   # bootstrap replicates (>= 1000 for publication)
+n_mc   <- if (identical(run_budget, "quick")) 5000 else 20000  # alpha Monte Carlo draws
 
 # C1.10: whether this render is at the production Monte Carlo budget (>= 1000
 # bootstrap replicates) rather than a fast dev-scale iteration render. Derived
@@ -83,7 +89,16 @@ vol_bin_um <- 2e4
 # which is included in each cached chunk's cache.extra, so every cached
 # C-PSD fit is invalidated together on a real data change without needing
 # per-chunk dependson wiring across river/sediment/ocean/per-location fits.
-raw_data_cache_key <- file.info(file.path(proj_root, "data_input", "Part_dets_comb.rds"))$mtime
+# Canonical per-sample monitoring table: the data owner's final QC'd summary
+# (Part_dets_summ_final.rds; reproduces manuscript Table 1 exactly: 57 river
+# samples, 3,777 particles). Sample-ID corrections follow Util_MSS.R.
+monitoring_file <- file.path(proj_root, "data_input", "Part_dets_summ_final.rds")
+monitoring_raw  <- readRDS(monitoring_file) |>
+  dplyr::mutate(Client_ID_MSSupdate = dplyr::recode(Client_ID_MSSupdate,
+                                                    "CR020250611S"    = "CR020250611SS",
+                                                    "SRR20240205SS_2" = "SRR20240205SS"))
+raw_data_cache_key <- list(file.info(file.path(proj_root, "data_input", "Part_dets_comb.rds"))$mtime,
+                           tools::md5sum(monitoring_file))
 
 # ── Utility functions (sourced from companion scripts in R/) ──
 # mp_risk_utils.R – C-PSD fitting, exposure/hazard/risk functions
@@ -166,7 +181,11 @@ raw_particles <- readRDS("data_input/Part_dets_comb.rds") |>
          width_um = min_length_um,
          sample_depth_general = recode(sample_depth_general, "depth" = "subsurface")
   ) |>
-  assign_polymer_density(lookup = polymer_density_tbl)
+  assign_polymer_density(lookup = polymer_density_tbl) |>
+  # Restrict to the canonical sample set (same sample-ID corrections as the
+  # monitoring table) so PSD fits and concentrations describe the same samples.
+  dplyr::mutate(Client_ID_MSSupdate = dplyr::recode(Client_ID_MSSupdate, "SRR20240205SS_2" = "SRR20240205SS")) |>
+  dplyr::filter(Client_ID_MSSupdate %in% unique(monitoring_raw$Client_ID_MSSupdate))
 
 # subset by matrix for downstream analysis
 raw_particles_river <- raw_particles |> 
@@ -274,7 +293,7 @@ knitr::kable(polymer_density_composition_tbl, caption = "River particle density 
 Here we load monitoring replicate concentrations (particles/L) that were *reported for limited size ranges* (e.g., 300–5000 µm typical of net tows).
 
 ```{r}
-monitoring <- readRDS("data_input/Part_dets_summ.rds") |> 
+monitoring <- monitoring_raw |> 
   filter(sample_type == "river water",
          material_simple == "plastic",
          sample_or_blank == "sample"
@@ -299,13 +318,77 @@ monitoring <- readRDS("data_input/Part_dets_summ.rds") |>
     ) 
   ) %>%
   rename(river = sample_location,
-         C_measured_pL = extrap_conc_PPL) |> 
+         C_measured_pL = extrap_conc_PPL) |>
           # should adjust based on power law LLOD determined below
-  mutate(Lmin_measured_um = 50, 
+  mutate(Lmin_measured_um = 50,
          Lmax_measured_um = 500,
-         sample_id = Client_ID_MSSupdate)
+         sample_id = Client_ID_MSSupdate) |>
+  # One row per SAMPLE: total plastic concentration = sum over polymer classes.
+  # (Previously each polymer-class row was treated as a sample, which
+  # understated exposure by roughly the number of classes per sample.)
+  collapse_to_sample_totals(sum_cols = c("count", "extrap_count", "C_measured_pL"))
 
+stopifnot(!anyDuplicated(monitoring$sample_id))
+cat("River monitoring samples:", nrow(monitoring), "| median total concentration:",
+    round(median(monitoring$C_measured_pL), 3), "particles/L (50-500 µm)\n")
 head(monitoring)
+```
+
+**Canonical river sample manifest.** The table below is the single sample manifest for every river number in this report and the manuscript (written to `data_output/sample_manifest_river_v1.csv`). Samples present in the earlier `Part_dets_summ.rds` but not in the data owner's final QC'd table are listed with the reason. The guard reproduces manuscript Table 1 (river × depth medians and sample sizes); the build fails if the manifest and Table 1 disagree.
+
+```{r river-sample-manifest}
+river_manifest <- monitoring |>
+  dplyr::transmute(
+    sample_id, river, date,
+    season = factor(dplyr::if_else(date < as.Date("2024-08-01"), "Season 1", "Season 2")),
+    depth = sample_depth_general,
+    volume_L = extrap_count / C_measured_pL,
+    n_particles_50_500 = count,
+    n_particles_50_500_extrap = extrap_count,
+    conc_50_500_L = C_measured_pL,
+    QC_pass = TRUE, QC_reason = NA_character_)
+
+legacy_ids <- readRDS("data_input/Part_dets_summ.rds") |>
+  dplyr::filter(sample_type == "river water", sample_or_blank == "sample") |>
+  dplyr::distinct(sample_id = Client_ID_MSSupdate, river = sample_location)
+river_manifest_excluded <- legacy_ids |>
+  dplyr::filter(!sample_id %in% river_manifest$sample_id) |>
+  dplyr::mutate(QC_pass = FALSE,
+                QC_reason = dplyr::if_else(sample_id == "SRR20240205SS_2",
+                                           "duplicate record; merged into SRR20240205SS by the data owner",
+                                           "not in the data owner's final QC'd dataset (Part_dets_summ_final.rds)"))
+utils::write.csv(dplyr::bind_rows(river_manifest, river_manifest_excluded),
+                 "data_output/sample_manifest_river_v1.csv", row.names = FALSE)
+
+# Guard: the manifest must reproduce manuscript Table 1 (median, 25th-75th percentile, n by river x depth).
+table1_reference <- tibble::tribble(
+  ~river,        ~depth,       ~t1_median, ~t1_n,
+  "San Lorenzo", "surface",    0.400,      7,
+  "San Lorenzo", "subsurface", 0.200,      7,
+  "Pajaro",      "surface",    0.220,      7,
+  "Pajaro",      "subsurface", 0.180,      7,
+  "Salinas",     "surface",    0.106,      8,
+  "Salinas",     "subsurface", 0.235,      7,
+  "Carmel",      "surface",    0.050,      7,
+  "Carmel",      "subsurface", 0.165,      7)
+table1_check <- river_manifest |>
+  dplyr::group_by(river, depth = as.character(depth)) |>
+  dplyr::summarise(n = dplyr::n(), median = stats::median(conc_50_500_L), .groups = "drop") |>
+  dplyr::full_join(table1_reference, by = c("river", "depth"))
+stopifnot(all(table1_check$n == table1_check$t1_n),
+          # Table 1 prints 3 decimals (0.1065 -> 0.106), so allow a half-unit tie.
+          all(abs(table1_check$median - table1_check$t1_median) <= 5e-4 + 1e-9))
+
+river_conc_summary <- river_manifest |>
+  dplyr::summarise(n_samples = dplyr::n(), n_particles = sum(n_particles_50_500),
+                   total_volume_L = sum(volume_L),
+                   pooled_conc_raw_L = sum(n_particles_50_500) / sum(volume_L),
+                   pooled_conc_extrap_L = sum(n_particles_50_500_extrap) / sum(volume_L),
+                   mean_conc_L = mean(conc_50_500_L), median_conc_L = stats::median(conc_50_500_L),
+                   q25_conc_L = stats::quantile(conc_50_500_L, 0.25), q75_conc_L = stats::quantile(conc_50_500_L, 0.75))
+knitr::kable(river_conc_summary, digits = 3,
+             caption = "River monitoring summary on the canonical sample set (50-500 µm). pooled_conc_raw_L = counted particles / total pumped volume (the draft's '0.33 L-1'; ignores aliquot subsampling); pooled_conc_extrap_L uses subsampling-extrapolated counts; mean/median/IQR are across per-sample concentrations.")
+knitr::kable(river_manifest_excluded, caption = "Samples excluded from the canonical set")
 ```
 
 
@@ -1082,8 +1165,32 @@ L_meas_max_use     <- river_corr$L_meas_max_use
 combined_cf        <- river_corr$combined_cf
 combined_cf_by_river <- river_corr$combined_cf_by_group   # NULL when pooled
 C_corrected_draws  <- river_corr$C_corrected_draws
-C_sample_median    <- river_corr$C_sample_median
+C_sample_median    <- river_corr$C_sample_median |>
+  dplyr::left_join(dplyr::distinct(monitoring, sample_id, river), by = "sample_id")
 eed_boot           <- river_corr$eed_boot
+
+# Pooled-slope exposure (sensitivity). ALIGNMENT RULE: any risk calculation that
+# uses these pooled-slope exposures must pair them with the pooled-slope hazard
+# (haz_pooled), never with the river-specific hazards (see README).
+if (use_river_slopes) {
+  set.seed(9111)
+  river_corr_pooled <- correct_and_bootstrap_eed(
+    monitoring = monitoring, conc_col = "C_measured_pL", cpsd_fit = cpsd_fit_all, alpha_draws = alpha,
+    L_tar_min = 1, L_tar_max = 5000, n_draws = 3000, n_boot = n_boot, probs = c(0.5, 0.95),
+    slope_convention = "differential")
+} else {
+  river_corr_pooled <- river_corr
+}
+combined_cf_pooled     <- river_corr_pooled$combined_cf
+C_sample_median_pooled <- river_corr_pooled$C_sample_median
+eed_boot_pooled        <- river_corr_pooled$eed_boot
+
+# River-specific EEDs (each river's samples, each river's own slope); paired
+# with each river's own aligned hazard in Section 8.
+eed_boot_by_river <- stats::setNames(lapply(sort(unique(monitoring$river)), function(r) {
+  withr::with_seed(9121 + match(r, sort(unique(monitoring$river))),
+                   bootstrap_eed(C_sample_median$C_corr_med[C_sample_median$river == r], n_boot = n_boot, probs = c(0.5, 0.95)))
+}), sort(unique(monitoring$river)))
 
 quantile(combined_cf, c(0.05, 0.5, 0.95))
 
@@ -1357,11 +1464,66 @@ knitr::include_graphics("figures/arranged_plot_river.png")
 ```{r}
 # build_haz_df() (sourced from R/mp_risk_utils.R) extracts and row-binds the HC5/HC10 x
 # Food Dilution/Tissue Translocation hazard summaries — used identically per matrix.
-haz <- build_haz_df(pSSDs, "Freshwater")
+# Pooled-slope hazard: aligned to the pooled river particle population (pooled
+# length draws `alpha`, pooled area/volume fits, pooled aspect ratio). Used ONLY
+# with pooled-slope exposures (ALIGNMENT RULE; see README).
+haz_pooled <- build_haz_df(pSSDs, "Freshwater")
+attr(haz_pooled, "psd_key") <- "river:pooled"
+```
+
+## 7.5 River-specific aligned hazard thresholds
+
+**Alignment rule.** Hazard thresholds are always aligned with the same power-law slopes and environment-specific particle parameters as the concentrations they are compared with. Because river exposures are rescaled with each river's own length slope (Section 5.1), each river also gets its own pSSD++ hazard. These are built from that river's length-slope draws (`alpha_by_river`, identical to the exposure draws), its own surface-area and volume/mass C-PSD fits (Section 4.2.5) and its own width:length ratios. HC5/HC10 are then re-derived per river. The pooled hazard above is used only with pooled-slope exposures.
+
+```{r river-aligned-hazards, cache=TRUE, cache.extra=list(n_boot, n_mc, slope_structural_sd, raw_data_cache_key)}
+river_names <- sort(names(cpsd_fits_by_loc))
+river_hazards <- {
+  stats::setNames(lapply(seq_along(river_names), function(i) {
+    r <- river_names[i]
+    aligned_freshwater_hazard(
+      tox_data         = tox_data,
+      alpha_draws      = alpha_by_river[[r]],
+      aspect_ratio_vec = raw_particles_river$aspect_ratio[raw_particles_river$sample_location == r],
+      fit_volume       = cpsd_loc_shape_vol[[r]]$all,
+      fit_area         = cpsd_loc_shape_area[[r]]$all,
+      n                = n_boot,
+      seed             = 5100 + 10 * i,
+      psd_key          = paste0("river:", r)
+    )
+  }), river_names)
+}
+```
+
+```{r river-aligned-hazard-summary}
+haz_by_river <- lapply(river_hazards, `[[`, "haz")
+hazard_alignment_tbl <- dplyr::bind_rows(
+  dplyr::bind_rows(lapply(river_hazards, `[[`, "alignment")),
+  tibble::tibble(psd_key = "river:pooled", alpha_freshwater = param_values$alpha.freshwater,
+                 alpha_freshwater_sd = param_values$alpha.freshwater.sd, a_sa = param_values$a.sa.freshwater,
+                 a_v = param_values$a.v.freshwater, a_m = param_values$a.m.freshwater,
+                 R_ave = param_values$R.ave.water.freshwater, n_particles_aspect = length(R.ave_vals)))
+# Exposure-side check: each hazard's length slope equals the exposure draws' mean.
+stopifnot(all(abs(vapply(river_names, function(r) river_hazards[[r]]$alignment$alpha_freshwater + mean(alpha_by_river[[r]]), numeric(1))) < 1e-10))
+knitr::kable(hazard_alignment_tbl, digits = 3,
+             caption = "Hazard-side particle parameters (positive magnitudes) aligned to each exposure population")
+hazard_by_river_tbl <- {
+  dplyr::bind_rows(lapply(river_names, function(r) haz_by_river[[r]] |> dplyr::group_by(ERM, HCx) |>
+    dplyr::summarise(HC_median = stats::median(PNEC), HC_p05 = stats::quantile(PNEC, 0.05),
+                     HC_p95 = stats::quantile(PNEC, 0.95), .groups = "drop") |> dplyr::mutate(psd_key = paste0("river:", r))))
+}
+pooled_hazard_tbl <- haz_pooled |> dplyr::group_by(ERM, HCx) |>
+  dplyr::summarise(HC_median = stats::median(PNEC), HC_p05 = stats::quantile(PNEC, 0.05),
+                   HC_p95 = stats::quantile(PNEC, 0.95), .groups = "drop") |> dplyr::mutate(psd_key = "river:pooled")
+knitr::kable(dplyr::bind_rows(hazard_by_river_tbl, pooled_hazard_tbl), digits = 3,
+             caption = "Aligned hazard thresholds (particles/L, 1-5000 µm) by river and pooled")
 ```
 
 ```{r hazard-threshold-plot}
-hazard_threshold_plot <- plot_hazard_threshold(haz, "River water")
+hazard_threshold_plot <- if (use_river_slopes) {
+  plot_hazard_threshold(dplyr::bind_rows(haz_by_river, .id = "river"), "River water (river-specific aligned hazards)") +
+    ggplot2::facet_grid(river ~ HCx + ERM, scales = "free_y",
+                        labeller = ggplot2::labeller(HCx = function(x) paste0("HC", x)))
+} else plot_hazard_threshold(haz_pooled, "River water")
 
 ggsave(hazard_threshold_plot, filename = "figures/hazard_threshold_plot.png", width = 9, height = 6, dpi = 300)
 hazard_threshold_plot
@@ -1378,10 +1540,28 @@ Below we compute four RQ distributions: [Food dilution, Tissue translocation] x 
 ```{r risk-quotient-1d}
 # draw_rq_mc1d() and summarize_rq() are sourced from R/mp_risk_utils.R.
 n_risk     <- 1000
-set.seed(9301)
-risk_draws <- draw_rq_mc1d(haz, eed_boot$q50, n_risk = n_risk)
+# ALIGNMENT RULE: each river's median exposure (its own slope) is divided by
+# that river's own aligned hazard; rivers are weighted equally (n_risk draws each).
+if (use_river_slopes) {
+  risk_draws <- draw_rq_aligned(
+    haz_by_group      = haz_by_river,
+    exposure_by_group = stats::setNames(lapply(river_names, function(r) with_psd_key(eed_boot_by_river[[r]]$q50, paste0("river:", r))), river_names),
+    n_risk = n_risk, seed = 9300) |>
+    dplyr::rename(river = group)
+  risk_summary_by_river <- risk_draws |> dplyr::group_by(river) |> dplyr::group_modify(~ summarize_rq(.x)) |> dplyr::ungroup()
+} else {
+  set.seed(9301)
+  risk_draws <- draw_rq_mc1d(haz_pooled, eed_boot_pooled$q50, n_risk = n_risk)
+  risk_summary_by_river <- NULL
+}
 risk_summary <- summarize_rq(risk_draws)
 risk_summary
+if (!is.null(risk_summary_by_river)) knitr::kable(risk_summary_by_river, digits = 3, caption = "1D risk by river (each river's exposure / its own aligned hazard)")
+
+# Pooled-slope reference (pooled exposure / pooled hazard), for sensitivities.
+set.seed(9302)
+risk_draws_pooled   <- draw_rq_mc1d(haz_pooled, eed_boot_pooled$q50, n_risk = n_risk)
+risk_summary_pooled <- summarize_rq(risk_draws_pooled)
 ```
 
 ```{r rq-plot}
@@ -1407,9 +1587,15 @@ Plot the EED CDF (green) alongside HCx CDFs (colored by ERM; linetype by HCx), w
 # plot_ecdf_overlap() (sourced from R/risk_plotting.R) wraps the ecdf_bands() calls
 # (from R/mp_risk_utils.R) for the exposure and hazard distributions and combines
 # them into one CDF overlap plot — used identically across river/sediment/ocean.
-ecdf_overlap_plot <- plot_ecdf_overlap(
-  eed_vals     = C_sample_median$C_corr_med,
-  haz_df       = haz,
+ecdf_overlap_plot <- if (use_river_slopes) {
+  patchwork::wrap_plots(lapply(river_names, function(r) plot_ecdf_overlap(
+    eed_vals     = C_sample_median$C_corr_med[C_sample_median$river == r],
+    haz_df       = haz_by_river[[r]],
+    matrix_label = paste0("River water: ", r),
+    n_boot       = n_boot)), ncol = 2) + patchwork::plot_layout(guides = "collect")
+} else plot_ecdf_overlap(
+  eed_vals     = C_sample_median_pooled$C_corr_med,
+  haz_df       = haz_pooled,
   matrix_label = "River water",
   n_boot       = n_boot
 )
@@ -1441,12 +1627,13 @@ while the **inner loop** samples exposure variability from the observed monitori
 mc2d_results <- mc2d_risk(
   monitoring_df = monitoring,
   combined_cf   = combined_cf,
-  haz_df        = haz,
+  haz_df        = haz_pooled,
   n_uncertainty = 300,
   n_variability = 1000,
   seed          = 1,
   cf_by_group   = combined_cf_by_river,   # river-specific CF per sample (NULL = pooled)
-  group_col     = "river"
+  group_col     = "river",
+  haz_by_group  = haz_by_river            # ALIGNMENT RULE: each sample vs its own river's hazard
 )
 
 mc2d_summary <- mc2d_results |>
@@ -1500,7 +1687,7 @@ mc2d_rq_density_plot
 
 Hoffman et al. (2026) show that vertical transport can make a sampled PSD deviate from a single power law, with apparent slopes differing from the underlying PSD by about two exponent units across a critical size. The following diagnostics are model-based sensitivities. They do not replace the production CF, but they show how much the Food Dilution and Tissue Translocation risk summaries move when the slope uncertainty is widened beyond OLS fit error and when surface/subsurface samples are analyzed separately.
 
-```{r hoffman-slope-uncertainty-sensitivity, cache=TRUE, cache.extra=list(n_boot, slope_application)}
+```{r hoffman-slope-uncertainty-sensitivity, cache=TRUE, cache.extra=list(n_boot, raw_data_cache_key)}
 summarize_mc2d_hc5 <- function(x) {
   x |>
     dplyr::filter(HCx == 5) |>
@@ -1514,51 +1701,34 @@ summarize_mc2d_hc5 <- function(x) {
 }
 
 slope_sd_grid <- c(0, slope_structural_sd, 0.5, 1.0)
+# Pooled-slope sensitivity. ALIGNMENT RULE: the hazard is re-derived at every
+# structural SD from the SAME widened slope draws used to rescale the exposure
+# (plus the pooled area/volume fits and aspect ratio), so exposure and hazard
+# always share one particle-population description.
 hoffman_slope_sensitivity <- dplyr::bind_rows(lapply(slope_sd_grid, function(sd_i) {
-  if (use_river_slopes) {
-    # Widen each river's own slope uncertainty and apply it to that river's
-    # samples, in the river's own measured window (production convention).
-    alpha_r <- alpha_draws_by_group(cpsd_fits_by_loc, n = 3000, structural_sd = sd_i,
-                                    seed = 1000 + as.integer(sd_i * 1000))
-    cf_r <- stats::setNames(lapply(names(alpha_r), function(r) {
-      w <- river_corr$L_meas_by_group[river_corr$L_meas_by_group$group == r, ]
-      correction_factor(alpha_r[[r]], w$L_meas_min, w$L_meas_max, 1, 5000, slope_convention = "differential")
-    }), names(alpha_r))
-    n_rows <- table(monitoring$river)
-    cf_i <- unlist(lapply(names(cf_r), function(r) rep_len(cf_r[[r]], 3000 * n_rows[[r]] / sum(n_rows))))
-  } else {
-    set.seed(1000 + as.integer(sd_i * 1000))
-    alpha_i <- alpha_dist(
-      mu = cpsd_fit_all$a_psd,
-      sd = cpsd_fit_all$se_a_psd,
-      n = 3000,
-      structural_sd = sd_i
-    )
-    cf_r <- NULL
-    cf_i <- correction_factor(
-      a = alpha_i,
-      L_meas_min = L_meas_min_use,
-      L_meas_max = L_meas_max_use,
-      L_tar_min = 1,
-      L_tar_max = 5000,
-      slope_convention = "differential"
-    )
-  }
+  alpha_i <- withr::with_seed(1000 + as.integer(sd_i * 1000), alpha_dist(
+    mu = cpsd_fit_all$a_psd, sd = cpsd_fit_all$se_a_psd, n = 3000, structural_sd = sd_i))
+  cf_i <- correction_factor(
+    a = alpha_i, L_meas_min = L_meas_min_use, L_meas_max = L_meas_max_use,
+    L_tar_min = 1, L_tar_max = 5000, slope_convention = "differential")
+  haz_i <- aligned_freshwater_hazard(
+    tox_data = tox_data, alpha_draws = alpha_i, aspect_ratio_vec = raw_particles_river$aspect_ratio,
+    fit_volume = cpsd_fit_volume, fit_area = cpsd_fit_area, n = n_boot,
+    seed = 5300 + as.integer(sd_i * 1000), psd_key = paste0("river:pooled:sd", sd_i))$haz
   mc_i <- mc2d_risk(
     monitoring_df = monitoring,
     combined_cf = cf_i,
-    haz_df = haz,
+    haz_df = haz_i,
     n_uncertainty = 100,
     n_variability = 500,
-    seed = 2000 + as.integer(sd_i * 1000),
-    cf_by_group = cf_r,
-    group_col = "river"
+    seed = 2000 + as.integer(sd_i * 1000)
   )
   summarize_mc2d_hc5(mc_i) |>
     dplyr::mutate(
       structural_sd = sd_i,
       CF_p50 = median(cf_i),
-      CF_p95 = quantile(cf_i, 0.95)
+      CF_p95 = quantile(cf_i, 0.95),
+      HC5_median = vapply(ERM, function(e) stats::median(haz_i$PNEC[haz_i$ERM == e & haz_i$HCx == 5]), numeric(1))
     )
 }))
 
@@ -1569,9 +1739,9 @@ knitr::kable(
 )
 ```
 
-The `structural_sd = 0` row isolates the corrected differential-slope convention with fit uncertainty only. Wider rows are assumptions motivated by Hoffman et al. (2026) and the RIVM (2025) precedent for deliberately broad slope priors; they are sampled in the MC2D outer uncertainty loop through `combined_cf`, not in the inner exposure-variability loop.
+The `structural_sd = 0` row isolates the corrected differential-slope convention with fit uncertainty only. Wider rows are assumptions motivated by Hoffman et al. (2026) and the RIVM (2025) precedent for deliberately broad slope priors; they are sampled in the MC2D outer uncertainty loop through the CF, not in the inner exposure-variability loop. This sensitivity uses the pooled slope on both sides. Following the alignment rule, the hazard (HC5) is re-derived at each structural SD from the same widened slope draws as the exposure, so the rows show the joint effect of slope uncertainty on exposure and hazard.
 
-```{r hoffman-depth-stratified-sensitivity, cache=TRUE, cache.extra=n_boot}
+```{r hoffman-depth-stratified-sensitivity, cache=TRUE, cache.extra=list(n_boot, raw_data_cache_key)}
 depth_levels <- levels(monitoring$sample_depth_general)
 
 depth_shape_fits <- dplyr::bind_rows(lapply(depth_levels, function(depth_i) {
@@ -1622,12 +1792,20 @@ depth_sensitivity <- dplyr::bind_rows(lapply(depth_levels, function(depth_i) {
       dplyr::pull(length_um),
     bin_um = 5
   )
-  alpha_i <- alpha_dist(
+  alpha_i <- withr::with_seed(3100 + match(depth_i, depth_levels), alpha_dist(
     mu = fit_i$a_psd,
     sd = fit_i$se_a_psd,
     n = 3000,
     structural_sd = slope_structural_sd
-  )
+  ))
+  # ALIGNMENT RULE: hazard aligned to this depth stratum's own particles
+  # (length draws above, plus its own area/volume fits and aspect ratio).
+  part_i <- raw_particles_river |> dplyr::filter(sample_depth_general == depth_i)
+  haz_i <- aligned_freshwater_hazard(
+    tox_data = tox_data, alpha_draws = alpha_i, aspect_ratio_vec = part_i$aspect_ratio,
+    fit_volume = fit_cpsd_segur_r(part_i$V_um3, bin_um = vol_bin_um, fit_range_um = vlb_river$all),
+    fit_area = fit_cpsd_segur_r(part_i$area_um2, bin_um = 500, fit_range_um = c(2000, 500000)),
+    n = n_boot, seed = 5400 + 10 * match(depth_i, depth_levels), psd_key = paste0("river:depth:", depth_i))$haz
   mon_i <- monitoring |> dplyr::filter(sample_depth_general == depth_i)
   corr_i <- correct_and_bootstrap_eed(
     monitoring = mon_i,
@@ -1644,7 +1822,7 @@ depth_sensitivity <- dplyr::bind_rows(lapply(depth_levels, function(depth_i) {
   mc_i <- mc2d_risk(
     monitoring_df = corr_i$monitoring,
     combined_cf = corr_i$combined_cf,
-    haz_df = haz,
+    haz_df = haz_i,
     n_uncertainty = 100,
     n_variability = 500,
     seed = 3000 + match(depth_i, depth_levels)
@@ -1671,15 +1849,15 @@ Surface and subsurface strata are both large enough to fit C-PSD slopes and boot
 
 ## 10.0.1 By-river risk characterization (not pooled)
 
-The headline river assessment pools particle and monitoring data across all four sampling locations (Carmel, Pajaro, Salinas, San Lorenzo) into a single C-PSD fit and a single exposure distribution. This section instead runs the full workflow -- C-PSD fit, differential-slope draws, correction factor, EED bootstrap, and Food Dilution/Tissue Translocation risk characterization -- **independently for each river**, reusing each location's C-PSD fit already computed in Section 4.2.1 (`cpsd_fits_by_loc`) and each river's own monitoring replicates, but the same production hazard distribution (`haz`) throughout, since species toxicity does not depend on which river was sampled. This tests whether the pooled result masks location-specific differences in exposure (driven by each river's own particle-size slope and measured concentrations) rather than assuming one river is representative of all four.
+With `slope_application = "river"` (the default), the headline river assessment (Sections 5-9) already rescales each river's samples with its own slope and divides by that river's own aligned hazard, so this section is the per-river view of the headline result. It runs the full workflow for each river independently: C-PSD fit, the identical differential-slope draws (`alpha_by_river`), correction factor, EED bootstrap, and Food Dilution/Tissue Translocation risk. Each river uses its own aligned hazard (`haz_by_river`, Section 7.5), never the pooled hazard, per the alignment rule.
 
-```{r river-stratified-risk, message=FALSE, warning=FALSE, cache=TRUE, cache.extra=n_boot}
+```{r river-stratified-risk, message=FALSE, warning=FALSE, cache=TRUE, cache.extra=list(n_boot, n_mc, raw_data_cache_key)}
 river_hc5_risk <- dplyr::bind_rows(lapply(locations, function(loc) {
   fit_i     <- cpsd_fits_by_loc[[loc]]
   seed_base <- 41000 + match(loc, locations) * 10
 
-  set.seed(seed_base)
-  alpha_i <- alpha_dist(mu = fit_i$a_psd, sd = fit_i$se_a_psd, n = 3000, structural_sd = slope_structural_sd)
+  # ALIGNMENT RULE: the same slope draws that built this river's hazard.
+  alpha_i <- alpha_by_river[[loc]]
 
   mon_i <- monitoring |> dplyr::filter(river == loc)
 
@@ -1691,7 +1869,10 @@ river_hc5_risk <- dplyr::bind_rows(lapply(locations, function(loc) {
   )
 
   set.seed(seed_base + 2)
-  risk_draws_i <- draw_rq_mc1d(haz, corr_i$eed_boot$q50, n_risk = 1000) |>
+  risk_draws_i <- draw_rq_aligned(
+    haz_by_group = stats::setNames(list(haz_by_river[[loc]]), loc),
+    exposure_by_group = stats::setNames(list(with_psd_key(corr_i$eed_boot$q50, paste0("river:", loc))), loc),
+    n_risk = 1000) |>
     dplyr::filter(HCx == 5)
 
   risk_draws_i |>
@@ -2011,9 +2192,9 @@ sed_volume_cpsd_plot
 Before treating any sediment concentration as a genuine particles/kg-dry-weight value, this subsection verifies where it actually comes from. The check below is rendered so the finding is auditable rather than asserted.
 
 ```{r spec1d-sediment-provenance-audit}
-part_dets_summ_raw <- readRDS("data_input/Part_dets_summ.rds")
+part_dets_summ_raw <- monitoring_raw
 
-cat("Columns available in data_input/Part_dets_summ.rds:\n")
+cat("Columns available in data_input/Part_dets_summ_final.rds:\n")
 print(names(part_dets_summ_raw))
 
 raw_sed_check <- part_dets_summ_raw |>
@@ -2049,7 +2230,7 @@ sediment_concentration_is_quantitative <- FALSE
 ```
 
 ```{r}
-monitoring_sed <- readRDS("data_input/Part_dets_summ.rds") |>
+monitoring_sed <- monitoring_raw |>
   filter(
     sample_type == "beach sand",
     material_simple == "plastic",
@@ -2068,7 +2249,9 @@ monitoring_sed <- readRDS("data_input/Part_dets_summ.rds") |>
     C_measured_pkg = extrap_conc_PPL,
     Lmin_measured_um = 50,
     Lmax_measured_um = 500
-  )
+  ) |>
+  # One row per sample (sum over polymer classes); see the river monitoring chunk.
+  collapse_to_sample_totals(sum_cols = c("count", "extrap_count", "extrap_conc_PPL", "C_measured_pkg"))
 
 set.seed(9102)
 sed_corr <- correct_and_bootstrap_eed(
@@ -3313,7 +3496,7 @@ knitr::kable(
 ## 12.2 Ocean monitoring concentrations and EED
 
 ```{r ocean-monitoring}
-monitoring_ocean <- readRDS("data_input/Part_dets_summ.rds") |>
+monitoring_ocean <- monitoring_raw |>
   dplyr::filter(
     sample_type    == "ocean water",
     material_simple == "plastic",
@@ -3326,7 +3509,9 @@ monitoring_ocean <- readRDS("data_input/Part_dets_summ.rds") |>
     C_measured_pL = extrap_conc_PPL,
     Lmin_measured_um = 50,
     Lmax_measured_um = 500
-  )
+  ) |>
+  # One row per sample (sum over polymer classes); see the river monitoring chunk.
+  collapse_to_sample_totals(sum_cols = c("count", "extrap_count", "extrap_conc_PPL", "C_measured_pL"))
 
 cat("Ocean monitoring samples:", nrow(monitoring_ocean), "\n")
 
@@ -3632,7 +3817,7 @@ river_pssd_legacy <- run_pssd_pipeline(
 )
 haz_legacy_river         <- build_haz_df(river_pssd_legacy$pSSDs, "Freshwater")
 set.seed(9304)
-risk_draws_legacy_river  <- draw_rq_mc1d(haz_legacy_river, eed_boot$q50, n_risk = n_risk)
+risk_draws_legacy_river  <- draw_rq_mc1d(haz_legacy_river, eed_boot_pooled$q50, n_risk = n_risk)
 risk_summary_legacy_river <- summarize_rq(risk_draws_legacy_river)
 ```
 
@@ -3949,7 +4134,9 @@ eed_boot_piecewise_ocean <- if (is.finite(pw_ocean$cf_piecewise)) {
 
 set.seed(9411)
 risk_draws_piecewise_river <- if (!is.null(eed_boot_piecewise_river)) {
-  draw_rq_mc1d(haz, eed_boot_piecewise_river$q50, n_risk = n_risk)
+  # Two-segment exposure vs the pooled single-slope hazard: the one documented
+  # ALIGNMENT RULE exception (PSSDplusplus cannot take a two-segment PSD).
+  draw_rq_mc1d(haz_pooled, eed_boot_piecewise_river$q50, n_risk = n_risk)
 } else NULL
 risk_summary_piecewise_river <- if (!is.null(risk_draws_piecewise_river)) summarize_rq(risk_draws_piecewise_river) else NULL
 
@@ -3968,8 +4155,8 @@ risk_summary_piecewise_ocean <- if (!is.null(risk_draws_piecewise_ocean)) summar
 ```{r spec2b-bounding-table}
 cf_bounding_tbl <- dplyr::bind_rows(
   tibble::tibble(Matrix = "River water", break_um = pw_river$break_um,
-                 CF_single_slope_p50 = median(combined_cf), CF_piecewise = pw_river$cf_piecewise,
-                 EED_single_slope_q50 = median(eed_boot$q50),
+                 CF_single_slope_p50 = median(combined_cf_pooled), CF_piecewise = pw_river$cf_piecewise,
+                 EED_single_slope_q50 = median(eed_boot_pooled$q50),
                  EED_piecewise_q50 = if (!is.null(eed_boot_piecewise_river)) median(eed_boot_piecewise_river$q50) else NA_real_),
   tibble::tibble(Matrix = "Sediment", break_um = pw_sed$break_um,
                  CF_single_slope_p50 = median(combined_cf_sed), CF_piecewise = pw_sed$cf_piecewise,
@@ -4151,7 +4338,7 @@ river_pssd_legacy_alpha <- run_pssd_pipeline(
 )
 haz_legacy_alpha_river        <- build_haz_df(river_pssd_legacy_alpha$pSSDs, "Freshwater")
 set.seed(9308)
-risk_draws_legacy_alpha_river <- draw_rq_mc1d(haz_legacy_alpha_river, eed_boot$q50, n_risk = n_risk)
+risk_draws_legacy_alpha_river <- draw_rq_mc1d(haz_legacy_alpha_river, eed_boot_pooled$q50, n_risk = n_risk)
 risk_summary_legacy_alpha_river <- summarize_rq(risk_draws_legacy_alpha_river)
 ```
 
@@ -4192,16 +4379,16 @@ river_pssd_legacy_asa <- run_pssd_pipeline(
 )
 haz_legacy_asa_river        <- build_haz_df(river_pssd_legacy_asa$pSSDs, "Freshwater")
 set.seed(9309)
-risk_draws_legacy_asa_river <- draw_rq_mc1d(haz_legacy_asa_river, eed_boot$q50, n_risk = n_risk)
+risk_draws_legacy_asa_river <- draw_rq_mc1d(haz_legacy_asa_river, eed_boot_pooled$q50, n_risk = n_risk)
 risk_summary_legacy_asa_river <- summarize_rq(risk_draws_legacy_asa_river)
 ```
 
 ```{r spec3c-tissue-translocation-inline, include=FALSE}
-tt_now       <- dplyr::filter(risk_summary, ERM == "Tissue Translocation", HCx == 5)
+tt_now       <- dplyr::filter(risk_summary_pooled, ERM == "Tissue Translocation", HCx == 5)
 tt_legacy    <- dplyr::filter(risk_summary_legacy_alpha_river, ERM == "Tissue Translocation", HCx == 5)
 tt_legacy_av <- dplyr::filter(risk_summary_legacy_river, ERM == "Tissue Translocation", HCx == 5)
 tt_legacy_asa <- dplyr::filter(risk_summary_legacy_asa_river, ERM == "Tissue Translocation", HCx == 5)
-fd_now       <- dplyr::filter(risk_summary, ERM == "Food Dilution", HCx == 5)
+fd_now       <- dplyr::filter(risk_summary_pooled, ERM == "Food Dilution", HCx == 5)
 fd_legacy_av <- dplyr::filter(risk_summary_legacy_river, ERM == "Food Dilution", HCx == 5)
 ```
 
@@ -4374,7 +4561,7 @@ m12_river_results <- dplyr::bind_rows(lapply(m12_floors, function(L) {
     cpsd_fit = cpsd_fit_all, alpha_draws = alpha, tox_data_base = tox_data,
     param_values_base = param_values, environments = c("Freshwater"),
     matrix_extra_args = list(), rave_override_fn = rave_override_river,
-    seed_base = 61000 + round(L * 10), prod_cf = combined_cf, prod_eed = eed_boot, prod_haz = haz
+    seed_base = 61000 + round(L * 10), prod_cf = combined_cf_pooled, prod_eed = eed_boot_pooled, prod_haz = haz_pooled
   )
 }))
 
@@ -4559,7 +4746,7 @@ m2_get_cfg <- function(compartment) {
          tox_data_base = tox_data, tox_fixed = tox_fixed_river,
          param_values_base = param_values, environments = c("Freshwater"),
          matrix_extra_args = list(), rave_override_fn = rave_override_river, env_key = "Freshwater",
-         prod_cf = combined_cf, prod_eed = eed_boot, prod_haz = haz)
+         prod_cf = combined_cf_pooled, prod_eed = eed_boot_pooled, prod_haz = haz_pooled)
   } else {
     list(monitoring_df = monitoring_ocean, cpsd_fit = cpsd_fit_ocean_all, alpha_draws = alpha_ocean,
          tox_data_base = tox_data_ocean, tox_fixed = tox_fixed_ocean,
@@ -5313,7 +5500,7 @@ m13_propagate_one <- function(fit, L_meas_min, L_meas_max, monitoring_df, conc_c
 
 m13_river_rq <- m13_propagate_one(
   m13_river_fit, L_meas_min_use, L_meas_max_use, monitoring, "C_measured_pL",
-  haz, n_risk, cpsd_fit_all$a_psd, combined_cf, seed_base = 72001
+  haz_pooled, n_risk, cpsd_fit_all$a_psd, combined_cf_pooled, seed_base = 72001
 )
 m13_ocean_rq <- m13_propagate_one(
   m13_ocean_fit, L_meas_min_ocean, L_meas_max_ocean, monitoring_ocean, "C_measured_pL",
@@ -5944,8 +6131,8 @@ mss_river_tt <- dplyr::filter(mss_river, ERM == "Tissue Translocation")
 mss_ocean_fd <- dplyr::filter(mss_ocean, ERM == "Food Dilution")
 mss_ocean_tt <- dplyr::filter(mss_ocean, ERM == "Tissue Translocation")
 
-rcr_river_fd <- individual_species_rcr(eed_boot$q50,       mss_river_fd$median_EC)
-rcr_river_tt <- individual_species_rcr(eed_boot$q50,       mss_river_tt$median_EC)
+rcr_river_fd <- individual_species_rcr(eed_boot_pooled$q50,       mss_river_fd$median_EC)
+rcr_river_tt <- individual_species_rcr(eed_boot_pooled$q50,       mss_river_tt$median_EC)
 rcr_ocean_fd <- individual_species_rcr(eed_boot_ocean$q50, mss_ocean_fd$median_EC)
 rcr_ocean_tt <- individual_species_rcr(eed_boot_ocean$q50, mss_ocean_tt$median_EC)
 
@@ -6021,7 +6208,7 @@ cf_case_summary <- function(matrix_label, cpsd_fit, combined_cf_current,
 }
 
 cf_before_after_all <- dplyr::bind_rows(
-  cf_case_summary("River water", cpsd_fit_all, combined_cf, L_meas_min_use, L_meas_max_use, alpha),
+  cf_case_summary("River water", cpsd_fit_all, combined_cf_pooled, L_meas_min_use, L_meas_max_use, alpha),
   cf_case_summary("Sediment", cpsd_fit_sed_all, combined_cf_sed, L_meas_min_use_sed, L_meas_max_use_sed, alpha_sed),
   cf_case_summary("Ocean water", cpsd_fit_ocean_all, combined_cf_ocean, L_meas_min_ocean, L_meas_max_ocean, alpha_ocean)
 )
@@ -6059,9 +6246,9 @@ cf_before_after_river <- tibble::tibble(
   slope_median = c(median(legacy_cf_river * 0 + alpha_dist(mu = cpsd_fit_all$a_cpsd, sd = cpsd_fit_all$se_a_cpsd, n = n_mc, structural_sd = 0)),
                    median(alpha_fit_only),
                    median(alpha)),
-  CF_p05 = c(quantile(legacy_cf_river, 0.05), quantile(fit_only_cf_river, 0.05), quantile(combined_cf, 0.05)),
-  CF_p50 = c(median(legacy_cf_river), median(fit_only_cf_river), median(combined_cf)),
-  CF_p95 = c(quantile(legacy_cf_river, 0.95), quantile(fit_only_cf_river, 0.95), quantile(combined_cf, 0.95))
+  CF_p05 = c(quantile(legacy_cf_river, 0.05), quantile(fit_only_cf_river, 0.05), quantile(combined_cf_pooled, 0.05)),
+  CF_p50 = c(median(legacy_cf_river), median(fit_only_cf_river), median(combined_cf_pooled)),
+  CF_p95 = c(quantile(legacy_cf_river, 0.95), quantile(fit_only_cf_river, 0.95), quantile(combined_cf_pooled, 0.95))
 )
 knitr::kable(cf_before_after_river, digits = 3, caption = "SPEC 1 before/after river correction factor convention check")
 ```
@@ -6074,7 +6261,7 @@ The Section 13 table above (SPEC 1, from the prior revision) shows that the **le
 ```{r spec1b-decomposition-table}
 spec1b_decomposition <- dplyr::bind_rows(
   dplyr::mutate(risk_summary_legacy_river, Matrix = "River water", Case = "Legacy cumulative a.v/a.sa"),
-  dplyr::mutate(risk_summary,               Matrix = "River water", Case = "Corrected differential a.v/a.sa"),
+  dplyr::mutate(risk_summary_pooled,        Matrix = "River water", Case = "Corrected differential a.v/a.sa"),
   dplyr::mutate(risk_summary_legacy_sed,    Matrix = "Sediment",    Case = "Legacy cumulative a.v/a.sa"),
   dplyr::mutate(risk_summary_sed,           Matrix = "Sediment",    Case = "Corrected differential a.v/a.sa"),
   dplyr::mutate(risk_summary_legacy_ocean,  Matrix = "Ocean water", Case = "Legacy cumulative a.v/a.sa"),
@@ -6126,7 +6313,7 @@ C_sample_median_legacycf <- C_legacycf_draws |>
   dplyr::summarise(C_corr_med = stats::median(C_corrected), .groups = "drop")
 eed_boot_legacycf_river <- bootstrap_eed(C_sample_median_legacycf$C_corr_med, n_boot = n_boot, probs = c(0.5, 0.95))
 set.seed(9307)
-risk_summary_legacycf_river <- summarize_rq(draw_rq_mc1d(haz, eed_boot_legacycf_river$q50, n_risk = n_risk))
+risk_summary_legacycf_river <- summarize_rq(draw_rq_mc1d(haz_pooled, eed_boot_legacycf_river$q50, n_risk = n_risk))
 ```
 
 ```{r spec3b-decomposition-table}
@@ -6136,7 +6323,7 @@ risk_summary_legacycf_river <- summarize_rq(draw_rq_mc1d(haz, eed_boot_legacycf_
 # since SPEC 3c found the prior Food-Dilution-only table masked how the a.sa
 # reversion affects the surface-area-weighted Tissue Translocation ERM.
 rq_decomp_river_raw <- dplyr::bind_rows(
-  dplyr::mutate(risk_summary,                        Contribution_reverted = "None (fully corrected, this revision)"),
+  dplyr::mutate(risk_summary_pooled,                 Contribution_reverted = "None (fully corrected, this revision)"),
   dplyr::mutate(risk_summary_legacycf_river,         Contribution_reverted = "(i) Exposure correction factor -> legacy cumulative-as-differential"),
   dplyr::mutate(risk_summary_legacy_alpha_river,      Contribution_reverted = "(ii) Hazard length-slope alignment -> legacy cumulative-as-differential"),
   dplyr::mutate(risk_summary_legacy_river,           Contribution_reverted = "(iii) Hazard volume+area+mass-slope alignment -> legacy cumulative (SPEC 1b)"),
@@ -7268,4 +7455,60 @@ build_alpha_forest_variant("Marine",     "ocean")
 
 ```{r session-info, echo=FALSE}
 sessionInfo()
+```
+
+# Appendix M. Manuscript parameter export (single source of truth)
+
+Every PSD, rescaling and risk number quoted in the Savoca et al. manuscript and SI is written here to `data_output/psd_rescaling_params.json` (and a flat CSV), at full precision, from the objects computed above. Rounding happens only in the manuscript-generation step. W1 values use the 50–500 µm sieve window and river-specific slopes, which are the benchmark-section conventions the manuscript Methods describe.
+
+```{r manuscript-params-export}
+.nb <- function(f) tryCatch(stats::nobs(f$fit), error = function(e) NA_integer_)
+fit_row <- function(f) list(a_cum = f$a_cpsd, a_cum_SE = f$se_a_cpsd, a_diff = f$a_psd, a_diff_SE = f$se_a_psd,
+                            CI95_a_diff = f$a_psd + c(-1.96, 1.96) * f$se_a_psd, R2 = f$r2, n_bins = .nb(f),
+                            window_LOD_um = c(f$lower_lod_um, f$upper_lod_um))
+pw_row <- dplyr::filter(critical_piecewise_tbl, Matrix == "River water")
+cf_sieve <- function(a) correction_factor(a, 50, 500, 1, 5000, slope_convention = "differential")
+rivm_v <- utils::read.csv("data_output/rivm_benchmark_text_values_v1.csv", check.names = FALSE)
+w1 <- function(key) { r <- rivm_v[rivm_v$key == key, ]; list(median_L = r$value / 1000, q25_L = r$q25 / 1000, q75_L = r$q75 / 1000, n = r$n) }
+rs_row <- function(x, erm) { r <- dplyr::filter(x, ERM == erm, HCx == 5); list(RQ_p50 = r$RQ_p50, RQ_p95 = r$RQ_p95, P_exceed = r$P_exceed) }
+
+psd_params <- list(
+  meta = list(run_budget = run_budget, n_boot = n_boot, n_mc = n_mc, slope_application = slope_application,
+              slope_structural_sd = slope_structural_sd, monitoring_file = basename(monitoring_file),
+              rendered = format(Sys.time(), "%Y-%m-%d %H:%M %Z")),
+  monitoring = as.list(river_conc_summary),
+  pooled = fit_row(cpsd_fit_all),
+  fragment = fit_row(cpsd_fit_frag),
+  fiber = fit_row(cpsd_fit_fiber),
+  by_river = lapply(cpsd_fits_by_loc, fit_row),
+  heterogeneity = river_slope_heterogeneity[c("Q", "df", "p_value", "i2", "weighted_mean")],
+  two_segment = list(breakpoint_um = pw_row$piecewise_break_um,
+                     a_fine_cum = pw_row$piecewise_low_a_cpsd, a_coarse_cum = pw_row$piecewise_high_a_cpsd,
+                     a_fine_diff = pw_row$piecewise_low_a_cpsd - 1, a_coarse_diff = pw_row$piecewise_high_a_cpsd - 1,
+                     dAIC = pw_row$piecewise_delta_aic),
+  sieve_window = list(
+    CF_single_pooled = cf_sieve(cpsd_fit_all$a_psd),
+    CF_single_pooled_CI95 = cf_sieve(cpsd_fit_all$a_psd + c(1.96, -1.96) * cpsd_fit_all$se_a_psd),
+    CF_single_by_river = lapply(cpsd_fits_by_loc, function(f) cf_sieve(f$a_psd)),
+    CF_two = correction_factor_piecewise(pw_row$piecewise_low_a_cpsd, pw_row$piecewise_high_a_cpsd, pw_row$piecewise_break_um,
+                                         50, 500, 1, 5000, slope_convention = "cumulative"),
+    C_W2 = w1("ours_allrivers_river_W2"),
+    C_W1_river = w1("ours_allrivers_river_W1"),
+    C_W1_single_pooled = w1("ours_allrivers_pooled_W1"),
+    C_W1_two = w1("ours_allrivers_piecewise_W1")),
+  risk_headline = list(food_dilution_HC5 = rs_row(risk_summary, "Food Dilution"),
+                       tissue_translocation_HC5 = rs_row(risk_summary, "Tissue Translocation")),
+  risk_by_river = if (!is.null(risk_summary_by_river)) lapply(split(risk_summary_by_river, risk_summary_by_river$river), function(x)
+    list(food_dilution_HC5 = rs_row(x, "Food Dilution"), tissue_translocation_HC5 = rs_row(x, "Tissue Translocation"))) else NULL,
+  risk_pooled_slope = list(food_dilution_HC5 = rs_row(risk_summary_pooled, "Food Dilution"),
+                           tissue_translocation_HC5 = rs_row(risk_summary_pooled, "Tissue Translocation")),
+  eed_river_q50_median_L = stats::median(eed_boot$q50)
+)
+psd_params$sieve_window$ratio_W1_river_over_two <- psd_params$sieve_window$C_W1_river$median_L / psd_params$sieve_window$C_W1_two$median_L
+
+jsonlite::write_json(psd_params, "data_output/psd_rescaling_params.json", auto_unbox = TRUE, digits = NA, pretty = TRUE)
+flat <- unlist(psd_params)
+utils::write.csv(data.frame(key = names(flat), value = unname(flat)), "data_output/psd_rescaling_params.csv", row.names = FALSE)
+writeLines(utils::capture.output(utils::sessionInfo()), "data_output/session_info.txt")
+cat("Exported", length(flat), "values to data_output/psd_rescaling_params.json\n")
 ```

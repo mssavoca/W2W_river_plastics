@@ -954,11 +954,13 @@ rivm_bootstrap_pipeline_objects <- function(proj_root, n_mc = 20000, slope_struc
     lazyLoad(sub("[.]rdb$", "", f), envir = envir)
   }
   assign("monitoring",
-         readRDS(file.path(proj_root, "data_input", "Part_dets_summ.rds")) |>
+         readRDS(file.path(proj_root, "data_input", "Part_dets_summ_final.rds")) |>
+           dplyr::mutate(Client_ID_MSSupdate = dplyr::recode(.data$Client_ID_MSSupdate,
+                                                             "SRR20240205SS_2" = "SRR20240205SS")) |>
            dplyr::filter(.data$sample_type == "river water", .data$material_simple == "plastic",
                          .data$sample_or_blank == "sample") |>
-           dplyr::transmute(sample_id = .data$Client_ID_MSSupdate, river = .data$sample_location,
-                            C_measured_pL = .data$extrap_conc_PPL),
+           dplyr::group_by(sample_id = .data$Client_ID_MSSupdate, river = .data$sample_location) |>
+           dplyr::summarise(C_measured_pL = sum(.data$extrap_conc_PPL), .groups = "drop"),
          envir = envir)
   fit <- get("cpsd_fit_all", envir = envir)
   set.seed(8001)

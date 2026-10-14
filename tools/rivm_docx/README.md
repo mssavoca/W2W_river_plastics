@@ -10,3 +10,11 @@ python tools/rivm_docx/edit_si.py   si_merged.docx   si_edit.docx
 ```
 
 Outputs used for the v1 drafts: `docs/*_v1_sc_rivm.docx`.
+
+## Inputs (all generated, never hand-typed)
+
+- `data_output/rivm_benchmark_*_v1.csv`, written by `R/rivm_benchmark.qmd` (the Dutch benchmark).
+- `data_output/psd_rescaling_params.json`, written by Appendix M of `R/probabilistic_risk_characterization.qmd`. It holds the PSD slopes, heterogeneity, two-segment fit, sieve-window CFs, W1/W2 concentrations and headline risk.
+- `figures/*.png`. Regenerated pipeline figures are swapped into the drafts (width kept, aspect corrected), and each swap is flagged with a comment.
+
+Re-run the pipeline first, then both scripts, then the `comment.py` calls (comment ids 801-804 main, 811-818 SI).
