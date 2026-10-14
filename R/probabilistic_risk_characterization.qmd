@@ -1500,7 +1500,7 @@ mc2d_rq_density_plot
 
 Hoffman et al. (2026) show that vertical transport can make a sampled PSD deviate from a single power law, with apparent slopes differing from the underlying PSD by about two exponent units across a critical size. The following diagnostics are model-based sensitivities. They do not replace the production CF, but they show how much the Food Dilution and Tissue Translocation risk summaries move when the slope uncertainty is widened beyond OLS fit error and when surface/subsurface samples are analyzed separately.
 
-```{r hoffman-slope-uncertainty-sensitivity, cache=TRUE, cache.extra=n_boot}
+```{r hoffman-slope-uncertainty-sensitivity, cache=TRUE, cache.extra=list(n_boot, slope_application)}
 summarize_mc2d_hc5 <- function(x) {
   x |>
     dplyr::filter(HCx == 5) |>
@@ -1515,28 +1515,44 @@ summarize_mc2d_hc5 <- function(x) {
 
 slope_sd_grid <- c(0, slope_structural_sd, 0.5, 1.0)
 hoffman_slope_sensitivity <- dplyr::bind_rows(lapply(slope_sd_grid, function(sd_i) {
-  set.seed(1000 + as.integer(sd_i * 1000))
-  alpha_i <- alpha_dist(
-    mu = cpsd_fit_all$a_psd,
-    sd = cpsd_fit_all$se_a_psd,
-    n = 3000,
-    structural_sd = sd_i
-  )
-  cf_i <- correction_factor(
-    a = alpha_i,
-    L_meas_min = L_meas_min_use,
-    L_meas_max = L_meas_max_use,
-    L_tar_min = 1,
-    L_tar_max = 5000,
-    slope_convention = "differential"
-  )
+  if (use_river_slopes) {
+    # Widen each river's own slope uncertainty and apply it to that river's
+    # samples, in the river's own measured window (production convention).
+    alpha_r <- alpha_draws_by_group(cpsd_fits_by_loc, n = 3000, structural_sd = sd_i,
+                                    seed = 1000 + as.integer(sd_i * 1000))
+    cf_r <- stats::setNames(lapply(names(alpha_r), function(r) {
+      w <- river_corr$L_meas_by_group[river_corr$L_meas_by_group$group == r, ]
+      correction_factor(alpha_r[[r]], w$L_meas_min, w$L_meas_max, 1, 5000, slope_convention = "differential")
+    }), names(alpha_r))
+    n_rows <- table(monitoring$river)
+    cf_i <- unlist(lapply(names(cf_r), function(r) rep_len(cf_r[[r]], 3000 * n_rows[[r]] / sum(n_rows))))
+  } else {
+    set.seed(1000 + as.integer(sd_i * 1000))
+    alpha_i <- alpha_dist(
+      mu = cpsd_fit_all$a_psd,
+      sd = cpsd_fit_all$se_a_psd,
+      n = 3000,
+      structural_sd = sd_i
+    )
+    cf_r <- NULL
+    cf_i <- correction_factor(
+      a = alpha_i,
+      L_meas_min = L_meas_min_use,
+      L_meas_max = L_meas_max_use,
+      L_tar_min = 1,
+      L_tar_max = 5000,
+      slope_convention = "differential"
+    )
+  }
   mc_i <- mc2d_risk(
     monitoring_df = monitoring,
     combined_cf = cf_i,
     haz_df = haz,
     n_uncertainty = 100,
     n_variability = 500,
-    seed = 2000 + as.integer(sd_i * 1000)
+    seed = 2000 + as.integer(sd_i * 1000),
+    cf_by_group = cf_r,
+    group_col = "river"
   )
   summarize_mc2d_hc5(mc_i) |>
     dplyr::mutate(

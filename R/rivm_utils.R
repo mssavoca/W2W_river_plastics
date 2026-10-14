@@ -35,6 +35,9 @@ RIVM_INPUT_FILES <- c(
 # Okabe-Ito palette; dataset colours used in every benchmark figure.
 OKABE_ITO <- c("#E69F00", "#56B4E9", "#009E73", "#F0E442",
                "#0072B2", "#D55E00", "#CC79A7", "#000000")
+# This study's primary slope application for the benchmark: river-specific
+# single slopes ("river"); "pooled" and "piecewise" are sensitivities.
+RIVM_OURS_PRIMARY <- "river"
 RIVM_DATASET_COLS <- c("Dutch rivers" = "#0072B2", "This study" = "#D55E00")
 RIVM_TECH_SHAPES  <- c("FTIR" = 21, "LDIR" = 24, "µFTIR" = 22)
 
@@ -630,7 +633,7 @@ plot_rivm_fig7 <- function(samples_tbl, base_size = 10) {
   prim <- samples_tbl |>
     dplyr::filter(.data$scenario == "primary",
                   (.data$dataset == "Dutch rivers" & .data$method_variant %in% c("published", "published_rivm")) |
-                    (.data$dataset == "This study" & .data$method_variant %in% c("pooled", "piecewise")))
+                    (.data$dataset == "This study" & .data$method_variant %in% c(RIVM_OURS_PRIMARY, "piecewise")))
   n_tbl <- prim |> dplyr::distinct(.data$group, .data$sample_id) |> dplyr::count(.data$group)
   lvl <- .rivm_row_order(unique(prim$group[prim$dataset == "Dutch rivers"]),
                          unique(prim$group[prim$dataset == "This study"]))
@@ -650,7 +653,8 @@ plot_rivm_fig7 <- function(samples_tbl, base_size = 10) {
     dplyr::mutate(
       variant_lab = dplyr::case_when(
         .data$dataset == "This study" & .data$window == "W2" ~ "",
-        .data$method_variant == "pooled" ~ " – single slope",
+        .data$method_variant == "pooled" ~ " – pooled slope",
+        .data$method_variant == "river" ~ " – river slope",
         .data$method_variant == "piecewise" ~ " – two-segment",
         TRUE ~ ""),
       slope_lab = dplyr::case_when(
@@ -665,7 +669,7 @@ plot_rivm_fig7 <- function(samples_tbl, base_size = 10) {
     # Our W2 rows are the measurement itself; keep a single row (pooled == piecewise == measured).
     if (win == "W2") d <- dplyr::filter(d, !(.data$dataset == "This study" & .data$method_variant == "piecewise"))
     row_lvls <- d |> dplyr::distinct(.data$group, .data$method_variant, .data$row) |>
-      dplyr::arrange(.data$group, .data$method_variant != "pooled") |> dplyr::pull(.data$row) |> unique()
+      dplyr::arrange(.data$group, .data$method_variant != RIVM_OURS_PRIMARY) |> dplyr::pull(.data$row) |> unique()
     d <- dplyr::mutate(d, row = factor(.data$row, levels = rev(row_lvls)))
     samp <- dplyr::filter(d, .data$value_type != "published")
     pubr <- dplyr::filter(d, .data$value_type == "published")
@@ -757,11 +761,12 @@ rivm_mpsizebase_ref <- function() {
 plot_rivm_ecdf <- function(samples_tbl, base_size = 10) {
   d <- samples_tbl |>
     dplyr::filter(.data$scenario == "primary",
-                  .data$method_variant %in% c("published", "harmonised", "pooled")) |>
+                  (.data$dataset == "Dutch rivers" & .data$method_variant %in% c("published", "harmonised")) |
+                    (.data$dataset == "This study" & .data$method_variant == RIVM_OURS_PRIMARY)) |>
     dplyr::mutate(uncertainty = dplyr::case_when(
       .data$method_variant == "published" ~ "RIVM method (published)",
       .data$method_variant == "harmonised" ~ "This study's method (harmonised)",
-      TRUE ~ "This study (pooled slope)"),
+      TRUE ~ "This study (river-specific slopes)"),
       window = factor(.data$window, levels = c("W2", "W1"), labels = rivm_windows()$window_label))
   ggplot2::ggplot(d, ggplot2::aes(x = .data$conc_p50, colour = .data$group, linetype = .data$uncertainty)) +
     ggplot2::stat_ecdf(geom = "step", linewidth = 0.5) +
@@ -771,7 +776,7 @@ plot_rivm_ecdf <- function(samples_tbl, base_size = 10) {
     ggplot2::scale_linetype_manual("Uncertainty method",
                                    values = c("RIVM method (published)" = "solid",
                                               "This study's method (harmonised)" = "dashed",
-                                              "This study (pooled slope)" = "solid")) +
+                                              "This study (river-specific slopes)" = "solid")) +
     ggplot2::labs(y = "Cumulative proportion of samples") +
     rivm_theme(base_size) +
     ggplot2::theme(panel.grid.major.y = ggplot2::element_line(colour = "grey90"), legend.box = "vertical")
@@ -807,8 +812,8 @@ plot_rivm_sensitivity <- function(groups_tbl, base_size = 10) {
              dplyr::mutate(method = ifelse(.data$method_variant == "published", "RIVM method (published)", "harmonised (this study's method)")),
            "(3) Uncertainty method", "method")
   p4 <- pr(dplyr::filter(g, .data$dataset == "This study", .data$window == "W1") |>
-             dplyr::mutate(slope_model = factor(.data$method_variant, c("pooled", "river", "piecewise"),
-                                                c("pooled single slope", "river-specific slope", "pooled two-segment"))),
+             dplyr::mutate(slope_model = factor(.data$method_variant, c("river", "pooled", "piecewise"),
+                                                c("river-specific slope (primary)", "pooled single slope", "pooled two-segment"))),
            "(4) This study: slope model", "slope_model")
   patchwork::wrap_plots(p1, p2, p3, p4, ncol = 2)
 }
@@ -888,7 +893,7 @@ rivm_manuscript_values <- function(samples_tbl, groups_tbl, slopes_tbl) {
   conc <- groups_tbl |>
     dplyr::filter(.data$scenario == "primary",
                   (.data$dataset == "Dutch rivers" & .data$method_variant %in% c("published", "harmonised")) |
-                    (.data$dataset == "This study" & .data$method_variant %in% c("pooled", "piecewise"))) |>
+                    (.data$dataset == "This study" & .data$method_variant %in% c("river", "pooled", "piecewise"))) |>
     dplyr::transmute(key = paste0(ifelse(.data$dataset == "This study", "ours_", "dutch_"),
                                   key(.data$group), "_", .data$method_variant, "_", .data$window),
                      value = .data$median, q25 = .data$q25, q75 = .data$q75, n = .data$n,
@@ -896,7 +901,7 @@ rivm_manuscript_values <- function(samples_tbl, groups_tbl, slopes_tbl) {
   # This study, all four rivers pooled across samples.
   ours_all <- samples_tbl |>
     dplyr::filter(.data$dataset == "This study", .data$scenario == "primary",
-                  .data$method_variant %in% c("pooled", "piecewise")) |>
+                  .data$method_variant %in% c("river", "pooled", "piecewise")) |>
     dplyr::group_by(.data$method_variant, .data$window) |>
     dplyr::summarise(value = stats::median(.data$conc_p50), q25 = stats::quantile(.data$conc_p50, .25),
                      q75 = stats::quantile(.data$conc_p50, .75), n = dplyr::n(),
@@ -985,7 +990,7 @@ rivm_figure_captions <- function(vals) {
     fig7 = paste(
       "Rescaled microplastic concentrations in Dutch rivers and the four Monterey Bay rivers, (a) rescaled to 50–500 µm (W2, primary: interior to every measured range) and (b) extrapolated to 1–5000 µm (W1).",
       "Open symbols, per-sample median; thin bars, per-sample 5–95% Monte Carlo interval; thick point ranges, median and interquartile range of the per-sample medians for each water body; symbol shape, analytical technique; colour, dataset. Row labels give the differential slope a used to rescale that row (two-segment model: fine | coarse segment) and the number of samples; this study's W2 rows are measurements, so the river-specific fitted slope is shown there for reference.",
-      "Value types: Dutch W2 and W1, reconstructed here with the RIVM uncertainty method (triangular α and ±10% size limits); “+”, RIVM's own published per-sample medians (W1 only); this study W2, measured (50–500 µm sieve fraction, CF = 1); this study W1, reconstructed from the pooled single slope and, separately, the pooled two-segment model.",
+      "Value types: Dutch W2 and W1, reconstructed here with the RIVM uncertainty method (triangular α and ±10% size limits); “+”, RIVM's own published per-sample medians (W1 only); this study W2, measured (50–500 µm sieve fraction, CF = 1); this study W1, reconstructed from each river's own single slope (primary) and, separately, the pooled two-segment model.",
       "Dutch data have no two-segment fit, so only our data are shown under both models. Dutch FTIR slopes were fitted above xmin ≈ 170–270 µm but are applied down to 20 µm; W1 differences are dominated by slope and should be read as secondary.",
       "Dommel combines Mintenig et al. (2020) and Mintenig et al. (2025).",
       rivm_caption_common()),
@@ -997,15 +1002,15 @@ rivm_figure_captions <- function(vals) {
       rivm_caption_common()),
     figSA = paste(
       "Empirical cumulative distributions of per-sample median rescaled concentrations by water body for W2 (50–500 µm) and W1 (1–5000 µm).",
-      "Dutch: solid, RIVM uncertainty method; dashed, this study's harmonised method (truncated-normal slope with structural SD, fixed size limits); both reconstructed. This study: pooled single slope (W2 measured; W1 reconstructed).",
+      "Dutch: solid, RIVM uncertainty method; dashed, this study's harmonised method (truncated-normal slope with structural SD, fixed size limits); both reconstructed. This study: river-specific single slopes (W2 measured; W1 reconstructed).",
       rivm_caption_common()),
     figSB = paste(
       "Sensitivity of water-body medians (points) and interquartile ranges (bars) of per-sample medians: (1) Dutch totals as reported versus excluding rubber (Mintenig: “Rubbers”; Mughini-Gras: isoprene; Mintenig 2025: EPDM rubber), since this study's polymer library has no rubber class;",
       "(2) LDIR lower size limit 10 µm (sample metadata) versus 20 µm (RIVM report text); (3) RIVM versus harmonised uncertainty method;",
-      "(4) this study's pooled single slope, river-specific slopes and pooled two-segment model (W1). All Dutch values reconstructed; this study W2 measured, W1 reconstructed.",
+      "(4) this study's river-specific slopes (primary), pooled single slope and pooled two-segment model (W1). All Dutch values reconstructed; this study W2 measured, W1 reconstructed.",
       rivm_caption_common()),
     figSC = paste(
-      sprintf("Correction factors to 1–5000 µm (median and 5–95%%) versus differential slope. Dutch per-sample factors span %s–%s (RIVM report: 46–440; shaded band); this study's factors (50–500 µm sieve window) are %s for the pooled slope and %s for the pooled two-segment model, with river-specific slopes shown separately.",
+      sprintf("Correction factors to 1–5000 µm (median and 5–95%%) versus differential slope. Dutch per-sample factors span %s–%s (RIVM report: 46–440; shaded band); this study's factors (50–500 µm sieve window) use each river's own slope (primary; labelled by river), with the pooled single slope (%s) and pooled two-segment model (%s) for reference.",
               v("cf_dutch_W1_min"), v("cf_dutch_W1_max"), v("cf_ours_pooled_W1"), v("cf_ours_piecewise_W1")),
       "All values reconstructed.",
       rivm_caption_common())
@@ -1016,12 +1021,12 @@ rivm_figure_captions <- function(vals) {
 #'
 #' Rescaled columns: median of per-sample medians [lowest per-sample 5th
 #' percentile - highest per-sample 95th percentile], primary variant (Dutch:
-#' RIVM method; this study: pooled single slope).
+#' RIVM method; this study: river-specific single slopes).
 rivm_si_table <- function(samples_tbl, slopes_tbl) {
   prim <- samples_tbl |>
     dplyr::filter(.data$scenario == "primary",
                   (.data$dataset == "Dutch rivers" & .data$method_variant == "published") |
-                    (.data$dataset == "This study" & .data$method_variant == "pooled"))
+                    (.data$dataset == "This study" & .data$method_variant == RIVM_OURS_PRIMARY))
   resc <- prim |>
     dplyr::group_by(.data$dataset, .data$study, .data$river, .data$technique, .data$window) |>
     dplyr::summarise(txt = sprintf("%s [%s–%s]", .fmt_n(stats::median(.data$conc_p50)),
@@ -1041,14 +1046,13 @@ rivm_si_table <- function(samples_tbl, slopes_tbl) {
                      slope = sprintf("%s [%s, %s]", .fmt_slope(.data$a), .fmt_slope(.data$ci_lo), .fmt_slope(.data$ci_hi)),
                      fit_window = .data$fit_window)
   ours_sl <- slopes_tbl |>
-    dplyr::filter(.data$label == "all (pooled)") |>
-    dplyr::transmute(slope = sprintf("%s [%s, %s] (pooled)", .fmt_slope(.data$a), .fmt_slope(.data$ci_lo), .fmt_slope(.data$ci_hi)),
+    dplyr::filter(.data$facet == "This study: by river") |>
+    dplyr::transmute(technique = .data$technique, river = .data$label,
+                     slope = sprintf("%s [%s, %s]", .fmt_slope(.data$a), .fmt_slope(.data$ci_lo), .fmt_slope(.data$ci_hi)),
                      fit_window = .data$fit_window)
   out <- base |>
-    dplyr::left_join(sl, by = c("technique", "river")) |>
+    dplyr::left_join(dplyr::bind_rows(sl, ours_sl), by = c("technique", "river")) |>
     dplyr::left_join(resc, by = c("dataset", "study", "river", "technique"))
-  hit <- out$dataset == "This study"
-  out$slope[hit] <- ours_sl$slope; out$fit_window[hit] <- ours_sl$fit_window
   out |>
     dplyr::transmute(Study = .data$study, `Water body` = .data$river, n = .data$n,
                      Technique = .data$technique,

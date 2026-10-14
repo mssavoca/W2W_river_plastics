@@ -31,7 +31,7 @@ CITE_MAIN = {
 
 # ── Checks behind every interpretive word (fail loudly rather than overstate) ──
 import vals
-ours = vals.VALS["ours_allrivers_pooled_W2"]
+ours = vals.VALS["ours_allrivers_river_W2"]
 ours_q25, ours_q75 = float(ours["q25"]), float(ours["q75"])
 for g in ("Meuse (FTIR)", "Dommel (FTIR)"):
     gg = group(g, "published", "W2")
@@ -86,12 +86,12 @@ conc = [
     "Rescaled to our 50–500 µm sieve window, which requires only interior rescaling for every dataset, Dutch river water measured over 20–5000 µm (FTIR) or 10–500 µm (LDIR) had medians of ",
     f("dutch_Meuse_published_W2"), " (Meuse), ", f("dutch_Dommel_published_W2"), " (Dommel), ",
     f("dutch_Rhine_published_W2"), " (Rhine) and ", f("dutch_Lekcanal_published_W2"),
-    " (Lek canal) particles m⁻³, versus ", f("ours_allrivers_pooled_W2"), " particles m⁻³ measured here (Fig. 7a). "
+    " (Lek canal) particles m⁻³, versus ", f("ours_allrivers_river_W2"), " particles m⁻³ measured here (Fig. 7a). "
     "The interquartile range of our samples overlapped those of the FTIR-measured Meuse and Dommel, whereas every LDIR sample from the Rhine and Lek canal exceeded our upper quartile; "
     "with two LDIR samples per water body and different analytical techniques, these differences should not be generalized. "
     "Extrapolated to 1–5000 µm, Dutch medians ranged from ", headline("dutch_%s_published_W1" % key_of[w1_min_g]), " (", name_of[w1_min_g], ") to ",
     headline("dutch_%s_published_W1" % key_of[w1_max_g]), " (", name_of[w1_max_g], ") particles m⁻³, versus ",
-    headline("ours_allrivers_pooled_W1"), " under our single-slope model and ", headline("ours_allrivers_piecewise_W1"),
+    headline("ours_allrivers_river_W1"), " with each river’s own single slope (", headline("ours_allrivers_pooled_W1"), " with one pooled slope) and ", headline("ours_allrivers_piecewise_W1"),
     " under the two-segment model (Fig. 7b). These W1 differences are dominated by the fitted slopes, which were estimated with different methods and fitting windows, "
     "and by differences between large perennial and small episodic rivers; they should therefore be read as model-based contrasts rather than differences in true abundance "
     "(Supporting Information, Table S-A and Figs. S-A to S-C).",
