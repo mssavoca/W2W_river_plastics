@@ -113,7 +113,26 @@ How each ocean mechanism carries over to rivers:
 1. **Sample selection: small for rivers.** 56 of 57 river samples have particle rows; only SRR20250303SD (47 particles) is missing. Rivers do not have the ocean's ×7.6 selection bias, but the gap would reappear for any river samples added in 2025 without an updated export. → Q10
 2. **Rebuild basis and blanks: ×2.0.** QC-passing rows exceed the summary counts in every river (median ratio 1.65 for San Lorenzo to 2.29 for Carmel). Blanks matter more for rivers than the ratio suggests: the median field blank holds 11 QC-passing particles, 31% of the median river sample (35), and 22 of 57 river samples hold no more than twice the median blank. Without blank correction of the particle rows, low-concentration river samples are mostly contamination. → Q3, Q4, Q11
 3. **Anchor and extrapolation: ×2.1.** In every river the LOD window holds more particles than the fitted power law predicts: 1.45 times (San Lorenzo), 2.15 (Carmel), 3.2 (Salinas) and 4.1 (Pajaro). The measured size distribution is flatter than the fitted slope below about 150 µm, the pattern expected if particles of 50–150 µm are under-detected or lost in processing. → Q6, Q14
-4. **River-specific: steep slopes.** Even before the rebuild and anchor steps (step A), Carmel and San Lorenzo match the Dutch FTIR rivers (1–2 times), but Salinas is 5–9 times and Pajaro 40–80 times higher. That is because Pajaro (−3.46) and Salinas (−3.04) have much steeper fitted slopes than the Dutch FTIR rivers (about −2.3). Rescaling from 50–500 µm multiplies by about 15,000 for Pajaro and 3,000 for Salinas, against 45–430 for the Dutch data. A steep fitted slope can be real, but it can also come from incomplete detection near the bottom of the fit window or from the fit window itself, so the measurement definitions and detection floor matter here too. → Q14
+4. **River-specific: steep slopes.** Even before the rebuild and anchor steps (step A), Carmel and San Lorenzo match the Dutch FTIR rivers (1–2 times), but Salinas is 5–9 times and Pajaro 40–80 times higher. That is because Pajaro (−3.46) and Salinas (−3.04) have much steeper fitted slopes than the Dutch FTIR rivers (about −2.3). Rescaling from 50–500 µm multiplies by about 15,000 for Pajaro and 3,000 for Salinas, against 45–430 for the Dutch data. Section 3.3 shows that most of this steepness comes from too few large particles above the fit window, not from the rivers themselves. → Q6, Q14
+
+### 3.3 Too few large particles steepens the fitted slopes
+
+![Figure 9](figs/fig9_large_particle_deficit.png)
+
+*Figure 9. Particles at or above each length (solid) against the power law fitted only to the particles inside each river's fit window (dashed). In Carmel, Pajaro and Salinas the observed curve falls away from the power law near the 500 µm sieve boundary: there are only 36–47% as many particles above the window as expected. San Lorenzo, whose window ends at 330 µm, has the expected number.*
+
+The steep river slopes come mostly from a shortage of large particles, not from the rivers or from contamination. The Segur et al. (2026) C-PSD method regresses the number of particles at or above each size. Every point in the fit window therefore also counts the particles above the window, and a shortage there bends the top of the window down and steepens the slope. Segur et al. describe this right-tail "slump" and tie the upper detection limit to the sampled volume and the fraction of the filter analysed.
+
+| River | C-PSD slope (production) | Maximum-likelihood slope, same window | Particles above window, observed vs expected |
+|---|---|---|---|
+| Carmel | −2.61 | −2.08 | 47% |
+| Pajaro | −3.46 | −2.81 | 38% |
+| Salinas | −3.04 | −2.42 | 36% |
+| San Lorenzo | −2.40 | −2.44 | 108% |
+
+The power-law fitting literature recommends maximum likelihood on the individual measurements, bounded at both ends when the upper tail is incomplete. On that basis the C-PSD slopes for Carmel, Pajaro and Salinas are too steep, which inflates the extrapolated concentrations about 7–13-fold. The report now includes this comparison, a simulation of each estimator and a risk sensitivity (Section 13.7). Subtracting the expected blank particles changes the slopes only slightly (+0.06 to +0.30), so contamination is not the cause.
+
+Whether the shortage is real or a counting artefact is a question for the lab: were the 212–500 µm and >500 µm sieve fractions aliquoted, imaged or counted differently from the <212 µm fraction? → Q6, Q7
 
 In short, the river and ocean overestimates share their causes: particle rows that are not blank-corrected and do not match the summary counts, a flatter-than-power-law distribution at the small end, and steep slopes that put almost the whole 1–5000 µm count below 10 µm. The ocean adds a sample-selection bias that rivers largely escape.
 
@@ -153,6 +172,7 @@ In short, the river and ocean overestimates share their causes: particle rows th
 **Q6 ([#10](https://github.com/mssavoca/W2W_river_plastics/issues/10)). How do the sieve fractions relate to the reported 50–500 µm range?**
 - *We see:* Figure 7. The &gt;500 µm fraction is in the µFTIR file; `size_class` labels use two encodings ("um" and "µm").
 - *Question:* Is the &gt;500 µm µFTIR fraction counted in the reported concentration, in the visual 500–5000 µm data, or both? Were the fractions analysed with different aliquot proportions?
+- *Also (large-particle shortage, Section 3.3):* In three rivers there are only 36–47% as many particles above about 500 µm as the in-window power law predicts. Were the 212–500 µm and &gt;500 µm fractions given a smaller aliquot than the &lt;212 µm fraction? Was the whole &gt;500 µm fraction imaged by µFTIR, or only part of it (or only particles not picked for the stereomicroscope analysis)? Could large particles have been split across filters or lost in handling?
 - *Resolves it:* Which fractions feed each reported number.
 
 ### Aliquots, runs and volumes

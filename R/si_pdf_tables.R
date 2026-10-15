@@ -1,7 +1,7 @@
 # si_pdf_tables.R
 # Supplementary-information tables for every particle-size PDF fit in
 # probabilistic_risk_characterization.qmd, formatted after Kooi et al. (2021,
-# Water Research 198:117011) SI Tables S3 (particle properties) and S4 (fitted
+# Water Research 202:117429) SI Tables S3 (particle properties) and S4 (fitted
 # minimum values and power-law exponents). Read-only: every function here
 # summarizes raw particles or fit objects already produced in the .qmd; the
 # only fitting done is the deterministic depth-stratified length refit in
@@ -448,7 +448,7 @@ si_write_docx <- function(path, props_river, props_ocean_sed, fits_river, fits_o
   doc <- heading(doc, "Supplementary Tables S5–S11: Particle properties, particle-size distribution fits, and concentration rescaling", 16)
   doc <- para(doc, txt(paste0(
     "These tables report the measured particle properties, and the fitted parameters and fit statistics, for every particle-size ",
-    "probability distribution (PDF) fitted in this work. They are formatted after Kooi et al. (2021, Water Research 198:117011, SI Tables S3–S4). ",
+    "probability distribution (PDF) fitted in this work. They are formatted after Kooi et al. (2021, Water Research 202:117429, SI Tables S3–S4). ",
     "River water (freshwater; n = ", fmt_n(n_river), " particles) is reported in Tables S5 and S7. Ocean water (n = ", fmt_n(n_ocean),
     ") and beach sand (n = ", fmt_n(n_sed), ") are reported together in Tables S6 and S8. Table S9 reports sample-level concentration rescaling; Tables S10 and S11 summarize those values by matrix and by matrix plus location, respectively. Every particle was identified by µFTIR as ",
     "plastic with a confident spectral match; non-plastic (mineral, organic) particles were excluded before any summary or fit.")))

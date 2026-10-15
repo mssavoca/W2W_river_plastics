@@ -4465,6 +4465,9 @@ rq_bounding_plot
 ```{r mpsizebase-child, child = file.path(proj_root, "R", "mpsizebase_comparison.qmd")}
 ```
 
+```{r slope-method-child, child = file.path(proj_root, "R", "slope_method_comparison.qmd")}
+```
+
 
 # 14. Combined risk quotient comparison across matrices
 
@@ -7073,7 +7076,7 @@ knitr::kable(table_s3_species_ec, caption = "Table S3: SSD species membership an
 
 ## 16.1 SI Tables S5–S11: particle properties, fit statistics, and concentration rescaling
 
-Supplementary tables reporting the particle properties underlying, the fitted parameters and fit statistics of every particle-size probability distribution fitted in this report, and the concentration rescaling for every monitoring sample, formatted after Kooi et al. (2021, *Water Research* 198:117011, SI Tables S3–S4). River water (freshwater) is reported separately (Tables S5, S7) from ocean water and beach sand (Tables S6, S8). Table S9 provides every sample's location, PSD model, slope, correction factor, and rescaled concentration; river samples appear under both river-specific and pooled-river scenarios. Table S10 summarizes those values by matrix and PSD model, and Table S11 additionally breaks them down by location. Ocean-water and beach-sand samples are shown under their available pooled-matrix model. Each C-PSD row reports the fitted window [x~min~, x~max~) selected by the Segur et al. (2026) two-step LOD algorithm (or fixed by the length/width-consistent volume bounds, Section 4.2.3; area fits use a fixed lower search bound, Section 4.2.2), the cumulative slope α~CPSD~ and log~10~ intercept *b* of log~10~ N(≥x) = *b* + α~CPSD~ log~10~ x (± OLS standard error), the differential BN-PSD slope a~PSD~ = α~CPSD~ − 1 (same SE; the Kooi et al. positive PDF exponent is α = |a~PSD~|), R², and the number of populated bins fitted. Lower/upper quartiles are the 25th/75th percentiles. Mass is volume × polymer-resolved density (Section 3.1.1), reported in µg. Fits are summarized from the fit objects above, not refit -- except the depth-stratified river length fits, which are deterministically refit here (identical call to Section 10.0) to retain intercepts and bin counts, and checked against `depth_shape_fits`.
+Supplementary tables reporting the particle properties underlying, the fitted parameters and fit statistics of every particle-size probability distribution fitted in this report, and the concentration rescaling for every monitoring sample, formatted after Kooi et al. (2021, *Water Research* 202:117429, SI Tables S3–S4). River water (freshwater) is reported separately (Tables S5, S7) from ocean water and beach sand (Tables S6, S8). Table S9 provides every sample's location, PSD model, slope, correction factor, and rescaled concentration; river samples appear under both river-specific and pooled-river scenarios. Table S10 summarizes those values by matrix and PSD model, and Table S11 additionally breaks them down by location. Ocean-water and beach-sand samples are shown under their available pooled-matrix model. Each C-PSD row reports the fitted window [x~min~, x~max~) selected by the Segur et al. (2026) two-step LOD algorithm (or fixed by the length/width-consistent volume bounds, Section 4.2.3; area fits use a fixed lower search bound, Section 4.2.2), the cumulative slope α~CPSD~ and log~10~ intercept *b* of log~10~ N(≥x) = *b* + α~CPSD~ log~10~ x (± OLS standard error), the differential BN-PSD slope a~PSD~ = α~CPSD~ − 1 (same SE; the Kooi et al. positive PDF exponent is α = |a~PSD~|), R², and the number of populated bins fitted. Lower/upper quartiles are the 25th/75th percentiles. Mass is volume × polymer-resolved density (Section 3.1.1), reported in µg. Fits are summarized from the fit objects above, not refit -- except the depth-stratified river length fits, which are deterministically refit here (identical call to Section 10.0) to retain intercepts and bin counts, and checked against `depth_shape_fits`.
 
 ```{r si-pdf-fit-tables}
 source(file.path(proj_root, "R", "si_pdf_tables.R"))
@@ -7798,6 +7801,7 @@ psd_params$particle_qc <- list(
   qc_rows_river = nrow(raw_particles_river))
 if (exists("anchor_params")) psd_params$anchor_shape <- anchor_params
 if (exists("mpsb_params")) psd_params$mpsizebase <- mpsb_params
+if (exists("slope_method_params")) psd_params$slope_methods <- slope_method_params
 
 jsonlite::write_json(psd_params, "data_output/psd_rescaling_params.json", auto_unbox = TRUE, digits = NA, pretty = TRUE)
 flat <- unlist(psd_params)

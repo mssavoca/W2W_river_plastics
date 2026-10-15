@@ -182,4 +182,38 @@ p8 <- ggplot(rsteps, aes(river, value, fill = step)) +
   theme(legend.position = "bottom", legend.box = "vertical")
 save(p8, "fig8_river_decomposition.png", w = 11, h = 6.5)
 
+# 9. Large-particle deficit: observed cumulative counts vs the in-window MLE power law
+tpl_mle <- function(x, lo, hi) {
+  x <- x[x >= lo & x < hi]
+  nll <- function(al) { k <- (1 - al) / (hi^(1 - al) - lo^(1 - al)); -sum(log(k) - al * log(x)) }
+  stats::optimize(nll, c(1.01, 8))$minimum
+}
+f9 <- dplyr::bind_rows(lapply(names(rfits), function(r) {
+  x <- rv$max_length_um[rv$sample_location == r]; f <- rfits[[r]]; lo <- f$lower_lod_um; hi <- f$upper_lod_um
+  al <- tpl_mle(x, lo, hi); n_win <- sum(x >= lo & x < hi)
+  # Expected N(>=L) for a power law matching the in-window count, extended to 5000 um
+  k <- n_win / ((lo^(1 - al) - hi^(1 - al)) / (al - 1))
+  L <- exp(seq(log(50), log(3000), length.out = 120))
+  ratio <- sum(x >= hi) / (k * (hi^(1 - al) - 5000^(1 - al)) / (al - 1))
+  lab <- sprintf("%s\nC-PSD a = %.2f; in-window MLE a = %.2f\nabove window: %.0f%% of expected", r, f$a_psd, -al, 100 * ratio)
+  dplyr::bind_rows(
+    tibble::tibble(river = lab, L = L, N = vapply(L, function(l) sum(x >= l), 1), what = "Observed N(>= L)", lo = lo, hi = hi),
+    tibble::tibble(river = lab, L = L, N = sum(x >= hi) + 0 * L + (k * (pmax(L, lo)^(1 - al) - 5000^(1 - al)) / (al - 1)) - k * (hi^(1 - al) - 5000^(1 - al)) / (al - 1) +
+                     k * (hi^(1 - al) - 5000^(1 - al)) / (al - 1) - sum(x >= hi), what = "Expected from in-window MLE slope", lo = lo, hi = hi) |>
+      dplyr::filter(L >= lo))
+}))
+p9 <- ggplot(f9, aes(L, N, color = what, linetype = what)) +
+  geom_rect(data = dplyr::distinct(f9, river, lo, hi), aes(xmin = lo, xmax = hi, ymin = 0, ymax = Inf), inherit.aes = FALSE, fill = "#1f6f5c", alpha = 0.07) +
+  geom_line(linewidth = 0.9) +
+  geom_vline(xintercept = 500, linetype = "dotted", color = "gray40") +
+  facet_wrap(~ river, nrow = 1) +
+  scale_x_log10() + scale_y_log10() +
+  scale_color_manual(values = c("Observed N(>= L)" = "#1f6f5c", "Expected from in-window MLE slope" = "#c0622b"), name = NULL) +
+  scale_linetype_manual(values = c("Observed N(>= L)" = "solid", "Expected from in-window MLE slope" = "dashed"), name = NULL) +
+  labs(x = "Particle length L (um, log)", y = "Particles at or above L (log)",
+       title = "Too few large particles: the cumulative curve falls below the power law above each fit window",
+       subtitle = "Shaded = Segur LOD window; dotted line = 500 um sieve boundary. The shortfall bends the C-PSD fit steeper.") +
+  theme(legend.position = "bottom", strip.text = element_text(size = 9))
+save(p9, "fig9_large_particle_deficit.png", w = 13, h = 5.5)
+
 cat("Wrote", length(list.files(out)), "figures to", out, "\n")
