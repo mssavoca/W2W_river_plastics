@@ -182,7 +182,7 @@ p8 <- ggplot(rsteps, aes(river, value, fill = step)) +
   theme(legend.position = "bottom", legend.box = "vertical")
 save(p8, "fig8_river_decomposition.png", w = 11, h = 6.5)
 
-# 9. Large-particle deficit: observed cumulative counts vs the in-window MLE power law
+# 9. Large-particle deficit: observed cumulative counts vs the fixed-window (100-500 um) MLE power law
 tpl_mle <- function(x, lo, hi) {
   x <- x[x >= lo & x < hi]
   nll <- function(al) { k <- (1 - al) / (hi^(1 - al) - lo^(1 - al)); -sum(log(k) - al * log(x)) }
@@ -190,16 +190,16 @@ tpl_mle <- function(x, lo, hi) {
 }
 f9 <- dplyr::bind_rows(lapply(names(rfits), function(r) {
   x <- rv$max_length_um[rv$sample_location == r]; f <- rfits[[r]]; lo <- f$lower_lod_um; hi <- f$upper_lod_um
-  al <- tpl_mle(x, lo, hi); n_win <- sum(x >= lo & x < hi)
+  al <- tpl_mle(x, 100, 500); n_win <- sum(x >= lo & x < hi)
   # Expected N(>=L) for a power law matching the in-window count, extended to 5000 um
   k <- n_win / ((lo^(1 - al) - hi^(1 - al)) / (al - 1))
   L <- exp(seq(log(50), log(3000), length.out = 120))
   ratio <- sum(x >= hi) / (k * (hi^(1 - al) - 5000^(1 - al)) / (al - 1))
-  lab <- sprintf("%s\nC-PSD a = %.2f; in-window MLE a = %.2f\nabove window: %.0f%% of expected", r, f$a_psd, -al, 100 * ratio)
+  lab <- sprintf("%s\nC-PSD a = %.2f; MLE (100-500 um) a = %.2f\nabove window: %.0f%% of expected", r, f$a_psd, -al, 100 * ratio)
   dplyr::bind_rows(
     tibble::tibble(river = lab, L = L, N = vapply(L, function(l) sum(x >= l), 1), what = "Observed N(>= L)", lo = lo, hi = hi),
     tibble::tibble(river = lab, L = L, N = sum(x >= hi) + 0 * L + (k * (pmax(L, lo)^(1 - al) - 5000^(1 - al)) / (al - 1)) - k * (hi^(1 - al) - 5000^(1 - al)) / (al - 1) +
-                     k * (hi^(1 - al) - 5000^(1 - al)) / (al - 1) - sum(x >= hi), what = "Expected from in-window MLE slope", lo = lo, hi = hi) |>
+                     k * (hi^(1 - al) - 5000^(1 - al)) / (al - 1) - sum(x >= hi), what = "Expected from 100-500 um MLE slope", lo = lo, hi = hi) |>
       dplyr::filter(L >= lo))
 }))
 p9 <- ggplot(f9, aes(L, N, color = what, linetype = what)) +
@@ -208,8 +208,8 @@ p9 <- ggplot(f9, aes(L, N, color = what, linetype = what)) +
   geom_vline(xintercept = 500, linetype = "dotted", color = "gray40") +
   facet_wrap(~ river, nrow = 1) +
   scale_x_log10() + scale_y_log10() +
-  scale_color_manual(values = c("Observed N(>= L)" = "#1f6f5c", "Expected from in-window MLE slope" = "#c0622b"), name = NULL) +
-  scale_linetype_manual(values = c("Observed N(>= L)" = "solid", "Expected from in-window MLE slope" = "dashed"), name = NULL) +
+  scale_color_manual(values = c("Observed N(>= L)" = "#1f6f5c", "Expected from 100-500 um MLE slope" = "#c0622b"), name = NULL) +
+  scale_linetype_manual(values = c("Observed N(>= L)" = "solid", "Expected from 100-500 um MLE slope" = "dashed"), name = NULL) +
   labs(x = "Particle length L (um, log)", y = "Particles at or above L (log)",
        title = "Too few large particles: the cumulative curve falls below the power law above each fit window",
        subtitle = "Shaded = Segur LOD window; dotted line = 500 um sieve boundary. The shortfall bends the C-PSD fit steeper.") +

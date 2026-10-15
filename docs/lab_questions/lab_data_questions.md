@@ -119,18 +119,18 @@ How each ocean mechanism carries over to rivers:
 
 ![Figure 9](figs/fig9_large_particle_deficit.png)
 
-*Figure 9. Particles at or above each length (solid) against the power law fitted only to the particles inside each river's fit window (dashed). In Carmel, Pajaro and Salinas the observed curve falls away from the power law near the 500 µm sieve boundary: there are only 36–47% as many particles above the window as expected. San Lorenzo, whose window ends at 330 µm, has the expected number.*
+*Figure 9. Particles at or above each length (solid) against the power law fitted by maximum likelihood to the particles between 100 and 500 µm (dashed). In Carmel, Pajaro and Salinas the observed curve falls away from the power law near the 500 µm sieve boundary: there are only 28–52% as many particles above the fit window as expected. San Lorenzo, whose window ends at 330 µm, has about the expected number (116%).*
 
 The steep river slopes come mostly from a shortage of large particles, not from the rivers or from contamination. The Segur et al. (2026) C-PSD method regresses the number of particles at or above each size. Every point in the fit window therefore also counts the particles above the window, and a shortage there bends the top of the window down and steepens the slope. Segur et al. describe this right-tail "slump" and tie the upper detection limit to the sampled volume and the fraction of the filter analysed.
 
-| River | C-PSD slope (production) | Maximum-likelihood slope, same window | Particles above window, observed vs expected |
-|---|---|---|---|
-| Carmel | −2.61 | −2.08 | 47% |
-| Pajaro | −3.46 | −2.81 | 38% |
-| Salinas | −3.04 | −2.42 | 36% |
-| San Lorenzo | −2.40 | −2.44 | 108% |
+| River | C-PSD slope (production) | Maximum-likelihood slope, 100–500 µm | Particles above window, observed vs expected | Correction factor 50–500 → 1–5000 µm: C-PSD vs MLE |
+|---|---|---|---|---|
+| Carmel | −2.61 | −2.16 | 52% | 557 vs 100 (5.5×) |
+| Pajaro | −3.46 | −2.58 | 28% | 15,170 vs 497 (31×) |
+| Salinas | −3.04 | −2.26 | 29% | 2,950 vs 146 (20×) |
+| San Lorenzo | −2.40 | −2.49 | 116% | 249 vs 351 (0.7×) |
 
-The power-law fitting literature recommends maximum likelihood on the individual measurements, bounded at both ends when the upper tail is incomplete. On that basis the C-PSD slopes for Carmel, Pajaro and Salinas are too steep, which inflates the extrapolated concentrations about 7–13-fold. The report now includes this comparison, a simulation of each estimator and a risk sensitivity (Section 13.7). Subtracting the expected blank particles changes the slopes only slightly (+0.06 to +0.30), so contamination is not the cause.
+The power-law fitting literature recommends maximum likelihood on the individual measurements, bounded at both ends when the upper tail is incomplete, over a window fixed in advance. Here that window is 100–500 µm: reliable µFTIR detection starts around 100 µm, and 500 µm is the sieve boundary. In simulation, this estimator stays close to the true slope whether large or small particles are undercounted; the C-PSD fit becomes about 0.4 too steep when large particles are undercounted. On that basis the C-PSD slopes for Carmel, Pajaro and Salinas are too steep, which inflates their extrapolated concentrations 5.5–31-fold. The report now includes this comparison, the simulation and a risk sensitivity (Section 13.7). Subtracting the expected blank particles changes the slopes only slightly (+0.06 to +0.30), so contamination is not the cause.
 
 Whether the shortage is real or a counting artefact is a question for the lab: were the 212–500 µm and >500 µm sieve fractions aliquoted, imaged or counted differently from the <212 µm fraction? → Q6, Q7
 
