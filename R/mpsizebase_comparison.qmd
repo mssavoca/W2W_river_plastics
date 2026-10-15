@@ -1,0 +1,334 @@
+## 13.6 Ocean-water comparison with MPsizeBase (spec/MPSizeBase.md Part D)
+
+MPsizeBase (Segur et al. 2026; Zenodo DOI [10.5281/zenodo.20832480](https://doi.org/10.5281/zenodo.20832480), record v5, CC BY 4.0) has no river, freshwater, sediment or beach rows, and no California rows. Its ocean data come mostly from coastal Korea, the Mediterranean, the Atlantic and the Arctic. It is therefore an ocean-water and method comparator, not a validation; river water keeps the RIVM and Kooi benchmarks. The primary like-for-like comparison is the concentration inside the fully detected 165–385 µm window (Tier 2). Slopes (Tier 1) are compared shape-to-shape on the a~psd~ convention, with each side's fit window stated. Values rescaled to 1–5000 µm (Tier 3) are secondary, because almost all of that range lies below 10 µm and is extrapolated. The PSD counts also differ between the paper (81 binned fragment and fiber PSDs from 44 studies) and the v19-5-2026 sheet, which has more PSDs. This child saves and restores the global RNG state.
+
+```{r mpsb-setup}
+mpsb_rng_state <- if (exists(".Random.seed", envir = globalenv())) get(".Random.seed", envir = globalenv()) else NULL
+mpsb_params <- list()
+mpsb_file <- file.path(proj_root, "data_input", "MPsizeBase v19-5-2026.xlsx")
+# D0: integrity (Zenodo file list: MD5 bd31cb5863cf1022f3717d219e2e6865, 3.2 MB)
+stopifnot("MPsizeBase MD5 mismatch" = unname(tools::md5sum(mpsb_file)) == "bd31cb5863cf1022f3717d219e2e6865")
+mpsb_raw <- suppressWarnings(readxl::read_excel(mpsb_file, sheet = "Literature PSD data", skip = 2, .name_repair = "unique_quiet"))
+W_lo <- 165; W_hi <- 385
+mpsb_num <- c("Low_size", "High_size", "Bin_concentration", "filtered_low_size", "filtered_high_size", "cumsum_slope",
+              "cumsum_log_intercept", "cumsum_powerlaw_alpha", "cumsum_MP_1_5000_mean", "PSD_MP_count",
+              "reported_min_size", "reported_max_size")
+mpsb_ocean <- mpsb_raw |>
+  dplyr::filter(Sample_type == "Ocean") |>
+  dplyr::mutate(dplyr::across(dplyr::all_of(mpsb_num), ~ suppressWarnings(as.numeric(.x))))
+stopifnot("MPsizeBase ocean rows must all be MP/m3" = all(mpsb_ocean$Bin_concentration_units == "MP/m3"))
+overlap <- function(lo, hi) pmax(0, pmin(hi, W_hi) - pmax(lo, W_lo))
+
+mpsb_psd <- mpsb_ocean |>
+  dplyr::group_by(PSD_ID) |>
+  dplyr::summarise(
+    Study = dplyr::first(Study), Year = dplyr::first(Year),
+    shape = dplyr::if_else(grepl("fiber", dplyr::first(MP_shape), ignore.case = TRUE), "fiber", "fragment"),
+    detection = dplyr::first(Broad_detection_method), depth_class = dplyr::first(Sub_type1),
+    location_class = dplyr::first(Sub_type2), sampling = dplyr::first(Broad_sampling_method),
+    sample_name = dplyr::first(Sample_name), n_mp = dplyr::first(PSD_MP_count),
+    bins_lo = min(Low_size), bins_hi = max(High_size),
+    lod_lo = suppressWarnings(min(filtered_low_size, na.rm = TRUE)), lod_hi = suppressWarnings(max(filtered_high_size, na.rm = TRUE)),
+    window_coverage = sum(overlap(Low_size, High_size)) / (W_hi - W_lo),
+    direct_165_385 = sum(Bin_concentration * overlap(Low_size, High_size) / (High_size - Low_size), na.rm = TRUE),
+    lod_window_conc = sum(Bin_concentration[!is.na(filtered_low_size)], na.rm = TRUE),
+    reported_range_conc = sum(Bin_concentration, na.rm = TRUE),
+    rep_lo = dplyr::first(reported_min_size), rep_hi = dplyr::first(reported_max_size),
+    a_cpsd = dplyr::first(cumsum_slope), a_psd = dplyr::first(cumsum_powerlaw_alpha),
+    b = dplyr::first(cumsum_log_intercept), ext_1_5000 = dplyr::first(cumsum_MP_1_5000_mean),
+    .groups = "drop") |>
+  dplyr::mutate(study_id = sub("_.*$", "", PSD_ID))
+```
+
+### D1. Reproduce the prepared windows tables
+
+The windows tables are regenerated with `tools/mpsizebase_ocean_windows_v1.py` from the checksum-verified workbook (run with the reticulate Python). The script defines an observed window (`direct_165_385`) as the reported bin concentrations overlapping 165–385 µm, with partial bins prorated linearly, valid only when the PSD's reported size range covers the window. Its sample key is study × location × coordinates × date × depth × sample name × sampling × mesh × volume; PSD_ID letters are site codes, not shapes. A sample-level direct sum is kept only if every shape's PSD covers the window. The spec's acceptance numbers are asserted below.
+
+```{r mpsb-d1}
+stopifnot(abs(mpsb_psd$a_psd - (mpsb_psd$a_cpsd - 1)) < 1e-12)
+stopifnot(abs(mpsb_psd$ext_1_5000 - 10^mpsb_psd$b * (1 - 5000^mpsb_psd$a_cpsd)) <= 1e-6 * pmax(1, mpsb_psd$ext_1_5000))
+mpsb_py <- reticulate::py_config()$python  # py_exe() is NULL until Python is initialised
+mpsb_out <- file.path(proj_root, "data_output")
+mpsb_status <- system2(mpsb_py, c("-I", shQuote(file.path(proj_root, "tools", "mpsizebase_ocean_windows_v1.py")),
+                                  shQuote(mpsb_file), shQuote(mpsb_out)), stdout = TRUE, stderr = TRUE)
+stopifnot("mpsizebase_ocean_windows_v1.py failed" = is.null(attr(mpsb_status, "status")))
+cat(mpsb_status, sep = "
+")
+mpsb_win <- utils::read.csv(file.path(mpsb_out, "mpsizebase_ocean_psd_windows_v1.csv"))
+mpsb_win$fit_165_385_in_LOD <- as.logical(mpsb_win$fit_165_385_in_LOD)
+mpsb_samples <- utils::read.csv(file.path(mpsb_out, "mpsizebase_ocean_sample_windows_v1.csv")) |>
+  dplyr::filter(!is.na(direct_165_385)) |>
+  dplyr::transmute(Study, location_class = Sub_type2, depth_class = Sub_type1, sampling = Sampling, shapes, direct_165_385)
+mpsb_psd <- mpsb_psd |>
+  dplyr::left_join(dplyr::select(mpsb_win, PSD_ID, direct_165_385_py = direct_165_385, fit_165_385_in_LOD), by = "PSD_ID") |>
+  dplyr::mutate(observed_window = !is.na(direct_165_385_py), lod_covers_window = fit_165_385_in_LOD)
+mpsb_d1 <- list(
+  n_ocean_psd = nrow(mpsb_win), detection = as.list(table(mpsb_win$Detection)),
+  n_observed_window = sum(!is.na(mpsb_win$direct_165_385)), n_studies_observed_window = dplyr::n_distinct(mpsb_win$Study[!is.na(mpsb_win$direct_165_385)]),
+  n_lod_covers = sum(mpsb_win$fit_165_385_in_LOD),
+  lod_covers_by_shape = mpsb_win |> dplyr::filter(fit_165_385_in_LOD) |> dplyr::group_by(shape = MP_shape) |>
+    dplyr::summarise(n = dplyr::n(), median_a_psd = stats::median(a_psd), .groups = "drop"),
+  n_samples_observed = nrow(mpsb_samples), sample_median_m3 = stats::median(mpsb_samples$direct_165_385),
+  sample_location = as.list(table(mpsb_samples$location_class)), sample_sampling = as.list(table(mpsb_samples$sampling)))
+stopifnot(mpsb_d1$n_ocean_psd == 99,
+          identical(unname(unlist(mpsb_d1$detection[c("FTIR", "Raman", "microscopy")])), c(90L, 7L, 2L)),
+          mpsb_d1$n_observed_window == 57, mpsb_d1$n_studies_observed_window == 11, mpsb_d1$n_lod_covers == 26,
+          abs(mpsb_d1$lod_covers_by_shape$median_a_psd[mpsb_d1$lod_covers_by_shape$shape == "Fragments"] - (-2.94)) < 0.01,
+          mpsb_d1$lod_covers_by_shape$n[mpsb_d1$lod_covers_by_shape$shape == "Fragments"] == 18,
+          abs(mpsb_d1$lod_covers_by_shape$median_a_psd[mpsb_d1$lod_covers_by_shape$shape == "Fibers"] - (-1.34)) < 0.01,
+          mpsb_d1$lod_covers_by_shape$n[mpsb_d1$lod_covers_by_shape$shape == "Fibers"] == 8,
+          mpsb_d1$n_samples_observed == 40, abs(mpsb_d1$sample_median_m3 - 61.9) < 0.1,
+          identical(unname(unlist(mpsb_d1$sample_location[c("coastal", "offshore")])), c(25L, 15L)),
+          identical(unname(unlist(mpsb_d1$sample_sampling[c("pump", "CTD", "IS pump", "tow")])), c(20L, 10L, 8L, 2L)))
+mpsb_params$D1 <- mpsb_d1
+knitr::kable(mpsb_d1$lod_covers_by_shape, digits = 3, caption = "D1: PSDs whose fitted LOD window fully covers 165-385 µm, by shape (asserted against the spec)")
+```
+
+All D1 acceptance numbers are reproduced and asserted: 99 ocean PSDs (90 FTIR, 7 Raman, 2 microscopy); 57 PSDs from 11 studies with an observed 165–385 µm window; 26 PSDs whose fitted LOD covers the window (fragments median a~psd~ −2.94, n = 18; fibers −1.34, n = 8); and 40 samples with an observed sample-level sum, median `r round(mpsb_d1$sample_median_m3, 1)` MP m⁻³ (25 coastal, 15 offshore; 20 pump, 10 CTD, 8 IS pump, 2 tow). `cumsum_powerlaw_alpha = cumsum_slope − 1` holds exactly, and the 1–5000 µm column equals 10^b(1 − 5000^a′).
+
+### D2/D3. Inclusion filters and study-level summaries
+
+```{r mpsb-d3}
+mpsb_inclusion <- mpsb_psd |>
+  dplyr::mutate(
+    exclusion_reason = dplyr::case_when(
+      detection == "microscopy" ~ "microscopy only (flagged sensitivity)",
+      is.na(n_mp) ~ "PSD_MP_count missing",
+      n_mp < 50 ~ "PSD_MP_count < 50",
+      TRUE ~ NA_character_),
+    slope_window_overlap = is.finite(lod_lo) & lod_lo < cpsd_fit_ocean_all$upper_lod_um & lod_hi > cpsd_fit_ocean_all$lower_lod_um,
+    included_slope = is.na(exclusion_reason) & slope_window_overlap,
+    included_concentration = is.na(exclusion_reason) & observed_window)
+mpsb_stage_counts <- tibble::tibble(
+  stage = c("Ocean PSDs", "FTIR or Raman", "+ PSD_MP_count >= 50", "+ LOD overlaps our ocean fit window (slope tier)", "+ observed 165-385 µm window (concentration tier)"),
+  n_psd = c(nrow(mpsb_psd), sum(mpsb_psd$detection != "microscopy"), sum(is.na(mpsb_inclusion$exclusion_reason)),
+            sum(mpsb_inclusion$included_slope), sum(mpsb_inclusion$included_concentration)))
+utils::write.csv(mpsb_inclusion, "data_output/mpsizebase_inclusion_table.csv", row.names = FALSE)
+knitr::kable(mpsb_stage_counts, caption = "D3: pre-registered inclusion filters (count at each stage). Full per-PSD table with exclusion reasons: data_output/mpsizebase_inclusion_table.csv")
+
+# Segur et al. weight every study equally: slopes by mean, extrapolated concentrations by median.
+mpsb_study <- mpsb_inclusion |> dplyr::filter(included_slope) |>
+  dplyr::group_by(study_id, shape) |>
+  dplyr::summarise(n_psd = dplyr::n(), a_psd_mean = mean(a_psd), ext_1_5000_median = stats::median(ext_1_5000), .groups = "drop")
+mpsb_params$D3 <- list(stage_counts = mpsb_stage_counts)
+```
+
+### D4. Tier 1: slopes by shape
+
+```{r mpsb-d4, fig.width=10, fig.height=5}
+our_ocean_slopes <- tibble::tibble(
+  shape = c("all", "fragment", "fiber"),
+  fit = list(cpsd_fit_ocean_all, cpsd_fit_ocean_frag, cpsd_fit_ocean_fiber)) |>
+  dplyr::mutate(a_psd = vapply(fit, `[[`, numeric(1), "a_psd"), se = vapply(fit, `[[`, numeric(1), "se_a_psd"),
+                window = vapply(fit, function(f) sprintf("%.0f–%.0f µm", f$lower_lod_um, f$upper_lod_um), character(1))) |>
+  dplyr::select(-fit)
+boot_ci <- function(x, seed) { if (length(x) < 3) return(c(NA, NA))
+  b <- withr::with_seed(seed, replicate(2000, stats::median(sample(x, replace = TRUE)))); stats::quantile(b, c(.025, .975), names = FALSE) }
+mpsb_slope_tbl <- dplyr::bind_rows(lapply(c("fragment", "fiber"), function(sh) {
+  dplyr::bind_rows(lapply(c("PSD level: all included", "PSD level: LOD covers 165-385", "Study level (mean per study)"), function(lv) {
+    x <- switch(lv,
+      "PSD level: all included" = mpsb_inclusion$a_psd[mpsb_inclusion$included_slope & mpsb_inclusion$shape == sh],
+      "PSD level: LOD covers 165-385" = mpsb_inclusion$a_psd[mpsb_inclusion$included_slope & mpsb_inclusion$lod_covers_window & mpsb_inclusion$shape == sh],
+      "Study level (mean per study)" = mpsb_study$a_psd_mean[mpsb_study$shape == sh])
+    ci <- boot_ci(x, 13800 + nchar(lv))
+    tibble::tibble(shape = sh, level = lv, n = length(x), median = stats::median(x),
+                   q25 = stats::quantile(x, .25, names = FALSE), q75 = stats::quantile(x, .75, names = FALSE),
+                   boot_ci_lo = ci[1], boot_ci_hi = ci[2],
+                   ours = our_ocean_slopes$a_psd[our_ocean_slopes$shape == sh],
+                   ours_window = our_ocean_slopes$window[our_ocean_slopes$shape == sh],
+                   mann_whitney_p_descriptive = if (length(x) >= 3) stats::wilcox.test(x, mu = our_ocean_slopes$a_psd[our_ocean_slopes$shape == sh], exact = FALSE)$p.value else NA_real_)
+  }))
+}))
+knitr::kable(mpsb_slope_tbl, digits = 3, caption = "D4: MPsizeBase ocean a_psd by shape vs this study's ocean fit (one-sample Wilcoxon p is descriptive only). MPsizeBase windows vary by PSD; the cleanest subset is LOD covers 165-385 µm.")
+
+mpsb_fig1 <- ggplot2::ggplot(dplyr::filter(mpsb_inclusion, included_slope), ggplot2::aes(x = shape, y = a_psd)) +
+  ggplot2::geom_boxplot(outlier.shape = NA, fill = "#009E73", alpha = 0.15, color = "#009E73") +
+  ggplot2::geom_jitter(ggplot2::aes(shape = lod_covers_window), width = 0.15, height = 0, alpha = 0.6, color = "#009E73") +
+  ggplot2::geom_point(data = dplyr::filter(our_ocean_slopes, shape != "all"), ggplot2::aes(x = shape, y = a_psd),
+                      inherit.aes = FALSE, color = "black", size = 4, shape = 18) +
+  ggplot2::geom_errorbar(data = dplyr::filter(our_ocean_slopes, shape != "all"),
+                         ggplot2::aes(x = shape, ymin = a_psd - 1.96 * se, ymax = a_psd + 1.96 * se), inherit.aes = FALSE, width = 0.1) +
+  ggplot2::geom_text(data = dplyr::filter(our_ocean_slopes, shape != "all"), ggplot2::aes(x = shape, y = a_psd, label = window),
+                     inherit.aes = FALSE, nudge_x = 0.32, size = 3.2) +
+  ggplot2::scale_shape_manual(values = c(`TRUE` = 16, `FALSE` = 1), name = "LOD covers 165-385 µm") +
+  ggplot2::labs(x = NULL, y = expression(italic(a)[psd]),
+                title = "Ocean-water C-PSD slopes by shape: MPsizeBase vs this study",
+                subtitle = stringr::str_wrap("Green = MPsizeBase PSDs passing D3 filters (filled = LOD covers 165-385 µm); black diamond = this study's ocean fit (95% CI), labelled with its fit window", 90)) +
+  ggplot2::theme_minimal(base_size = 14) + ggplot2::theme(legend.position = "bottom")
+ggplot2::ggsave(mpsb_fig1, filename = "figures/mpsizebase_fig1_slopes_by_shape.png", width = 10, height = 5, dpi = 300)
+mpsb_fig1
+mpsb_params$D4 <- list(ours = our_ocean_slopes, mpsizebase = mpsb_slope_tbl)
+```
+
+### D5. Tier 2: concentrations in the fully detected 165–385 µm window (primary comparison)
+
+This study's ocean concentrations in 165–385 µm come straight from the particle rows with exact edges: the number of QC-passing particle rows in [165, 385) µm × the sample's per-particle concentration (`C_reported_pL / count`) × 1000 L m⁻³. Only ocean samples with particle-level data are included. Our ocean samples have no recorded depth, so they are compared against both MPsizeBase depth classes.
+
+```{r mpsb-d5, fig.width=10, fig.height=5}
+ours_165_385 <- raw_particles_ocean |>
+  dplyr::filter(Client_ID_MSSupdate %in% monitoring_ocean$sample_id) |>
+  dplyr::count(sample_id = Client_ID_MSSupdate, wt = length_um >= W_lo & length_um < W_hi, name = "n_165_385") |>
+  dplyr::right_join(dplyr::select(monitoring_ocean, sample_id, C_reported_pL, count), by = "sample_id") |>
+  dplyr::mutate(n_165_385 = dplyr::coalesce(n_165_385, 0L), conc_m3 = n_165_385 * C_reported_pL / count * 1000)
+mpsb_conc <- dplyr::bind_rows(
+  dplyr::transmute(ours_165_385, source = "This study (CA coastal, depth not recorded)", group = "This study", conc_m3),
+  dplyr::transmute(mpsb_samples, source = "MPsizeBase", group = paste(location_class, "/", ifelse(sampling %in% c("pump", "CTD", "IS pump"), "pump/CTD", sampling)), conc_m3 = direct_165_385),
+  dplyr::transmute(mpsb_samples, source = "MPsizeBase", group = paste("all", depth_class), conc_m3 = direct_165_385))
+mpsb_conc_tbl <- mpsb_conc |> dplyr::group_by(source, group) |>
+  dplyr::summarise(n = dplyr::n(), median_m3 = stats::median(conc_m3), q25 = stats::quantile(conc_m3, .25), q75 = stats::quantile(conc_m3, .75), .groups = "drop")
+knitr::kable(mpsb_conc_tbl, digits = 2, caption = "D5: 165-385 µm concentrations (MP/m3). Nearest analogues: coastal (location) and pump/CTD (sampling).")
+# ECDF lines only for groups with >= 3 samples (n = 1 tow groups would draw as a
+# single vertical step); every group, including small ones, stays in the table above.
+mpsb_fig2_groups <- mpsb_conc_tbl$group[mpsb_conc_tbl$n >= 3]
+mpsb_fig2 <- ggplot2::ggplot(mpsb_conc |> dplyr::filter(conc_m3 > 0, group %in% mpsb_fig2_groups), ggplot2::aes(x = conc_m3, color = group)) +
+  ggplot2::stat_ecdf(linewidth = 0.9) + ggplot2::scale_x_log10(labels = scales::label_number()) +
+  ggplot2::labs(x = "Concentration in 165–385 µm (MP m⁻³, log scale)", y = "Empirical cumulative probability", color = NULL,
+                title = "Ocean-water concentrations in the fully detected 165–385 µm window",
+                subtitle = stringr::str_wrap(paste0("n per group: ", paste0(mpsb_conc_tbl$group, " = ", mpsb_conc_tbl$n, collapse = "; "),
+                                                    ". Groups with n < 3 (tows) are in the table only."), 100)) +
+  ggplot2::theme_minimal(base_size = 13) + ggplot2::theme(legend.position = "right")
+ggplot2::ggsave(mpsb_fig2, filename = "figures/mpsizebase_fig2_165_385_ecdf.png", width = 10, height = 5, dpi = 300)
+mpsb_fig2
+mpsb_params$D5 <- list(table = mpsb_conc_tbl, n_ours = nrow(ours_165_385), n_ours_zero = sum(ours_165_385$conc_m3 == 0))
+```
+
+### D6. Tier 3: measured and rescaled concentrations by anchor
+
+Figure 3 puts every comparison on one log axis as boxplots with all points. MPsizeBase values are sample totals (fragment + fiber PSDs of the same sample summed; the script's sample key). The panels run from the most to the least like-for-like:
+
+1. **Measured, identical window 165–385 µm**: observed bins (MPsizeBase) vs QC-passing particle rows (this study), no extrapolation.
+2. **Measured, identical window 50–500 µm**: MPsizeBase observed bins vs this study's reported 50–500 µm concentration (all 15 samples) and the particle-rebuilt value (6 samples with particle data).
+3. **Measured, each study's own reported range**: unscaled reported concentrations.
+4. **Rescaled to 1–5000 µm, LOD-anchored**: observed fit-window concentration × CF from that window (production for this study).
+5. **Rescaled to 1–5000 µm, reported-range anchored**: reported concentration × CF from the reported range (for this study, the 50–500 µm sieve window with the ocean slope).
+6. **Rescaled to 1–5000 µm, MPsizeBase published fit**: 10^b(1 − 5000^a′), shown for reference.
+
+Rescaled values are extrapolation-dominated: for this study's ocean slope, `r round(100 * (1 - 10^(cpsd_fit_ocean_all$a_psd + 1)) / (1 - 5000^(cpsd_fit_ocean_all$a_psd + 1)), 1)`% of the 1–5000 µm count lies below 10 µm. Summing fragment and fiber extrapolations per sample is our aggregation, not a quantity the paper reports.
+
+```{r mpsb-d6, fig.width=13, fig.height=7}
+share_below_10_d6 <- function(a) (1 - 10^(a + 1)) / (1 - 5000^(a + 1))
+cf_safe <- function(a, lo, hi) ifelse(is.finite(lo) & is.finite(hi) & hi > lo & a < -1,
+                                      suppressWarnings(((5000^(a + 1) - 1) / (a + 1)) / ((hi^(a + 1) - lo^(a + 1)) / (a + 1))), NA_real_)
+# PSD level (all ocean PSDs), then summed to the script's sample key.
+mpsb_key_cols <- c("Study", "Location", "Lat", "Lon", "Start", "Depth_inf", "Depth_sup", "Sample_name", "Sub_type1", "Sampling", "Mesh_um", "Volume_m3")
+mpsb_t3 <- mpsb_psd |>
+  dplyr::left_join(dplyr::select(mpsb_inclusion, PSD_ID, exclusion_reason), by = "PSD_ID") |>
+  dplyr::mutate(b_lod_anchored = lod_window_conc * cf_safe(a_psd, lod_lo, lod_hi),
+                c_reported_range = reported_range_conc * cf_safe(a_psd, rep_lo, rep_hi),
+                share_below_10um = share_below_10_d6(a_psd)) |>
+  dplyr::select(-dplyr::any_of(setdiff(mpsb_key_cols, "Study"))) |>
+  dplyr::left_join(dplyr::select(mpsb_win, dplyr::all_of(c("PSD_ID", setdiff(mpsb_key_cols, "Study"))), Study_key = Study), by = "PSD_ID")
+mpsb_t3$sample_key <- do.call(paste, c(lapply(mpsb_t3[, c("Study_key", setdiff(mpsb_key_cols, "Study"))], as.character), sep = "|"))
+stopifnot("PSD -> sample key must reproduce the script's 79 samples" = dplyr::n_distinct(mpsb_t3$sample_key) == 79)
+mpsb_sample_t3 <- mpsb_t3 |>
+  dplyr::group_by(sample_key) |>
+  dplyr::summarise(shapes = paste(sort(unique(shape)), collapse = "+"), lod_anchored = sum(b_lod_anchored),
+                   reported_anchored = sum(c_reported_range), .groups = "drop")
+mpsb_samples_all <- utils::read.csv(file.path(mpsb_out, "mpsizebase_ocean_sample_windows_v1.csv"))
+
+# This study: all 15 ocean samples (summary table) and the 6 with particle-level data.
+ocean_all <- monitoring_raw |>
+  dplyr::filter(sample_type == "ocean water", material_simple == "plastic", sample_or_blank == "sample") |>
+  dplyr::group_by(sample_id = Client_ID_MSSupdate) |>
+  dplyr::summarise(C_reported_m3 = sum(extrap_conc_PPL) * 1000, volume_L = sum(extrap_count) / sum(extrap_conc_PPL), .groups = "drop") |>
+  dplyr::mutate(has_particle_data = sample_id %in% monitoring_ocean$sample_id)
+ours6 <- monitoring_ocean |>
+  dplyr::left_join(dplyr::select(ours_165_385, sample_id, n_165_385), by = "sample_id") |>
+  dplyr::mutate(C_165_385_rebuilt = n_165_385 * C_reported_pL / count * 1000,
+                C_165_385_reported_fraction = C_reported_pL * n_165_385 / n_particles_reported_window * 1000,
+                C_50_500_rebuilt = C_rebuilt_reported_window * 1000)
+cf_sieve_ocean <- stats::median(correction_factor(alpha_ocean, 50, 500, 1, 5000, slope_convention = "differential"))
+
+src_levels <- c("This study: all 15 samples (reported)", "This study: 6 samples with particle data", "MPsizeBase: sample totals")
+panel_levels <- c("1. Measured: identical window\n165–385 µm", "2. Measured: identical window\n50–500 µm",
+                  "3. Measured: each study's\nown reported range", "4. Rescaled 1–5000 µm:\nLOD-anchored",
+                  "5. Rescaled 1–5000 µm:\nreported-range anchored", "6. Rescaled 1–5000 µm:\nMPsizeBase published fit")
+mk <- function(panel, source, variant, v) tibble::tibble(panel = panel, source = source, variant = variant, conc_m3 = v)
+fig3_df <- dplyr::bind_rows(
+  mk(panel_levels[1], src_levels[2], "particle-rebuilt", ours6$C_165_385_rebuilt),
+  mk(panel_levels[1], src_levels[2], "reported x in-window fraction", ours6$C_165_385_reported_fraction),
+  mk(panel_levels[1], src_levels[3], "observed bins", mpsb_samples_all$direct_165_385),
+  mk(panel_levels[2], src_levels[1], "reported", ocean_all$C_reported_m3),
+  mk(panel_levels[2], src_levels[2], "particle-rebuilt", ours6$C_50_500_rebuilt),
+  mk(panel_levels[2], src_levels[3], "observed bins", mpsb_samples_all$direct_50_500),
+  mk(panel_levels[3], src_levels[1], "reported", ocean_all$C_reported_m3),
+  mk(panel_levels[3], src_levels[3], "reported (own range)", mpsb_samples_all$reported_conc_m3),
+  mk(panel_levels[4], src_levels[2], "production (LOD window x CF)", C_sample_median_ocean$C_corr_med * 1000),
+  mk(panel_levels[4], src_levels[3], "LOD window x own CF", mpsb_sample_t3$lod_anchored),
+  mk(panel_levels[5], src_levels[1], "50-500 µm sieve x CF", ocean_all$C_reported_m3 * cf_sieve_ocean),
+  mk(panel_levels[5], src_levels[3], "reported range x own CF", mpsb_sample_t3$reported_anchored),
+  mk(panel_levels[6], src_levels[3], "published fit", mpsb_samples_all$fit_1_5000)) |>
+  dplyr::filter(is.finite(conc_m3), conc_m3 > 0) |>
+  dplyr::mutate(panel = factor(panel, levels = panel_levels), source = factor(source, levels = src_levels))
+mpsb_t3_tbl <- fig3_df |> dplyr::group_by(panel, source, variant) |>
+  dplyr::summarise(n = dplyr::n(), median_m3 = stats::median(conc_m3), q25 = stats::quantile(conc_m3, .25),
+                   q75 = stats::quantile(conc_m3, .75), .groups = "drop")
+utils::write.csv(fig3_df, "data_output/mpsizebase_fig3_points.csv", row.names = FALSE)
+knitr::kable(mpsb_t3_tbl, digits = 1, caption = "D6: measured and rescaled ocean concentrations (MP/m3) by panel, source and anchor (every point is shown in Figure 3; data_output/mpsizebase_fig3_points.csv)")
+
+mpsb_fig3 <- ggplot2::ggplot(fig3_df, ggplot2::aes(x = source, y = conc_m3, color = source)) +
+  ggplot2::geom_boxplot(outlier.shape = NA, fill = NA, width = 0.6) +
+  ggplot2::geom_jitter(ggplot2::aes(shape = variant), width = 0.18, height = 0, alpha = 0.65, size = 1.8) +
+  ggplot2::facet_wrap(~ panel, nrow = 1) +
+  ggplot2::scale_y_log10(breaks = 10^seq(-2, 9, by = 1), labels = scales::label_log()) +
+  ggplot2::scale_color_manual(values = c("#D55E00", "#0072B2", "#009E73"), name = NULL, drop = FALSE) +
+  ggplot2::scale_shape_manual(values = c(16, 17, 15, 3, 4, 8, 1, 2, 0, 5, 6), name = "Anchor / variant") +
+  ggplot2::labs(x = NULL, y = "Concentration (MP m⁻³, log scale)",
+                title = "Ocean-water concentrations: this study vs MPsizeBase, measured (panels 1–3) and rescaled to 1–5000 µm (panels 4–6)",
+                subtitle = stringr::str_wrap(paste0("Boxplots with all points. Panels 1–2 compare identical size windows with no extrapolation. ",
+                  "MPsizeBase points are sample totals (fragment + fiber PSDs summed). Rescaled values are extrapolation-dominated."), 150)) +
+  ggplot2::guides(color = ggplot2::guide_legend(nrow = 1), shape = ggplot2::guide_legend(nrow = 2)) +
+  ggplot2::theme_minimal(base_size = 11) +
+  ggplot2::theme(axis.text.x = ggplot2::element_blank(), legend.position = "bottom", legend.box = "vertical",
+                 strip.text = ggplot2::element_text(face = "bold", size = 9),
+                 panel.border = ggplot2::element_rect(color = "gray80", fill = NA, linewidth = 0.4))
+ggplot2::ggsave(mpsb_fig3, filename = "figures/mpsizebase_fig3_1_5000_forest.png", width = 13, height = 7, dpi = 300)
+mpsb_fig3
+mpsb_params$D6 <- mpsb_t3_tbl
+```
+
+#### Why this study's rescaled ocean values are higher than MPsizeBase
+
+The gap at 1–5000 µm is methodological, not evidence that Monterey Bay coastal water is more contaminated. On identical measured windows this study falls inside the MPsizeBase range (panels 1–2). The chain below rebuilds the production value from the all-sample reported concentration, one step at a time (medians over samples).
+
+```{r mpsb-ocean-decomposition}
+ocean_cf_lod <- stats::median(combined_cf_ocean)
+ocean_a <- cpsd_fit_ocean_all$a_psd
+pred_frac <- (cpsd_fit_ocean_all$lower_lod_um^(ocean_a + 1) - cpsd_fit_ocean_all$upper_lod_um^(ocean_a + 1)) / (50^(ocean_a + 1) - 500^(ocean_a + 1))
+obs_frac <- sum(monitoring_ocean$n_particles_lod_window) / sum(monitoring_ocean$n_particles_reported_window)
+blank_qc <- parts_all_ids |> dplyr::filter(sample_or_blank == "blank", sample_type == "field blank",
+                                           !material_class %in% c("mineral", "organic matter"), !is.na(material_class))
+blank_qc <- blank_qc[spectra_qc_pass(blank_qc), ] |> dplyr::count(Client_ID_MSSupdate)
+ocean_volume_L <- stats::median(ocean_all$volume_L)
+mpsb_blank <- mpsb_raw$Blank_corrected[mpsb_raw$Sample_type == "Ocean" & !duplicated(mpsb_raw$PSD_ID)]
+decomp <- tibble::tibble(
+  step = c("A. All 15 samples: reported 50–500 µm x CF(50–500 µm -> 1–5000 µm)",
+           "B. Only the 6 samples with particle-level data (same anchor)",
+           "C. Concentration rebuilt from QC-passing particle rows (same anchor)",
+           "D. Anchored on the fitted LOD window instead of 50–500 µm (production)"),
+  value_m3 = c(stats::median(ocean_all$C_reported_m3) * cf_sieve_ocean,
+               stats::median(ocean_all$C_reported_m3[ocean_all$has_particle_data]) * cf_sieve_ocean,
+               stats::median(ours6$C_50_500_rebuilt) * cf_sieve_ocean,
+               stats::median(C_sample_median_ocean$C_corr_med) * 1000)) |>
+  dplyr::mutate(fold_vs_previous = value_m3 / dplyr::lag(value_m3))
+knitr::kable(decomp, digits = 2, caption = paste0("Decomposition of this study's ocean 1-5000 µm value (MP/m3). For reference, MPsizeBase sample-total published-fit median = ",
+  format(round(stats::median(mpsb_samples_all$fit_1_5000, na.rm = TRUE)), big.mark = ","), " MP/m3."))
+mpsb_params$ocean_decomposition <- list(steps = decomp, predicted_lod_fraction = pred_frac, observed_lod_fraction = obs_frac,
+  field_blank_qc_particles_median = stats::median(blank_qc$n), ocean_sample_volume_L = ocean_volume_L,
+  mpsizebase_blank_corrected = as.list(table(mpsb_blank)))
+```
+
+Three causes account for the gap:
+
+1. **Sample selection (step B, ×`r round(decomp$fold_vs_previous[2], 1)`).** The particle-level export covers only the 2024 ocean samples, which are the high ones. The `r sum(!ocean_all$has_particle_data)` samples without particle data (2025) have low reported concentrations: median `r round(stats::median(ocean_all$C_reported_m3[!ocean_all$has_particle_data]))` MP m⁻³, against `r round(stats::median(ocean_all$C_reported_m3[ocean_all$has_particle_data]))` for the 6 samples with data. The particle-rebuild basis cannot use them, so the ocean exposure rests on the high-concentration samples only. An updated particle export is the most important single fix.
+2. **Rebuild basis and blank correction (step C, ×`r round(decomp$fold_vs_previous[3], 1)`).** QC-passing particle rows outnumber the summary counts, which appear to be blank-corrected; the rows are not. Field blanks hold a median of `r stats::median(blank_qc$n)` QC-passing particles, about `r round(stats::median(blank_qc$n) / ocean_volume_L * 1000)` MP m⁻³ for a `r round(ocean_volume_L)` L sample. That is as much as an entire low-concentration sample. `r sum(mpsb_blank == "yes", na.rm = TRUE)` of `r length(mpsb_blank)` MPsizeBase ocean PSDs are blank-corrected.
+3. **Anchor and extrapolation (step D, ×`r round(decomp$fold_vs_previous[4], 1)`).** The ocean fit window is `r round(cpsd_fit_ocean_all$lower_lod_um)`–`r round(cpsd_fit_ocean_all$upper_lod_um)` µm. It holds `r round(100 * obs_frac, 1)`% of the 50–500 µm particles, against `r round(100 * pred_frac, 1)`% predicted by the fitted power law (×`r round(obs_frac / pred_frac, 1)`): the measured PSD is flatter than the fitted slope at the small end. Rescaling from the upper window then extrapolates most of the 1–5000 µm count below 10 µm (CF median `r format(round(ocean_cf_lod), big.mark = ",")`).
+
+Starting from the all-sample reported concentrations with the sieve anchor (step A), this study's 1–5000 µm ocean value is comparable to MPsizeBase. The production ocean value is therefore an upper bound, conditional on the 2024 samples, the rebuild basis and the LOD anchor. It is not evidence of unusually high contamination.
+
+
+**Tier 4 (500–5000 µm, optional) is not run.** The visually extracted large-particle fraction and the 11 MPsizeBase PSDs covering 500–5000 µm (mostly tows) are not comparable enough for a quantitative statement.
+
+```{r mpsb-restore-rng, include=FALSE}
+if (!is.null(mpsb_rng_state)) assign(".Random.seed", mpsb_rng_state, envir = globalenv())
+```

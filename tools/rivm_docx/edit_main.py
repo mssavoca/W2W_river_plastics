@@ -112,6 +112,27 @@ conc = [
 pconc = trk.new_paragraph(p72, conc, rpr_from=p72.find(qn("w:r")))
 p72.addnext(pconc)
 
+# ── Spectral QC and particle accounting (methods; FLAGGED for confirmation) ──
+qc = P["particle_qc"]; wf = qc["waterfall"]["River water"]; rc = qc["reconciliation"]
+n_qc_river = wf["Spectral QC (confident, bad_spectra == FALSE)"]
+n_plastic_river = wf["Plastic (not mineral/organic)"]
+excl = {m: len(P["rescaling"][k] or []) for m, k in (("river", "river_excluded_no_particle_data"), ("ocean", "ocean_excluded_no_particle_data"))}
+p_lab = find_p("As laboratory procedures were refined")
+qc_text = [
+    "Spectral quality control and particle accounting. Particle-level µFTIR records were retained if the spectral library match was rated confident and the "
+    "match correlation exceeded 0.66 (the bad-spectra flag in the instrument export marks correlations ≤ 0.66). "
+    f"Of {n_plastic_river:,} plastic-classified particle records from river samples, {n_qc_river:,} passed spectral quality control. "
+    f"The per-sample summary used for Table 1 counted {qc['summary_count_river']:,} particles; the summary counts are not a subset of the particle-level records "
+    "(they differ by polymer class), consistent with separate upstream processing. "
+    "Each sample's concentration was therefore rebuilt from its quality-controlled particle records, with each record representing the sample's aliquot "
+    "extrapolation factor (extrapolated count divided by counted particles) within the analysed volume. "
+    f"Samples without particle-level records could not be rebuilt and were excluded rather than treated as non-detects ({excl['river']} river and {excl['ocean']} ocean samples). ",
+    ("[FLAG – CONFIRM BEFORE PUBLICATION: the rebuilt-concentration basis assumes the quality-controlled particle records are the particles scaled by the summary's "
+     "aliquot factor; this must be confirmed with the analytical laboratory, and the particle-level export must be updated for the 2025 samples.]", {"bold": True}),
+]
+pqc = trk.new_paragraph(p_lab, qc_text, rpr_from=p_lab.find(qn("w:r")))
+p_lab.addnext(pqc)
+
 # ── Figures 7 and 8 after Fig. 6 caption ──────────────────────────────────────
 p_fig6cap = find_p("Fig. 6. C-PSD particle length fits")
 p_fig6img = p_fig6cap.getprevious()
@@ -230,7 +251,7 @@ trk.tracked_replace(p73, "The fitted slope was estimated over the empirically su
                     [f"The fitted slopes and concentrations were both restricted to each river’s empirically supported C-PSD window ({lo:.0f}-{hi:.0f} µm for the pooled fit)"])
 trk.tracked_replace(p73, "(ΔAIC = -44.0)",
                     [f"(ΔAIC = {two['dAIC']:.1f}; breakpoint {two['breakpoint_um']:.0f} µm; differential slopes {two['a_fine_diff']:.2f} below and {two['a_coarse_diff']:.2f} above), "
-                     f"giving a correction factor of {cf3(rs['CF_two'])} and a median of {sigL(W1t['median_L'])} microplastics L⁻¹ ({rs['ratio_W1_river_over_two']:.1f}-fold lower than with river-specific single slopes)"])
+                     f"giving a correction factor of {cf3(rs['CF_two'])} and a median of {sigL(W1t['median_L'])} microplastics L⁻¹ ({rs['ratio_W1_pooled_over_two']:.1f}-fold lower than with the pooled single slope on the same window)"])
 
 # Conclusions
 p77 = find_p("Our results also demonstrate how environmental microplastic abundance")

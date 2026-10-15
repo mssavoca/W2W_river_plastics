@@ -63,7 +63,7 @@ plot_cpsd_multi <- function(fits,
         in_lod = is.finite(lower_lod_plot) & is.finite(fo$upper_lod_um) &
                  L_low >= lower_lod_plot & L_high <= fo$upper_lod_um
       ) |>
-      dplyr::filter(L_low > 0, N_ge > 0)
+      dplyr::filter(L_low > 0, N_ge > 0, n > 0)  # populated bins only (as in the fit); empty bins repeat N_ge
   }))
 
   # Per-group fit parameters for equation labels

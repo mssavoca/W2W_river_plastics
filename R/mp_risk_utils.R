@@ -454,8 +454,12 @@ lod_scope_monitoring_concentrations <- function(
     reported_lmin_col = "Lmin_reported_um", reported_lmax_col = "Lmax_reported_um",
     cpsd_fit, group_col = NULL, cpsd_fit_by_group = NULL,
     sample_id_col = "sample_id", raw_sample_id_col = "Client_ID_MSSupdate",
-    raw_length_col = "length_um", raw_count_col = "count") {
-  required_monitoring <- c(sample_id_col, reported_conc_col, reported_lmin_col, reported_lmax_col)
+    raw_length_col = "length_um", raw_count_col = "count",
+    concentration_basis = c("particle_rebuild", "reported_fraction"),
+    reported_count_col = "count", drop_unmeasured = TRUE) {
+  concentration_basis <- match.arg(concentration_basis)
+  required_monitoring <- c(sample_id_col, reported_conc_col, reported_lmin_col, reported_lmax_col,
+                           if (concentration_basis == "particle_rebuild") reported_count_col)
   required_raw <- c(raw_sample_id_col, raw_length_col)
   stopifnot(is.data.frame(monitoring), is.data.frame(raw_particles),
             all(required_monitoring %in% names(monitoring)),
@@ -503,15 +507,18 @@ lod_scope_monitoring_concentrations <- function(
       in_lod_window = raw_length_um >= lod_lower_um & raw_length_um < lod_upper_um
     ) |>
     dplyr::summarise(
+      n_particles_qc_total = sum(raw_count, na.rm = TRUE),
       n_particles_reported_window = sum(raw_count[in_reported_window], na.rm = TRUE),
       n_particles_lod_window = sum(raw_count[in_lod_window], na.rm = TRUE),
       .by = dplyr::all_of(sample_id_col)
     )
 
-  monitoring |>
+  out <- monitoring |>
     dplyr::left_join(lod_bounds, by = sample_id_col) |>
     dplyr::left_join(raw_counts, by = sample_id_col) |>
     dplyr::mutate(
+      has_particle_data = !is.na(n_particles_qc_total) & n_particles_qc_total > 0,
+      n_particles_qc_total = dplyr::coalesce(n_particles_qc_total, 0),
       n_particles_reported_window = dplyr::coalesce(n_particles_reported_window, 0),
       n_particles_lod_window = dplyr::coalesce(n_particles_lod_window, 0),
       lod_particle_fraction = dplyr::if_else(
@@ -520,9 +527,82 @@ lod_scope_monitoring_concentrations <- function(
         0
       ),
       Lmin_measured_um = lod_lower_um,
-      Lmax_measured_um = lod_upper_um,
-      !!output_conc_col := .data[[reported_conc_col]] * lod_particle_fraction
+      Lmax_measured_um = lod_upper_um
     )
+
+  if (concentration_basis == "particle_rebuild") {
+    # Concentration rebuilt from the QC-passing particle rows: each row stands
+    # for (extrap_count / count) particles (the summary's aliquot factor) in
+    # the sample's analysed volume (extrap_count / C_reported), so one row
+    # contributes C_reported / count. Samples with no QC-passing particle rows
+    # cannot be rebuilt and are NA (not zero); they are not non-detects.
+    out <- out |>
+      dplyr::mutate(
+        conc_per_qc_particle = dplyr::if_else(has_particle_data, .data[[reported_conc_col]] / .data[[reported_count_col]], NA_real_),
+        C_rebuilt_reported_window = n_particles_reported_window * conc_per_qc_particle,
+        !!output_conc_col := n_particles_lod_window * conc_per_qc_particle
+      )
+  } else {
+    out <- out |>
+      dplyr::mutate(!!output_conc_col := .data[[reported_conc_col]] * lod_particle_fraction)
+  }
+
+  excluded <- out[[sample_id_col]][!out$has_particle_data]
+  if (drop_unmeasured && concentration_basis == "particle_rebuild" && length(excluded) > 0) {
+    message("lod_scope_monitoring_concentrations(): ", length(excluded),
+            " sample(s) without QC-passing particle rows excluded (cannot rebuild concentration): ",
+            paste(excluded, collapse = ", "))
+    out <- out[out$has_particle_data, , drop = FALSE]
+  }
+  attr(out, "excluded_no_particle_data") <- excluded
+  attr(out, "concentration_basis") <- concentration_basis
+  out
+}
+
+#' Columns added by lod_scope_monitoring_concentrations(); drop them before
+#' re-scoping an already-scoped monitoring table to a different window.
+lod_scope_added_cols <- c("reported_lower_um", "reported_upper_um", "lod_lower_um", "lod_upper_um",
+                          "has_particle_data", "n_particles_qc_total", "n_particles_reported_window",
+                          "n_particles_lod_window", "lod_particle_fraction", "conc_per_qc_particle",
+                          "C_rebuilt_reported_window")
+
+#' Spectral QC predicate for particle-level µFTIR rows (shared by river, ocean, sand)
+#'
+#' `bad_spectra` is a deterministic flag on the library-match correlation:
+#' TRUE <=> max_cor_val <= 0.66 (a POOR spectrum), FALSE <=> max_cor_val > 0.66.
+#' Every analyst "possible"/"undetermined" row is TRUE. A pass therefore needs
+#' acc_analy_conf == "confident" AND bad_spectra == FALSE. (Before 2026-10-15
+#' the pipeline kept bad_spectra == TRUE, i.e. only poorly matched particles;
+#' see docs/CHANGELOG_hoffman_revisions.md and R/particle_qc_audit.R.)
+spectra_qc_pass <- function(d) {
+  d$acc_analy_conf %in% "confident" & d$bad_spectra %in% FALSE
+}
+
+#' Fail loudly if a QC-filtered particle table has the wrong polarity
+assert_spectra_qc <- function(d) {
+  if (nrow(d) == 0) stop("assert_spectra_qc(): no particles passed spectral QC", call. = FALSE)
+  if (any(is.na(d$material_class))) stop("assert_spectra_qc(): retained rows with missing polymer ID", call. = FALSE)
+  if (any(d$max_cor_val <= 0.66, na.rm = TRUE) || any(d$bad_spectra %in% TRUE))
+    stop("assert_spectra_qc(): retained rows with max_cor_val <= 0.66 / bad_spectra == TRUE (polarity error)", call. = FALSE)
+  if (!all(d$acc_analy_conf %in% "confident")) stop("assert_spectra_qc(): retained non-confident rows", call. = FALSE)
+  invisible(TRUE)
+}
+
+#' Particle-accounting waterfall for one matrix (production QC rule)
+particle_qc_waterfall <- function(parts_all, sample_ids, sample_type) {
+  steps <- list(
+    "All rows (all matrices)"           = function(d) rep(TRUE, nrow(d)),
+    "Samples only (blanks removed)"     = function(d) d$sample_or_blank %in% "sample",
+    "Matrix (sample_type)"              = function(d) d$sample_type %in% sample_type,
+    "Canonical sample set"              = function(d) d$Client_ID_MSSupdate %in% sample_ids,
+    "Plastic (not mineral/organic)"     = function(d) !d$material_class %in% c("mineral", "organic matter") & !is.na(d$material_class),
+    "Spectral QC (confident, bad_spectra == FALSE)" = function(d) spectra_qc_pass(d),
+    "Valid length"                      = function(d) is.finite(d$max_length_um) & d$max_length_um > 0,
+    "Inside 50-500 um"                  = function(d) d$max_length_um >= 50 & d$max_length_um <= 500
+  )
+  n <- integer(0); d <- parts_all
+  for (nm in names(steps)) { d <- d[steps[[nm]](d), ]; n[nm] <- nrow(d) }
+  tibble::tibble(stage = names(n), n = unname(n), n_dropped = c(NA, -diff(unname(n))))
 }
 
 #' Polymer density lookup used for particle-level density sensitivity

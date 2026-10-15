@@ -97,15 +97,32 @@ monitoring_raw  <- readRDS(monitoring_file) |>
   dplyr::mutate(Client_ID_MSSupdate = dplyr::recode(Client_ID_MSSupdate,
                                                     "CR020250611S"    = "CR020250611SS",
                                                     "SRR20240205SS_2" = "SRR20240205SS"))
-raw_data_cache_key <- list(file.info(file.path(proj_root, "data_input", "Part_dets_comb.rds"))$mtime,
-                           tools::md5sum(monitoring_file))
-
 # ── Utility functions (sourced from companion scripts in R/) ──
 # mp_risk_utils.R – C-PSD fitting, exposure/hazard/risk functions
 # cpsd_plotting.R – plot_cpsd_multi(), MP_PALETTE
 source(file.path(proj_root, "R", "mp_risk_utils.R"))
 source(file.path(proj_root, "R", "cpsd_plotting.R"))
 source(file.path(proj_root, "R", "risk_plotting.R"))    # matrix-aware risk plotting helpers
+
+# Concentration basis for the C-PSD-window exposure concentration (see
+# lod_scope_monitoring_concentrations()): "particle_rebuild" (production since
+# 2026-10-15; QC-passing particle rows x summary aliquot factor
+# extrap_count/count) or "reported_fraction" (reported concentration x in-window
+# particle fraction; prior production, retained as a sensitivity).
+# FLAG: the particle-rebuild basis needs data-owner confirmation before
+# publication -- the summary's `count` cannot be reproduced from the particle
+# table (data_output/particle_qc_reconciliation_by_sample.csv).
+concentration_basis <- "particle_rebuild"
+
+# Cache key: content hashes (not mtimes) of both input files, plus hashes of the
+# spectral-QC rule and concentration basis. The particle-set hash is appended in
+# Section 3.1 once the QC'd particle table exists, so every cached chunk below
+# is invalidated by any change to the data, the QC filter, or the retained set.
+raw_data_cache_key <- list(
+  particle_file = unname(tools::md5sum(file.path(proj_root, "data_input", "Part_dets_comb.rds"))),
+  monitoring_file = unname(tools::md5sum(monitoring_file)),
+  qc_filter = rlang::hash(deparse(spectra_qc_pass)),
+  concentration_basis = concentration_basis)
 
 # Hoffman et al. (2026)-motivated sensitivity controls. These are explicit
 # assumptions so they can be changed without editing hidden model logic.
@@ -168,11 +185,18 @@ This data comes from microscopy/FTIR particle measurements (a table of individua
 
 ```{r}
 # import river particle data (includes plastics and non-plastics)
-raw_particles <- readRDS("data_input/Part_dets_comb.rds") |> 
-  # filter to only QC-passing particles
-  dplyr::filter(!material_class %in% c("mineral", "organic matter"), #filter non-plastic
-                acc_analy_conf == "confident", # only use confident spectra
-                bad_spectra) %>% #filter out bad spectra
+parts_all <- readRDS("data_input/Part_dets_comb.rds")
+raw_particles <- parts_all |>
+  dplyr::filter(!material_class %in% c("mineral", "organic matter")) #filter non-plastic
+# Spectral QC (shared predicate, R/mp_risk_utils.R): confident AND
+# bad_spectra == FALSE. bad_spectra is TRUE exactly when the library-match
+# correlation max_cor_val <= 0.66, i.e. TRUE = POOR spectrum. Until 2026-10-15
+# this filter kept bad_spectra == TRUE (only poorly matched particles); see
+# R/particle_qc_audit.R and docs/CHANGELOG_hoffman_revisions.md.
+stopifnot(with(dplyr::filter(parts_all, !is.na(bad_spectra)), all(bad_spectra == (max_cor_val <= 0.66))))
+raw_particles <- raw_particles[spectra_qc_pass(raw_particles), ]
+assert_spectra_qc(raw_particles)
+raw_particles <- raw_particles |>
   # extract the first 8-digit block from the ID
   mutate(date_raw = str_extract(Client_ID_MSSupdate, "\\d{8}"), date = ymd(date_raw), # convert YYYYMMDD → Date
          shape = case_when(aspect_ratio >= 3 ~ "fiber", # common definition of fiber - check!
@@ -189,6 +213,10 @@ raw_particles <- readRDS("data_input/Part_dets_comb.rds") |>
     Client_ID_MSSupdate = dplyr::recode(Client_ID_MSSupdate, "SRR20240205SS_2" = "SRR20240205SS")
   ) |>
   dplyr::filter(Client_ID_MSSupdate %in% unique(monitoring_raw$Client_ID_MSSupdate))
+
+# Cache key: append a hash of the retained particle set itself (Section 1 setup).
+raw_data_cache_key$particle_set <- rlang::hash(
+  raw_particles[, c("Client_ID_MSSupdate", "sample_id", "particle_id", "length_um", "width_um", "area_um2", "material_class")])
 
 # subset by matrix for downstream analysis
 raw_particles_river <- raw_particles |> 
@@ -469,7 +497,9 @@ knitr::kable(loc_summary, caption = "C-PSD length fits by river location (Segur 
 
 ### 4.2.2 LOD-scoped monitoring concentrations
 
-The exposure concentration and correction-factor denominator must refer to the same particle-size interval. For each sample, we therefore retain the data owner's reported concentration only as its sample-specific normalization, then multiply it by the fraction of that sample's QC-passing particle count that lies within its river's C-PSD fit window. The resulting `C_measured_pL` is the concentration within that C-PSD-valid window, and its lower and upper bounds are passed unchanged to the correction factor. Samples without a QC-passing particle in the valid window receive a zero LOD-window concentration; they remain in the EED as non-detects.
+The exposure concentration and correction-factor denominator must refer to the same particle-size interval. Under the production `particle_rebuild` basis, each sample's concentration is rebuilt directly from its QC-passing particle rows: every row inside the river's C-PSD fit window counts as `extrap_count / count` particles (the summary's aliquot factor) in the sample's analysed volume (`extrap_count / C_reported_pL`), so one row contributes `C_reported_pL / count` particles/L. The resulting `C_measured_pL` is the concentration within that C-PSD-valid window, and its bounds are passed unchanged to the correction factor. Samples whose QC-passing rows all fall outside the window receive a zero concentration and stay in the EED as non-detects; samples with **no** particle-level rows at all cannot be rebuilt and are excluded (they are not non-detects). The prior basis (reported concentration × in-window particle fraction) is retained as `concentration_basis = "reported_fraction"`.
+
+**FLAG (confirm before publication):** the particle-rebuild basis assumes that the QC-passing particle rows are the particles that the summary's aliquot factor scales. The summary `count` cannot be reproduced from the particle table under any tested inclusion rule (Section 4.2.2.1), so this basis must be confirmed with the data owner.
 
 ```{r river-lod-scoped-concentrations}
 monitoring <- lod_scope_monitoring_concentrations(
@@ -479,13 +509,17 @@ monitoring <- lod_scope_monitoring_concentrations(
   output_conc_col = "C_measured_pL",
   cpsd_fit = cpsd_fit_all,
   group_col = "river",
-  cpsd_fit_by_group = cpsd_fits_by_loc
+  cpsd_fit_by_group = cpsd_fits_by_loc,
+  concentration_basis = concentration_basis
 )
+river_excluded_no_particles <- attr(monitoring, "excluded_no_particle_data")
 
 stopifnot(
   all(monitoring$Lmin_measured_um < monitoring$Lmax_measured_um),
   all(monitoring$lod_particle_fraction >= 0 & monitoring$lod_particle_fraction <= 1),
-  all(monitoring$C_measured_pL <= monitoring$C_reported_pL)
+  all(is.finite(monitoring$C_measured_pL)),
+  if (concentration_basis == "particle_rebuild") all(monitoring$C_measured_pL <= monitoring$C_rebuilt_reported_window + 1e-12)
+  else all(monitoring$C_measured_pL <= monitoring$C_reported_pL)
 )
 
 river_lod_conc_summary <- monitoring |>
@@ -495,14 +529,67 @@ river_lod_conc_summary <- monitoring |>
     n_zero_lod_concentration = sum(C_measured_pL == 0),
     median_particle_fraction = stats::median(lod_particle_fraction),
     median_reported_pL = stats::median(C_reported_pL),
+    median_rebuilt_50_500_pL = if (concentration_basis == "particle_rebuild") stats::median(C_rebuilt_reported_window) else NA_real_,
     median_lod_window_pL = stats::median(C_measured_pL),
     .groups = "drop"
   )
 knitr::kable(
   river_lod_conc_summary,
   digits = 3,
-  caption = "River monitoring concentrations reconstructed within each river's C-PSD-valid length window. The reported 50-500 µm concentration supplies only the sample-specific normalization; downstream exposure uses the LOD-window concentration."
+  caption = paste0("River monitoring concentrations within each river's C-PSD-valid length window (basis: ", concentration_basis, "). Downstream exposure uses the LOD-window concentration. Excluded (no particle-level rows): ", if (length(river_excluded_no_particles)) paste(river_excluded_no_particles, collapse = ", ") else "none", ".")
 )
+```
+
+#### 4.2.2.1 Spectral QC and particle accounting
+
+`bad_spectra` is a deterministic flag on the spectral library-match correlation (TRUE exactly when `max_cor_val` ≤ 0.66; asserted in Section 3.1), so the QC rule keeps `acc_analy_conf == "confident"` **and** `bad_spectra == FALSE`. The waterfall below traces particle rows from the raw table to the 50–500 µm range for each matrix. The per-sample reconciliation compares QC-passing particle rows with the summary table's `count`. The two files come from different upstream processing (some polymer classes appear in one but not the other), so they are not expected to match exactly. The documented tolerance is that the pooled ratio of QC rows to summary count per matrix, over samples with particle data, must lie between 0.75 and 3. Under the pre-2026-10-15 inverted filter the river ratio was 0.32, which this check would have caught.
+
+```{r particle-qc-accounting}
+parts_all_ids <- parts_all |>
+  dplyr::mutate(Client_ID_MSSupdate = dplyr::recode(sub("_[0-9]+$", "", Client_ID_MSSupdate),
+                                                    "SRR20240205SS_2" = "SRR20240205SS"))
+qc_matrices <- c("River water" = "river water", "Ocean water" = "ocean water", "Beach sand" = "beach sand")
+canonical_ids_for <- function(st) unique(monitoring_raw$Client_ID_MSSupdate[
+  monitoring_raw$sample_type == st & monitoring_raw$material_simple == "plastic" & monitoring_raw$sample_or_blank == "sample"])
+
+particle_qc_waterfall_tbl <- dplyr::bind_rows(lapply(names(qc_matrices), function(m) {
+  particle_qc_waterfall(parts_all_ids, canonical_ids_for(qc_matrices[[m]]), qc_matrices[[m]]) |>
+    dplyr::mutate(matrix = m, .before = 1)
+}))
+particle_qc_recon_tbl <- dplyr::bind_rows(lapply(names(qc_matrices), function(m) {
+  st <- qc_matrices[[m]]
+  qc_rows <- raw_particles |> dplyr::filter(sample_type == st) |> dplyr::count(Client_ID_MSSupdate, name = "n_qc_rows")
+  monitoring_raw |>
+    dplyr::filter(sample_type == st, material_simple == "plastic", sample_or_blank == "sample") |>
+    dplyr::group_by(sample_id = Client_ID_MSSupdate) |>
+    dplyr::summarise(location = dplyr::first(sample_location), summ_count = sum(count),
+                     summ_extrap_count = sum(extrap_count), .groups = "drop") |>
+    dplyr::left_join(qc_rows, by = c("sample_id" = "Client_ID_MSSupdate")) |>
+    dplyr::mutate(matrix = m, .before = 1, n_qc_rows = dplyr::coalesce(n_qc_rows, 0L),
+                  aliquot_factor = summ_extrap_count / summ_count,
+                  ratio_qc_rows_to_summary = n_qc_rows / summ_count,
+                  status = dplyr::if_else(n_qc_rows > 0, "rebuilt", "excluded: no particle-level rows"))
+}))
+utils::write.csv(particle_qc_waterfall_tbl, "data_output/particle_qc_waterfall.csv", row.names = FALSE)
+utils::write.csv(particle_qc_recon_tbl, "data_output/particle_qc_reconciliation_by_sample.csv", row.names = FALSE)
+
+particle_qc_recon_summary <- particle_qc_recon_tbl |>
+  dplyr::group_by(matrix) |>
+  dplyr::summarise(n_samples = dplyr::n(), n_excluded_no_particle_rows = sum(n_qc_rows == 0),
+                   summary_count_total = sum(summ_count), qc_rows_total = sum(n_qc_rows),
+                   pooled_ratio_measured = sum(n_qc_rows[n_qc_rows > 0]) / sum(summ_count[n_qc_rows > 0]),
+                   median_ratio_measured = stats::median(ratio_qc_rows_to_summary[n_qc_rows > 0]), .groups = "drop")
+
+# Documented tolerance (see text above): catches a polarity regression.
+stopifnot(all(particle_qc_recon_summary$pooled_ratio_measured > 0.75 &
+              particle_qc_recon_summary$pooled_ratio_measured < 3))
+# The samples dropped from the river exposure are exactly those without particle rows.
+stopifnot(setequal(river_excluded_no_particles,
+                   particle_qc_recon_tbl$sample_id[particle_qc_recon_tbl$matrix == "River water" & particle_qc_recon_tbl$n_qc_rows == 0]))
+
+knitr::kable(particle_qc_waterfall_tbl, caption = "Particle-accounting waterfall by matrix (production spectral-QC rule)")
+knitr::kable(particle_qc_recon_summary, digits = 3,
+             caption = "QC-passing particle rows vs. summary counts by matrix. Samples without particle-level rows are excluded from the rebuilt-concentration exposure (not treated as non-detects).")
 ```
 
 ```{r cpsd-location-heterogeneity}
@@ -631,7 +718,7 @@ knitr::kable(lit_alpha_df,
 
 **Key finding — consistency with µFTIR studies, divergence from net-trawl surveys.** Our fragment *a*~psd~ (`r round(cpsd_fit_frag$a_cpsd - 1, 2)`) and all-shape *a*~psd~ (`r round(cpsd_fit_all$a_cpsd - 1, 2)`) are within the range reported by Wang et al. (2026) for Dutch river suspended solids measured by µFTIR (−3.19 to −3.89, mean combined −3.65, SD 0.21). This agreement is not surprising: both datasets use particle-by-particle µFTIR counting on filtered samples. In contrast, our values are substantially steeper than the global surface water meta-analysis compiled by Zhao et al. (2026; mean α = 1.50, equivalent *a*~psd~ = −1.50, SD 0.53) and the freshwater/marine surface-water defaults reported by Kooi et al. (2021; α = `r round(kooi_alpha_freshwater, 2)` freshwater, `r round(kooi_alpha_marine, 2)` marine). The Segur et al. (2026) reference slopes (ocean −1.66, atmosphere −1.55 in C-PSD notation, equivalent *a*~psd~ ≈ −2.66 and −2.55) are intermediate.
 
-The divergence from the Zhao/Kooi global averages likely reflects three interacting factors: (1) **analytical resolution** — µFTIR counting captures particles approaching ~20 µm, whereas most studies in the Zhao meta-analysis used net trawls or pump samples with mesh sizes ≥ 300 µm, systematically missing the numerically dominant small-particle fraction and producing an apparent shallower slope; (2) **size range of fit** — our Segur LOD algorithm fits the C-PSD over a restricted window (~100–330 µm for fragments) within which the distribution is inherently steeper than a global fit spanning three orders of magnitude; (3) **environmental context** — California coastal rivers may differ from open-ocean or mixed-environment global compilations.
+The divergence from the Zhao/Kooi global averages likely reflects three interacting factors: (1) **analytical resolution** — µFTIR counting captures particles approaching ~20 µm, whereas most studies in the Zhao meta-analysis used net trawls or pump samples with mesh sizes ≥ 300 µm, systematically missing the numerically dominant small-particle fraction and producing an apparent shallower slope; (2) **size range of fit** — our Segur LOD algorithm fits the C-PSD over a restricted window (`r round(cpsd_fit_frag$lower_lod_used_um)`–`r round(cpsd_fit_frag$upper_lod_um)` µm for fragments) within which the distribution is inherently steeper than a global fit spanning three orders of magnitude; (3) **environmental context** — California coastal rivers may differ from open-ocean or mixed-environment global compilations.
 
 **Fiber vs. fragment.** Fibers exhibit a notably shallower slope (*a*~psd~ = `r round(cpsd_fit_fiber$a_cpsd - 1, 2)`) than fragments (*a*~psd~ = `r round(cpsd_fit_frag$a_cpsd - 1, 2)`). This is consistent with Zhao et al. (2026), who found that fibers have dramatically lower mesh capture efficiency (0.70% at 330 µm mesh; 37.6% at 20 µm mesh across a 10–5000 µm size range) compared to fragments (7.9% at 330 µm). While our µFTIR pump-and-filter approach avoids the coarsest mesh bias, filter capture of fine fibers (whose short axis — diameter ≤ 10 µm — can pass through a nominal 50 µm pore) may still be lower than for equidimensional fragments. A shallower measured fiber slope would result if fine fibers are under-retained, making observed fiber concentrations a minimum estimate. Users comparing fiber-specific concentrations across studies should be aware of this potential systematic bias.
 
@@ -954,7 +1041,7 @@ extract_fit_points <- function(fits_by_loc, metric_name) {
           N_ge   = rev(cumsum(rev(n))),
           in_lod = is.finite(b$lo) & is.finite(b$hi) & L_low >= b$lo & L_high <= b$hi
         ) |>
-        dplyr::filter(L_low > 0, N_ge > 0) |>
+        dplyr::filter(L_low > 0, N_ge > 0, n > 0) |>
         dplyr::transmute(metric = metric_name, shape = shp, location = loc,
                          L_low, logN = log10(N_ge), in_lod)
     }))
@@ -1219,9 +1306,9 @@ eed_boot           <- river_corr$eed_boot
 # Pooled-slope analyses use the POOLED C-PSD window, so their concentrations are
 # re-scoped to that window (same size interval as their CF denominator).
 monitoring_pooled_scope <- lod_scope_monitoring_concentrations(
-  monitoring = dplyr::select(monitoring, -dplyr::any_of(c("reported_lower_um", "reported_upper_um", "lod_lower_um", "lod_upper_um", "n_particles_reported_window", "n_particles_lod_window", "lod_particle_fraction"))),
+  monitoring = dplyr::select(monitoring, -dplyr::any_of(lod_scope_added_cols)),
   raw_particles = raw_particles_river, reported_conc_col = "C_reported_pL",
-  output_conc_col = "C_measured_pL", cpsd_fit = cpsd_fit_all)
+  output_conc_col = "C_measured_pL", cpsd_fit = cpsd_fit_all, concentration_basis = concentration_basis)
 if (use_river_slopes) {
   set.seed(9111)
   river_corr_pooled <- correct_and_bootstrap_eed(
@@ -1434,7 +1521,7 @@ alpha_combined_plot_river
 
 The output `MC_sim_df` is a long data frame with one row per toxicological endpoint per Monte Carlo replicate, with columns for the aligned dose (`particles_L_food_dilution`, `particles_L_ox_stress`), bioaccessibility group (`ingestible`, `translocatable`), and quality tier (`risk.13`, `bio_f`). It is then split by ERM and filtered to the relevant endpoints before SSD fitting in Section 7.4.
 
-```{r run-pssd-pipeline, cache=TRUE, cache.extra=n_boot}
+```{r run-pssd-pipeline, cache=TRUE, cache.extra=list(n_boot, raw_data_cache_key)}
 # run_pssd_pipeline() (sourced from R/mp_risk_utils.R) bundles MC_sim_align_parallel(),
 # the ERM-specific results_df filtering, erm_registry construction, and make_all_pSSDs()
 # into one step used identically across river/sediment/ocean.
@@ -1864,9 +1951,9 @@ depth_sensitivity <- dplyr::bind_rows(lapply(depth_levels, function(depth_i) {
     n = n_boot, seed = 5400 + 10 * match(depth_i, depth_levels), psd_key = paste0("river:depth:", depth_i))$haz
   mon_i <- lod_scope_monitoring_concentrations(
     monitoring = monitoring |> dplyr::filter(sample_depth_general == depth_i) |>
-      dplyr::select(-dplyr::any_of(c("reported_lower_um", "reported_upper_um", "lod_lower_um", "lod_upper_um", "n_particles_reported_window", "n_particles_lod_window", "lod_particle_fraction"))),
+      dplyr::select(-dplyr::any_of(lod_scope_added_cols)),
     raw_particles = part_i, reported_conc_col = "C_reported_pL",
-    output_conc_col = "C_measured_pL", cpsd_fit = fit_i)
+    output_conc_col = "C_measured_pL", cpsd_fit = fit_i, concentration_basis = concentration_basis)
   corr_i <- correct_and_bootstrap_eed(
     monitoring = mon_i,
     conc_col = "C_measured_pL",
@@ -2035,8 +2122,8 @@ The one genuine uncertainty from the 4×/25 µm configuration is **incomplete co
 # Compare CF and risk outcomes under two L_meas_min assumptions:
 # 50 µm (current, includes marginal zone) vs 100 µm (excludes marginal zone — conservative floor)
 lmeas_scenarios <- list(
-  "L_meas_min = 50 µm (current)" = list(L_lo = 50,  L_hi = 500),
-  "L_meas_min = 100 µm (conservative)" = list(L_lo = 100, L_hi = 500)
+  "Nominal 50-500 µm (diagnostic)" = list(L_lo = 50,  L_hi = 500),
+  "Nominal 100-500 µm (diagnostic)" = list(L_lo = 100, L_hi = 500)
 )
 
 lmeas_cf_summary <- dplyr::bind_rows(lapply(names(lmeas_scenarios), function(scen) {
@@ -2059,7 +2146,8 @@ lmeas_cf_summary <- dplyr::bind_rows(lapply(names(lmeas_scenarios), function(sce
 
 knitr::kable(lmeas_cf_summary,
   caption = paste0(
-    "Correction factor (50–500 µm → 1–5000 µm) under alternative lower detection limits. ",
+    "NOMINAL DIAGNOSTIC -- NOT THE PRODUCTION CF. Correction factor from a nominal reported range (anchor: nominal sieve range; slope: pooled river a_psd) to 1–5000 µm. ",
+    "The production CF uses each river's own C-PSD LOD window and slope (Section 5.1). ",
     "Using differential a_psd = ", round(cpsd_fit_all$a_psd, 3), " (all shapes, Segur LOD). ",
     "n_mc = ", n_mc, " Monte Carlo draws."
   ),
@@ -2068,8 +2156,8 @@ knitr::kable(lmeas_cf_summary,
 ```
 
 ```{r lmeas-inline, include=FALSE}
-cf_50  <- lmeas_cf_summary$CF_med[lmeas_cf_summary$scenario == "L_meas_min = 50 µm (current)"]
-cf_100 <- lmeas_cf_summary$CF_med[lmeas_cf_summary$scenario == "L_meas_min = 100 µm (conservative)"]
+cf_50  <- lmeas_cf_summary$CF_med[lmeas_cf_summary$scenario == "Nominal 50-500 µm (diagnostic)"]
+cf_100 <- lmeas_cf_summary$CF_med[lmeas_cf_summary$scenario == "Nominal 100-500 µm (diagnostic)"]
 ```
 
 Raising the *nominal* lower bound from 50 to 100 µm increases the diagnostic median CF from `r cf_50`× to `r cf_100`× because more particles are treated as extrapolated. This calculation does not change the production result: the production workflow uses the C-PSD-selected LOD window and recomputes each sample's input concentration within that same window.
@@ -2323,8 +2411,10 @@ monitoring_sed <- lod_scope_monitoring_concentrations(
   raw_particles = raw_particles_sed,
   reported_conc_col = "C_reported_pkg",
   output_conc_col = "C_measured_pkg",
-  cpsd_fit = cpsd_fit_sed_all
+  cpsd_fit = cpsd_fit_sed_all,
+  concentration_basis = concentration_basis
 )
+sed_excluded_no_particles <- attr(monitoring_sed, "excluded_no_particle_data")
 
 set.seed(9102)
 sed_corr <- correct_and_bootstrap_eed(
@@ -2469,7 +2559,7 @@ alpha_combined_plot_sed
 ```
 
 #### Align Toxicity Data
-```{r align-tox-sed, cache=TRUE, cache.extra=n_boot}
+```{r align-tox-sed, cache=TRUE, cache.extra=list(n_boot, raw_data_cache_key)}
 # run_pssd_pipeline() (sourced from R/mp_risk_utils.R) bundles MC_sim_align_parallel(),
 # the ERM-specific results_df filtering, erm_registry construction, and make_all_pSSDs()
 # into one step used identically across river/sediment/ocean. Sediment is mass-based
@@ -3123,12 +3213,12 @@ cpsd_slopes_all_metrics_plot
 
 ## 12.1.1 All-matrix particle-length PSD comparison with MPSizeBase
 
-This section is intentionally placed after the river, sediment, and ocean length C-PSDs have all been calculated. It imports Segur et al.'s MPSizeBase workbook directly from `assets/SI/SI 3 code and data/MPsizeBase_v15_05_2026.xlsx`, reads the workbook `Read Me`, and parses one literature *a*~psd~ value per `PSD_ID` from the `Literature PSD data` tab. The `cumsum_powerlaw_alpha` column is already the converted BN-PSD/differential slope (*a*~psd~ = *a*~cpsd~ - 1), so no additional conversion is applied.
+This section is intentionally placed after the river, sediment, and ocean length C-PSDs have all been calculated. It imports the MPSizeBase workbook v19-5-2026 (Zenodo, DOI [10.5281/zenodo.20832480](https://doi.org/10.5281/zenodo.20832480), record v5, CC BY 4.0; file `data_input/MPsizeBase v19-5-2026.xlsx`, MD5 bd31cb5863cf1022f3717d219e2e6865, asserted below), reads the workbook `Read Me`, and parses one literature *a*~psd~ value per `PSD_ID` from the `Literature PSD data` tab. The `cumsum_powerlaw_alpha` column is already the converted BN-PSD/differential slope (*a*~psd~ = *a*~cpsd~ - 1), so no additional conversion is applied.
 
 ```{r alpha-comparison-all-matrices-mpsizebase, fig.width=12, fig.height=7, echo=FALSE, message=FALSE, warning=FALSE}
-mpsizebase_path <- file.path(
-  proj_root, "assets", "SI", "SI 3 code and data", "MPsizeBase_v15_05_2026.xlsx"
-)
+mpsizebase_path <- file.path(proj_root, "data_input", "MPsizeBase v19-5-2026.xlsx")
+mpsizebase_md5 <- "bd31cb5863cf1022f3717d219e2e6865"  # Zenodo 10.5281/zenodo.20832480 (v5)
+stopifnot("MPsizeBase workbook checksum mismatch" = unname(tools::md5sum(mpsizebase_path)) == mpsizebase_md5)
 
 mpsizebase_readme <- readxl::read_excel(
   mpsizebase_path,
@@ -3175,8 +3265,11 @@ literature_psd_alpha <- mpsizebase_literature_raw |>
     n_bins = dplyr::n(),
     a_cpsd = dplyr::first(as.numeric(cumsum_slope)),
     a_psd = dplyr::first(as.numeric(cumsum_powerlaw_alpha)),
-    lod_low_um = suppressWarnings(min(as.numeric(Low_size), na.rm = TRUE)),
-    lod_high_um = suppressWarnings(max(as.numeric(High_size), na.rm = TRUE)),
+    # Fitted LOD window = the filtered (fit) bins, not the full reported bin range.
+    lod_low_um = suppressWarnings(min(as.numeric(filtered_low_size), na.rm = TRUE)),
+    lod_high_um = suppressWarnings(max(as.numeric(filtered_high_size), na.rm = TRUE)),
+    bins_low_um = suppressWarnings(min(as.numeric(Low_size), na.rm = TRUE)),
+    bins_high_um = suppressWarnings(max(as.numeric(High_size), na.rm = TRUE)),
     .groups = "drop"
   ) |>
   dplyr::mutate(
@@ -3382,9 +3475,10 @@ zhao_df <- tibble::tibble(
 
 literature_ocean_df <- literature_ocean_only |>
   dplyr::transmute(
-    Source      = "Literature ocean (MPSizeBase compilation, marine)",
+    # Segur et al. fit fragments and fibers separately: keep them as separate rows.
+    Source      = paste0("Literature ocean (MPSizeBase compilation, marine) — ", Shape, "s"),
     Matrix      = "Marine",
-    Shape       = "all",
+    Shape       = Shape,
     alpha_abs,
     se          = NA_real_,
     se_kind     = NA_character_,
@@ -3398,7 +3492,8 @@ source_levels_bottom_to_top <- c(
   "Zhao et al. 2026 — global surface water (mixed F+M, unclassified)",
   "Kooi et al. 2021 — marine default",
   "Segur et al. 2026 — ocean reference (marine, C-PSD)",
-  "Literature ocean (MPSizeBase compilation, marine)",
+  "Literature ocean (MPSizeBase compilation, marine) — fibers",
+  "Literature ocean (MPSizeBase compilation, marine) — fragments",
   "This study — Ocean (marine)",
   "Kooi et al. 2021 — freshwater default",
   "Wang et al. 2026 — Rhine/Meuse rivers (freshwater, µFTIR)",
@@ -3414,7 +3509,8 @@ source_labels_clean <- c(
   "Zhao et al. 2026 — global surface water (mixed F+M, unclassified)" = "Zhao et al. 2026 - Global surface water (N=45 studies)",
   "Kooi et al. 2021 — marine default"                                 = "Kooi et al. 2021 - Marine default",
   "Segur et al. 2026 — ocean reference (marine, C-PSD)"               = "Segur et al. 2026 - Ocean reference",
-  "Literature ocean (MPSizeBase compilation, marine)"                 = paste0("Literature ocean (MPSizeBase) (N=", nrow(literature_ocean_only), ")"),
+  "Literature ocean (MPSizeBase compilation, marine) — fragments"     = paste0("Literature ocean fragments (MPSizeBase) (N=", sum(literature_ocean_only$Shape == "fragment"), ")"),
+  "Literature ocean (MPSizeBase compilation, marine) — fibers"        = paste0("Literature ocean fibers (MPSizeBase) (N=", sum(literature_ocean_only$Shape == "fiber"), ")"),
   "This study — Ocean (marine)"                                       = "This study - Ocean",
   "Kooi et al. 2021 — freshwater default"                             = "Kooi et al. 2021 - Freshwater default",
   "Wang et al. 2026 — Rhine/Meuse rivers (freshwater, µFTIR)"         = "Wang et al. 2026 - Rhine/Meuse rivers (N=6 samples)",
@@ -3430,7 +3526,7 @@ alpha_forest_df <- dplyr::bind_rows(
     Matrix     = factor(Matrix, levels = c("Freshwater", "Marine", "Mixed (unclassified)")),
     Shape      = factor(Shape, levels = c("fragment", "fiber", "all", "all-site")),
     is_this_study   = grepl("^This study", Source),
-    is_boxplot_row  = Source == "Literature ocean (MPSizeBase compilation, marine)",
+    is_boxplot_row  = grepl("^Literature ocean", Source),
     # offset was fixed at each source-piece's own construction (above), so it
     # is never recomputed from a mismatched/shared group size here.
     x_pos = as.numeric(Source) + offset,
@@ -3594,8 +3690,11 @@ monitoring_ocean <- lod_scope_monitoring_concentrations(
   raw_particles = raw_particles_ocean,
   reported_conc_col = "C_reported_pL",
   output_conc_col = "C_measured_pL",
-  cpsd_fit = cpsd_fit_ocean_all
+  cpsd_fit = cpsd_fit_ocean_all,
+  concentration_basis = concentration_basis
 )
+ocean_excluded_no_particles <- attr(monitoring_ocean, "excluded_no_particle_data")
+cat("Ocean samples excluded (no particle-level rows):", length(ocean_excluded_no_particles), "\n")
 
 cat("Ocean monitoring samples:", nrow(monitoring_ocean), "\n")
 
@@ -3724,7 +3823,7 @@ tryCatch(
 
 ### Align toxicity data
 
-```{r ocean-mc-sim, cache=TRUE, cache.extra=n_boot}
+```{r ocean-mc-sim, cache=TRUE, cache.extra=list(n_boot, raw_data_cache_key)}
 # run_pssd_pipeline() (sourced from R/mp_risk_utils.R) bundles MC_sim_align_parallel(),
 # the ERM-specific results_df filtering, erm_registry construction, and make_all_pSSDs()
 # into one step used identically across river/sediment/ocean.
@@ -3874,7 +3973,7 @@ param_values_legacy_sed    <- legacy_cumulative_av_params(param_values_sed,  "se
 param_values_legacy_ocean  <- legacy_cumulative_av_params(param_values_ocean,"marine",                cpsd_fit_volume_ocean, cpsd_fit_area_ocean)
 ```
 
-```{r spec1b-legacy-river-pipeline, include=FALSE, cache=TRUE, cache.extra=n_boot}
+```{r spec1b-legacy-river-pipeline, include=FALSE, cache=TRUE, cache.extra=list(n_boot, raw_data_cache_key)}
 set.seed(7004)
 param_matrix_legacy_river <- matrix_function(
   n = n_boot,
@@ -3905,7 +4004,7 @@ risk_draws_legacy_river  <- draw_rq_mc1d(haz_legacy_river, eed_boot_pooled$q50, 
 risk_summary_legacy_river <- summarize_rq(risk_draws_legacy_river)
 ```
 
-```{r spec1b-legacy-sed-pipeline, include=FALSE, cache=TRUE, cache.extra=n_boot}
+```{r spec1b-legacy-sed-pipeline, include=FALSE, cache=TRUE, cache.extra=list(n_boot, raw_data_cache_key)}
 set.seed(7005)
 param_matrix_legacy_sed <- matrix_function(
   n = n_boot,
@@ -3940,7 +4039,7 @@ risk_draws_legacy_sed  <- draw_rq_mc1d(haz_legacy_sed, eed_boot_sed$q50, n_risk 
 risk_summary_legacy_sed <- summarize_rq(risk_draws_legacy_sed)
 ```
 
-```{r spec1b-legacy-ocean-pipeline, include=FALSE, cache=TRUE, cache.extra=n_boot}
+```{r spec1b-legacy-ocean-pipeline, include=FALSE, cache=TRUE, cache.extra=list(n_boot, raw_data_cache_key)}
 set.seed(7006)
 param_matrix_legacy_ocean <- matrix_function(
   n = n_boot,
@@ -4058,7 +4157,7 @@ df_all_ms <- dplyr::bind_rows(lapply(names(cpsd_length_fits_by_matrix), function
       Matrix = mat,
       in_lod = L_low >= fo$lower_lod_used_um & L_high <= fo$upper_lod_um
     ) |>
-    dplyr::filter(L_low > 0, N_ge > 0)
+    dplyr::filter(L_low > 0, N_ge > 0, n > 0)
 }))
 
 pred_single_ms <- dplyr::bind_rows(lapply(names(cpsd_length_fits_by_matrix), function(mat) {
@@ -4360,6 +4459,12 @@ rq_bounding_plot
 ```{r rivm-benchmark-child, child = file.path(proj_root, "R", "rivm_benchmark.qmd")}
 ```
 
+```{r anchor-shape-child, child = file.path(proj_root, "R", "anchor_shape_sensitivity.qmd")}
+```
+
+```{r mpsizebase-child, child = file.path(proj_root, "R", "mpsizebase_comparison.qmd")}
+```
+
 
 # 14. Combined risk quotient comparison across matrices
 
@@ -4384,7 +4489,7 @@ rq_comparison_all_matrices_plot
 ```
 
 
-```{r spec3b-decomp-length-alpha-legacy, include=FALSE, cache=TRUE, cache.extra=n_boot}
+```{r spec3b-decomp-length-alpha-legacy, include=FALSE, cache=TRUE, cache.extra=list(n_boot, raw_data_cache_key)}
 # (ii) Hazard-side length-slope alignment reverted to legacy (cumulative-as-
 # differential); a.v/a.sa/a.m and exposure stay at their corrected values.
 # Requires one additional pSSD rerun (river only, for compute budget).
@@ -4426,7 +4531,7 @@ risk_draws_legacy_alpha_river <- draw_rq_mc1d(haz_legacy_alpha_river, eed_boot_p
 risk_summary_legacy_alpha_river <- summarize_rq(risk_draws_legacy_alpha_river)
 ```
 
-```{r spec3c-decomp-asa-legacy, include=FALSE, cache=TRUE, cache.extra=n_boot}
+```{r spec3c-decomp-asa-legacy, include=FALSE, cache=TRUE, cache.extra=list(n_boot, raw_data_cache_key)}
 # (iv) Hazard surface-area-slope alignment ONLY reverted to legacy
 # (cumulative-as-differential); a.v/a.m, length alpha, and exposure all stay
 # at their corrected values. This isolates a.sa alone, separate from the
@@ -4506,7 +4611,7 @@ The production correction factor extrapolates the measured particle count down t
 
 At each floor, three things move together: (1) the exposure-side correction factor and EED are recomputed over `[L_tar_min, 5000]` µm; (2) the pSSD++ integration floor (`x1M_set` in `matrix_function()`, `x1D_set` in `run_pssd_pipeline()`) is set to the same `L_tar_min`; and (3) the Food Dilution toxicity records are filtered as above before the hazard alignment is re-derived. The `L_tar_min = 1` µm row reuses the already-computed production CF/EED/hazard objects rather than recomputing an identical result under a new seed (relocate-don't-recompute).
 
-```{r m12-floor-sensitivity, message=FALSE, warning=FALSE, cache=TRUE, cache.extra=n_boot}
+```{r m12-floor-sensitivity, message=FALSE, warning=FALSE, cache=TRUE, cache.extra=list(n_boot, raw_data_cache_key)}
 m12_floors <- c(1, 2.5, 5, 7.5, 10, 20)
 
 m12_run_one_floor <- function(L_tar_min, matrix_label, monitoring_df, cpsd_fit, alpha_draws,
@@ -4994,7 +5099,7 @@ m2_run_one <- function(compartment, arm, L_tar_min, seed_exposure, seed_hazard, 
 }
 ```
 
-```{r m2-grid-run, cache=TRUE, cache.extra=n_boot, message=FALSE, warning=FALSE}
+```{r m2-grid-run, cache=TRUE, cache.extra=list(n_boot, raw_data_cache_key), message=FALSE, warning=FALSE}
 arm_a_haz_cache <- list(
   river = m2_compute_hazard(m2_get_cfg("river"), tox_fixed_river, TOX_FIXED_FLOOR, "m2_armA_haz_river", seed_hazard = 81011),
   ocean = m2_compute_hazard(m2_get_cfg("ocean"), tox_fixed_ocean, TOX_FIXED_FLOOR, "m2_armA_haz_ocean", seed_hazard = 81021)
@@ -5557,8 +5662,12 @@ m13_propagate_one <- function(fit, L_meas_min, L_meas_max, monitoring_df, conc_c
     a = -fit$alpha_mle, L_meas_min = L_meas_min, L_meas_max = L_meas_max,
     L_tar_min = 1, L_tar_max = 5000, slope_convention = "differential"
   )
-  cf_lognormal <- (stats::plnorm(5000, fit$meanlog, fit$sdlog) - stats::plnorm(1, fit$meanlog, fit$sdlog)) /
-    (stats::plnorm(L_meas_max, fit$meanlog, fit$sdlog) - stats::plnorm(L_meas_min, fit$meanlog, fit$sdlog))
+  # Computed from log upper-tail probabilities: when the tail above xmin is a
+  # near-pure power law the lognormal MLE drifts to its power-law limit (very
+  # negative meanlog, very large sdlog) and plain CDF differences underflow to 0/0.
+  lS <- function(x) stats::plnorm(x, fit$meanlog, fit$sdlog, lower.tail = FALSE, log.p = TRUE)
+  cf_lognormal <- exp(lS(1) - lS(L_meas_min)) * (-expm1(lS(5000) - lS(1))) / (-expm1(lS(L_meas_max) - lS(L_meas_min)))
+  stopifnot("lognormal CF is not finite" = is.finite(cf_lognormal) && cf_lognormal > 0)
 
   rq_for_cf <- function(cf_val, seed) {
     set.seed(seed)
@@ -6655,7 +6764,7 @@ This subsection implements `sediment_psd_shift_sensitivity()` (`R/mp_risk_utils.
 
 **What is *not* transplanted.** Thuy-Dung et al.'s *k*~frag~/shell-geometry fragmentation model is calibrated to polymer-coated-fertilizer prills with 7-year field data — a single, known-age, known-geometry polymer system — not the heterogeneous mixed-polymer sediment microplastics of unknown age sampled here. Rather than fit a kinetic rate that would not transfer to this dataset, the size-shift below is parameterized as an explicit, cited scenario grid: an added shift to the differential length/area/volume/mass slopes (`alpha`/`a.v`/`a.sa`/`a.m.sediment.freshwater`, positive-alpha convention — larger values are steeper/finer), applied identically across all four size metrics as a simplifying assumption (fragmentation is assumed to shift all size metrics proportionally).
 
-```{r sediment-psd-shift-sensitivity, cache=TRUE, cache.extra=n_boot}
+```{r sediment-psd-shift-sensitivity, cache=TRUE, cache.extra=list(n_boot, raw_data_cache_key)}
 # 0 = no shift (baseline -- an internal consistency check against
 # Section 11.4's production sediment HC5, subject to Monte Carlo/parallel RNG
 # noise since no fixed seed is threaded through PSSDplusplus's parallel
@@ -7648,8 +7757,16 @@ psd_params <- list(
   # Rescaling on the resolved basis: concentrations restricted to each C-PSD
   # window (Section 4.2.2), CF from that same window to 1-5000 um.
   rescaling = list(
-    basis = "C-PSD-window concentration (reported 50-500 um concentration x in-window particle fraction); CF from the same window to 1-5000 um",
+    basis = if (concentration_basis == "particle_rebuild")
+      "C-PSD-window concentration rebuilt from QC-passing particle rows x summary aliquot factor (extrap_count/count) / analysed volume; CF from the same window to 1-5000 um. FLAG: needs data-owner confirmation before publication."
+      else "C-PSD-window concentration (reported 50-500 um concentration x in-window particle fraction); CF from the same window to 1-5000 um",
+    concentration_basis = concentration_basis,
+    n_samples_river_used = nrow(monitoring),
+    river_excluded_no_particle_data = I(river_excluded_no_particles),
+    ocean_excluded_no_particle_data = I(ocean_excluded_no_particles),
+    sand_excluded_no_particle_data = I(sed_excluded_no_particles),
     n_nondetect_river_window = sum(monitoring$C_measured_pL == 0),
+    C_rebuilt_50_500_river = if (concentration_basis == "particle_rebuild") qsum(monitoring$C_rebuilt_reported_window) else NULL,
     C_W2_reported = qsum(monitoring$C_reported_pL),
     C_lod_window_river = qsum(monitoring$C_measured_pL),
     lod_fraction_median = stats::median(monitoring$lod_particle_fraction),
@@ -7669,7 +7786,18 @@ psd_params <- list(
                            tissue_translocation_HC5 = rs_row(risk_summary_pooled, "Tissue Translocation")),
   eed_river_q50_median_L = stats::median(eed_boot$q50)
 )
-psd_params$rescaling$ratio_W1_river_over_two <- psd_params$rescaling$C_W1_river$median_L / psd_params$rescaling$C_W1_two$median_L
+# Pooled single-slope W1 over pooled two-segment W1 (same anchor and slope source;
+# Part C fix -- previously divided the river-specific W1 by the pooled two-segment W1).
+psd_params$rescaling$ratio_W1_pooled_over_two <- psd_params$rescaling$C_W1_pooled$median_L / psd_params$rescaling$C_W1_two$median_L
+psd_params$particle_qc <- list(
+  rule = "acc_analy_conf == 'confident' & bad_spectra == FALSE (bad_spectra TRUE <=> max_cor_val <= 0.66)",
+  polarity_fixed = "2026-10-15 (previously kept bad_spectra == TRUE)",
+  waterfall = lapply(split(particle_qc_waterfall_tbl, particle_qc_waterfall_tbl$matrix), function(x) as.list(stats::setNames(x$n, x$stage))),
+  reconciliation = lapply(split(particle_qc_recon_summary, particle_qc_recon_summary$matrix), function(x) as.list(x[, -1])),
+  summary_count_river = sum(particle_qc_recon_tbl$summ_count[particle_qc_recon_tbl$matrix == "River water"]),
+  qc_rows_river = nrow(raw_particles_river))
+if (exists("anchor_params")) psd_params$anchor_shape <- anchor_params
+if (exists("mpsb_params")) psd_params$mpsizebase <- mpsb_params
 
 jsonlite::write_json(psd_params, "data_output/psd_rescaling_params.json", auto_unbox = TRUE, digits = NA, pretty = TRUE)
 flat <- unlist(psd_params)

@@ -1,0 +1,4 @@
+matrix,n_sample_class_cells,cells_summary_zero_but_particles,cells_summary_exceeds_all_rows,particles_in_classes_absent_from_summary,summary_count_in_cells_exceeding_rows
+river,507,133,87,917,464
+ocean,116,10,63,20,198
+sand,533,47,294,88,1617

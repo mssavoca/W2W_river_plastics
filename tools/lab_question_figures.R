@@ -1,0 +1,150 @@
+# Figures for docs/lab_questions/lab_data_questions.md (questions for the
+# analytical lab). Reads only data_input/ and writes docs/lab_questions/figs/.
+# Run from the project root:  Rscript tools/lab_question_figures.R
+
+suppressMessages({ library(dplyr); library(ggplot2) })
+source("R/mp_risk_utils.R")
+out <- "docs/lab_questions/figs"
+dir.create(out, recursive = TRUE, showWarnings = FALSE)
+theme_set(theme_minimal(base_size = 13) +
+            theme(panel.border = element_rect(color = "gray80", fill = NA, linewidth = 0.4),
+                  plot.title.position = "plot"))
+save <- function(p, f, w = 9, h = 5.5) ggsave(file.path(out, f), p, width = w, height = h, dpi = 200)
+
+summ <- readRDS("data_input/Part_dets_summ_final.rds") |>
+  mutate(sid = recode(Client_ID_MSSupdate, "CR020250611S" = "CR020250611SS", "SRR20240205SS_2" = "SRR20240205SS"))
+parts <- readRDS("data_input/Part_dets_comb.rds") |>
+  mutate(sid = recode(sub("_[0-9]+$", "", Client_ID_MSSupdate), "SRR20240205SS_2" = "SRR20240205SS"))
+plastic <- parts |> filter(!material_class %in% c("mineral", "organic matter"), !is.na(material_class))
+qc_new <- spectra_qc_pass(plastic)
+qc_old <- plastic$acc_analy_conf %in% "confident" & plastic$bad_spectra %in% TRUE
+matrices <- c("river water" = "River water", "ocean water" = "Ocean water", "beach sand" = "Beach sand")
+summ_tot <- summ |>
+  filter(material_simple == "plastic", sample_or_blank == "sample", sample_type %in% names(matrices)) |>
+  group_by(sid, sample_type) |>
+  summarise(summary_count = sum(count), conc_m3 = sum(extrap_conc_PPL) * 1000, .groups = "drop")
+
+# 1. bad_spectra is a threshold on the library-match correlation
+f1 <- parts |> filter(!is.na(bad_spectra)) |>
+  mutate(flag = ifelse(bad_spectra, "bad_spectra = TRUE", "bad_spectra = FALSE"))
+p1 <- ggplot(f1, aes(max_cor_val, fill = flag)) +
+  geom_histogram(binwidth = 0.01, boundary = 0, color = NA) +
+  geom_vline(xintercept = 0.66, linetype = "dashed") + geom_vline(xintercept = 0.60, linetype = "dotted") +
+  annotate("text", x = 0.665, y = Inf, label = "0.66: bad_spectra cut", hjust = 0, vjust = 1.5, size = 3.6) +
+  annotate("text", x = 0.595, y = Inf, label = "0.60: 'confident' cut", hjust = 1, vjust = 1.5, size = 3.6) +
+  scale_fill_manual(values = c("bad_spectra = FALSE" = "#1f6f5c", "bad_spectra = TRUE" = "#c0622b"), name = NULL) +
+  labs(x = "Library-match correlation (max_cor_val)", y = "Particles (all rows)",
+       title = "bad_spectra is TRUE exactly when the match correlation is 0.66 or lower",
+       subtitle = "Particles between 0.60 and 0.66 are rated 'confident' yet flagged bad_spectra = TRUE") +
+  theme(legend.position = "top")
+save(p1, "fig1_bad_spectra_threshold.png")
+
+# 2. Particle rows vs summary counts, per sample
+rows <- plastic |> filter(sample_or_blank == "sample") |>
+  mutate(new = qc_new[plastic$sample_or_blank == "sample"], old = qc_old[plastic$sample_or_blank == "sample"]) |>
+  group_by(sid) |> summarise(`Corrected filter (bad_spectra = FALSE)` = sum(new), `Old filter (bad_spectra = TRUE)` = sum(old), .groups = "drop")
+f2 <- summ_tot |> inner_join(rows, by = "sid") |>
+  tidyr::pivot_longer(c(`Corrected filter (bad_spectra = FALSE)`, `Old filter (bad_spectra = TRUE)`), names_to = "filter", values_to = "rows") |>
+  filter(rows > 0) |> mutate(Matrix = matrices[sample_type])
+p2 <- ggplot(f2, aes(summary_count, rows, color = Matrix)) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray40") +
+  geom_point(alpha = 0.75, size = 2) +
+  facet_wrap(~ filter) +
+  scale_x_log10() + scale_y_log10() +
+  scale_color_manual(values = c("River water" = "#0072B2", "Ocean water" = "#009E73", "Beach sand" = "#E69F00")) +
+  labs(x = "Summary count per sample (Part_dets_summ_final)", y = "QC-passing particle rows per sample",
+       title = "Particle-level rows do not reproduce the summary counts under either filter",
+       subtitle = "Dashed line = 1:1. Each point is one sample.") +
+  theme(legend.position = "top")
+save(p2, "fig2_rows_vs_summary.png", w = 10, h = 5.5)
+
+# 3. One sample, polymer by polymer
+ex <- "CRR20231207SD"
+f3 <- full_join(
+  summ |> filter(sid == ex, material_simple == "plastic") |> group_by(material_class) |> summarise(`Summary count` = sum(count)),
+  plastic |> filter(sid == ex) |> mutate(q = spectra_qc_pass(pick(everything()))) |> group_by(material_class) |>
+    summarise(`QC-passing particle rows` = sum(q), `All plastic rows` = n()),
+  by = "material_class") |>
+  tidyr::pivot_longer(-material_class, names_to = "source", values_to = "n") |>
+  mutate(n = coalesce(n, 0), material_class = stringr::str_trunc(material_class, 38))
+p3 <- ggplot(f3, aes(reorder(material_class, n), n, fill = source)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.75) +
+  coord_flip() + scale_y_continuous(trans = scales::pseudo_log_trans(base = 10), breaks = c(0, 1, 3, 10, 30, 100, 300)) +
+  scale_fill_manual(values = c("Summary count" = "#c0622b", "QC-passing particle rows" = "#1f6f5c", "All plastic rows" = "#9db8ae"), name = NULL) +
+  labs(x = NULL, y = "Particles (log scale)", title = paste0("Sample ", ex, ": summary vs particle table, by polymer"),
+       subtitle = "The summary lists 3 particles in 3 classes; the particle table has hundreds of polyethylene and polystyrene rows") +
+  theme(legend.position = "top")
+save(p3, "fig3_example_sample_by_polymer.png", w = 10, h = 6)
+
+# 4. Which samples have particle-level data (ocean and sand)
+f4 <- summ_tot |> filter(sample_type %in% c("ocean water", "beach sand")) |>
+  mutate(Matrix = matrices[sample_type], year = paste0("20", substr(gsub("\\D", "", sid), 3, 4)),
+         `Particle-level data` = ifelse(sid %in% parts$sid, "present", "missing"))
+p4 <- ggplot(f4, aes(year, conc_m3, color = `Particle-level data`)) +
+  geom_jitter(width = 0.15, height = 0, size = 2.4, alpha = 0.85) +
+  facet_wrap(~ Matrix, scales = "free_y") + scale_y_log10(labels = scales::label_comma()) +
+  scale_color_manual(values = c(present = "#1f6f5c", missing = "#c0622b")) +
+  labs(x = "Sampling year", y = "Reported concentration x 1000
+(water: per m3; sand: unit unconfirmed, see Q9)",
+       title = "Samples without particle-level records are the 2025 samples",
+       subtitle = "For ocean water these are also the low-concentration samples, so analyses needing particle data see only the high ones") +
+  theme(legend.position = "top")
+save(p4, "fig4_missing_particle_data.png", w = 10, h = 5)
+
+# 5. Ocean 1-5000 um decomposition (fitted slope, point estimate)
+oc <- plastic |> filter(sample_type == "ocean water", sample_or_blank == "sample")
+oc <- oc[spectra_qc_pass(oc), ]
+fit <- fit_cpsd_segur_r(oc$max_length_um, bin_um = 5)
+a <- fit$a_psd
+cf <- function(lo, hi) correction_factor(a, lo, hi, 1, 5000)
+oc_summ <- summ |> filter(sample_type == "ocean water", material_simple == "plastic", sample_or_blank == "sample") |>
+  group_by(sid) |> summarise(count = sum(count), C = sum(extrap_conc_PPL) * 1000, .groups = "drop")
+oc_rows <- oc |> group_by(sid) |> summarise(n50 = sum(max_length_um >= 50 & max_length_um <= 500),
+                                             nlod = sum(max_length_um >= fit$lower_lod_um & max_length_um < fit$upper_lod_um))
+o6 <- inner_join(oc_summ, oc_rows, by = "sid")
+steps <- tibble::tibble(
+  step = factor(c("A. All 15 samples,\nreported 50-500 um,\nsieve-anchored", "B. Only the 6 samples\nwith particle data",
+                  "C. Rebuilt from\nQC-passing rows", "D. Anchored on the\nLOD window\n(production)"),
+                levels = c("A. All 15 samples,\nreported 50-500 um,\nsieve-anchored", "B. Only the 6 samples\nwith particle data",
+                           "C. Rebuilt from\nQC-passing rows", "D. Anchored on the\nLOD window\n(production)")),
+  value = c(median(oc_summ$C) * cf(50, 500), median(o6$C) * cf(50, 500),
+            median(o6$n50 * o6$C / o6$count) * cf(50, 500),
+            median(o6$nlod * o6$C / o6$count) * cf(fit$lower_lod_um, fit$upper_lod_um)))
+mpsb <- read.csv("data_output/mpsizebase_ocean_sample_windows_v1.csv")
+p5 <- ggplot(steps, aes(step, value)) +
+  geom_col(fill = "#1f6f5c", width = 0.6) +
+  geom_text(aes(label = format(signif(value, 2), big.mark = ",", scientific = FALSE)), vjust = -0.4, size = 3.8) +
+  geom_hline(yintercept = median(mpsb$fit_1_5000, na.rm = TRUE), linetype = "dashed", color = "#c0622b") +
+  annotate("text", x = 0.55, y = median(mpsb$fit_1_5000, na.rm = TRUE), label = "MPsizeBase ocean sample median",
+           hjust = 0, vjust = -0.5, color = "#c0622b", size = 3.6) +
+  scale_y_log10(labels = scales::label_comma(), expand = expansion(mult = c(0, 0.12))) +
+  labs(x = NULL, y = "Ocean 1-5000 um concentration (MP per m3, log)",
+       title = "How the ocean estimate climbs from comparable-to-literature to ~40x higher",
+       subtitle = sprintf("Median over samples; fitted ocean slope a = %.2f; LOD window %.0f-%.0f um", a, fit$lower_lod_um, fit$upper_lod_um))
+save(p5, "fig5_ocean_decomposition.png", w = 10, h = 5.5)
+
+# 6. Blank particle counts vs sample counts
+bl <- plastic |> filter(sample_type %in% c("field blank", "lab blank", "river water", "ocean water")) |>
+  mutate(q = spectra_qc_pass(pick(everything()))) |> filter(q) |>
+  mutate(group = ifelse(sample_or_blank == "blank", sample_type, paste(sample_type, "sample"))) |>
+  count(group, sid)
+p6 <- ggplot(bl, aes(group, n)) +
+  geom_boxplot(outlier.shape = NA, width = 0.55) + geom_jitter(width = 0.15, height = 0, alpha = 0.6, color = "#1f6f5c") +
+  scale_y_log10() +
+  labs(x = NULL, y = "QC-passing plastic rows (log)",
+       title = "Blanks carry particles on the same order as low-concentration samples",
+       subtitle = "Particle-level rows are not blank-corrected; the summary counts appear to be")
+save(p6, "fig6_blanks_vs_samples.png", w = 9, h = 5)
+
+# 7. Sieve size class vs measured length
+f7 <- plastic[qc_new, ] |> filter(sample_or_blank == "sample") |>
+  mutate(size_class = factor(case_when(grepl("^<212", size_class, useBytes = TRUE) ~ "<212", grepl("^212", size_class, useBytes = TRUE) ~ "212-500", grepl("^>500", size_class, useBytes = TRUE) ~ ">500"), levels = c("<212", "212-500", ">500")))
+p7 <- ggplot(f7, aes(size_class, max_length_um)) +
+  geom_boxplot(outlier.alpha = 0.3) + scale_y_log10() +
+  geom_hline(yintercept = c(50, 500), linetype = "dashed", color = "#c0622b") +
+  labs(x = "Sieve size fraction (size_class)", y = "Measured particle length, max_length_um (log)",
+       title = "Sieve fraction is not measured length; the >500 um fraction is in the µFTIR table",
+       subtitle = "Dashed lines = reported 50-500 um range")
+save(p7, "fig7_size_class_vs_length.png", w = 8, h = 5)
+
+cat("Wrote", length(list.files(out)), "figures to", out, "\n")

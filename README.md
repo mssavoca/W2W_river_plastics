@@ -135,7 +135,7 @@ Two RDS files are required:
 | `material_class` | character | "plastic", "mineral", "organic matter", etc. |
 | `sample_type` | character | "river water", "beach sand", etc. |
 | `sample_location` | character | Site/location name |
-| `bad_spectra` | logical | TRUE = keep (good spectrum) |
+| `bad_spectra` | logical | TRUE = POOR spectrum (max_cor_val <= 0.66); QC keeps FALSE via `spectra_qc_pass()` |
 | `Client_ID_MSSupdate` | character | Sample ID containing 8-digit date (YYYYMMDD) |
 
 **`Part_dets_summ.rds`** — site-level concentration table, one row per sample:

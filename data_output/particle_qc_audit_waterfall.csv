@@ -1,0 +1,61 @@
+matrix,polarity,stage,n,n_dropped,pct_retained_of_prev
+river,production,1 all rows (all matrices),77335,NA,NA
+river,production,2 samples only (blanks removed),75053,2282,97
+river,production,3 sample_type,36355,38698,48.4
+river,production,3b canonical sample set,36044,311,99.1
+river,production,4 plastic (not mineral/organic),8840,27204,24.5
+river,production,5 acc_analy_conf == confident,8343,497,94.4
+river,production,6 bad_spectra condition,1195,7148,14.3
+river,production,7 valid length,1195,0,100
+river,production,8 inside 50-500 um,1176,19,98.4
+river,production,9 inside LOD window (production fit),353,823,30
+river,flipped,1 all rows (all matrices),77335,NA,NA
+river,flipped,2 samples only (blanks removed),75053,2282,97
+river,flipped,3 sample_type,36355,38698,48.4
+river,flipped,3b canonical sample set,36044,311,99.1
+river,flipped,4 plastic (not mineral/organic),8840,27204,24.5
+river,flipped,5 acc_analy_conf == confident,8343,497,94.4
+river,flipped,6 bad_spectra condition,7148,1195,85.7
+river,flipped,7 valid length,7148,0,100
+river,flipped,8 inside 50-500 um,6885,263,96.3
+river,flipped,9 inside LOD window (production fit),2204,4681,32
+ocean,production,1 all rows (all matrices),77335,NA,NA
+ocean,production,2 samples only (blanks removed),75053,2282,97
+ocean,production,3 sample_type,5351,69702,7.1
+ocean,production,3b canonical sample set,5170,181,96.6
+ocean,production,4 plastic (not mineral/organic),2318,2852,44.8
+ocean,production,5 acc_analy_conf == confident,2298,20,99.1
+ocean,production,6 bad_spectra condition,114,2184,5
+ocean,production,7 valid length,114,0,100
+ocean,production,8 inside 50-500 um,112,2,98.2
+ocean,production,9 inside LOD window (production fit),60,52,53.6
+ocean,flipped,1 all rows (all matrices),77335,NA,NA
+ocean,flipped,2 samples only (blanks removed),75053,2282,97
+ocean,flipped,3 sample_type,5351,69702,7.1
+ocean,flipped,3b canonical sample set,5170,181,96.6
+ocean,flipped,4 plastic (not mineral/organic),2318,2852,44.8
+ocean,flipped,5 acc_analy_conf == confident,2298,20,99.1
+ocean,flipped,6 bad_spectra condition,2184,114,95
+ocean,flipped,7 valid length,2184,0,100
+ocean,flipped,8 inside 50-500 um,2013,171,92.2
+ocean,flipped,9 inside LOD window (production fit),995,1018,49.4
+sand,production,1 all rows (all matrices),77335,NA,NA
+sand,production,2 samples only (blanks removed),75053,2282,97
+sand,production,3 sample_type,32353,42700,43.1
+sand,production,3b canonical sample set,27963,4390,86.4
+sand,production,4 plastic (not mineral/organic),10670,17293,38.2
+sand,production,5 acc_analy_conf == confident,10475,195,98.2
+sand,production,6 bad_spectra condition,741,9734,7.1
+sand,production,7 valid length,741,0,100
+sand,production,8 inside 50-500 um,713,28,96.2
+sand,production,9 inside LOD window (production fit),319,394,44.7
+sand,flipped,1 all rows (all matrices),77335,NA,NA
+sand,flipped,2 samples only (blanks removed),75053,2282,97
+sand,flipped,3 sample_type,32353,42700,43.1
+sand,flipped,3b canonical sample set,27963,4390,86.4
+sand,flipped,4 plastic (not mineral/organic),10670,17293,38.2
+sand,flipped,5 acc_analy_conf == confident,10475,195,98.2
+sand,flipped,6 bad_spectra condition,9734,741,92.9
+sand,flipped,7 valid length,9734,0,100
+sand,flipped,8 inside 50-500 um,8990,744,92.4
+sand,flipped,9 inside LOD window (production fit),4104,4886,45.7

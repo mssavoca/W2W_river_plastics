@@ -1,0 +1,209 @@
+## 13.5 Anchor and shape sensitivities (spec/MPSizeBase.md Part B) and slope-SE realism (Part C)
+
+These are supplementary sensitivities. None of them changes the production exposure: LOD-anchored, particle-rebuilt sample concentrations rescaled with each river's own single slope. They answer three questions. How much does the exposure depend on where the concentration is anchored (S-A)? How much of the between-sample spread comes from the sample-specific in-window fraction (S-B)? What happens if fragments and fibers are rescaled with their own slopes rather than one pooled slope (S-C)? Every CF and concentration quoted in this section is labelled with its anchor, slope source and window (S-D). This child saves and restores the global RNG state, so it does not change any later result.
+
+```{r anchor-setup}
+anchor_rng_state <- if (exists(".Random.seed", envir = globalenv())) get(".Random.seed", envir = globalenv()) else NULL
+anchor_params <- list()
+q_summ <- function(x) c(median = stats::median(x), q25 = stats::quantile(x, 0.25, names = FALSE),
+                        q75 = stats::quantile(x, 0.75, names = FALSE))
+# Share of the 1-5000 um count lying below 10 um for a differential slope a (< -1).
+share_below_10 <- function(a) (1 - 10^(a + 1)) / (1 - 5000^(a + 1))
+```
+
+### S-A. Dual anchor: LOD-anchored (production) vs sieve-anchored
+
+Arm A is the production monitoring table: the C-PSD-window concentration with each river's own LOD window. Arm B anchors the same samples at the nominal 50–500 µm sieve window with the reported concentration. Both arms use the identical river-specific slope draws (`alpha_by_river`). The diagnostic compares the in-window fraction the river's power law predicts, (L₂^(a+1) − L₁^(a+1)) / (500^(a+1) − 50^(a+1)), with the observed `lod_particle_fraction`.
+
+```{r anchor-sa}
+anchor_B_mon <- monitoring |>
+  dplyr::mutate(Lmin_measured_um = 50, Lmax_measured_um = 500, C_measured_pL = C_reported_pL)
+anchor_run <- function(mon, seed) withr::with_seed(seed, correct_and_bootstrap_eed(
+  monitoring = mon, conc_col = "C_measured_pL", cpsd_fit = cpsd_fit_all, alpha_draws = alpha,
+  L_tar_min = 1, L_tar_max = 5000, n_draws = 3000, n_boot = n_boot, probs = c(0.5, 0.95),
+  slope_convention = "differential", group_col = "river", cpsd_fit_by_group = cpsd_fits_by_loc,
+  alpha_draws_by_group = alpha_by_river))
+anchor_A <- anchor_run(monitoring, 13501)
+anchor_B <- anchor_run(anchor_B_mon, 13501)
+
+anchor_W1 <- dplyr::bind_rows(
+  dplyr::mutate(anchor_A$C_sample_median, arm = "A_LOD"),
+  dplyr::mutate(anchor_B$C_sample_median, arm = "B_sieve")) |>
+  dplyr::left_join(dplyr::distinct(monitoring, sample_id, river, depth = sample_depth_general), by = "sample_id")
+anchor_sa_tbl <- anchor_W1 |>
+  dplyr::group_by(river, depth, arm) |>
+  dplyr::summarise(W1_median = stats::median(C_corr_med), W1_q25 = stats::quantile(C_corr_med, 0.25),
+                   W1_q75 = stats::quantile(C_corr_med, 0.75), .groups = "drop") |>
+  tidyr::pivot_wider(names_from = arm, values_from = c(W1_median, W1_q25, W1_q75)) |>
+  dplyr::mutate(ratio_A_over_B = W1_median_A_LOD / W1_median_B_sieve)
+
+anchor_frac_diag <- monitoring |>
+  dplyr::mutate(a = vapply(river, function(r) cpsd_fits_by_loc[[r]]$a_psd, numeric(1)),
+                predicted_fraction = (Lmax_measured_um^(a + 1) - Lmin_measured_um^(a + 1)) / (500^(a + 1) - 50^(a + 1)),
+                low_n_flag = n_particles_lod_window < 10) |>
+  dplyr::select(sample_id, river, depth = sample_depth_general, Lmin_measured_um, Lmax_measured_um,
+                n_particles_lod_window, observed_fraction = lod_particle_fraction, predicted_fraction, low_n_flag)
+
+knitr::kable(anchor_sa_tbl, digits = 3,
+  caption = "S-A: W1 (1-5000 µm) sample medians by river x depth. Arm A = LOD-window anchor (production, particle-rebuilt concentration); Arm B = 50-500 µm sieve anchor (reported concentration). Same river-specific slope draws in both arms.")
+knitr::kable(anchor_frac_diag |> dplyr::group_by(river) |>
+               dplyr::summarise(n_samples = dplyr::n(), n_low_n_flag = sum(low_n_flag),
+                                observed_fraction_median = stats::median(observed_fraction),
+                                predicted_fraction = dplyr::first(predicted_fraction), .groups = "drop"),
+  digits = 3, caption = "S-A diagnostic: observed in-window particle fraction vs the fraction predicted by the river's own power law. Flag = fewer than 10 QC-passing particles in the LOD window.")
+utils::write.csv(anchor_frac_diag, "data_output/anchor_sa_fraction_diagnostic.csv", row.names = FALSE)
+
+anchor_params$S_A <- list(
+  W1_A_LOD = as.list(q_summ(anchor_A$C_sample_median$C_corr_med)),
+  W1_B_sieve = as.list(q_summ(anchor_B$C_sample_median$C_corr_med)),
+  ratio_A_over_B_median = stats::median(anchor_A$C_sample_median$C_corr_med) / stats::median(anchor_B$C_sample_median$C_corr_med),
+  n_samples_low_n = sum(anchor_frac_diag$low_n_flag))
+```
+
+### S-B. Variance-reduced anchor
+
+The sample-specific in-window fraction is noisy when a sample has few particles in the window. S-B replaces it with each river's pooled fraction (Σ in-window particles ÷ Σ in-range particles), applied to the sample-specific reported concentration, and reports the effect on EED spread and on the number of zero-concentration samples.
+
+```{r anchor-sb}
+anchor_pooled_frac <- monitoring |>
+  dplyr::group_by(river) |>
+  dplyr::summarise(pooled_fraction = sum(n_particles_lod_window) / sum(n_particles_reported_window), .groups = "drop")
+anchor_SB_mon <- monitoring |>
+  dplyr::left_join(anchor_pooled_frac, by = "river") |>
+  dplyr::mutate(C_measured_pL = C_reported_pL * pooled_fraction)
+anchor_SB <- anchor_run(anchor_SB_mon, 13501)
+anchor_sb_tbl <- tibble::tibble(
+  arm = c("Production (sample-specific, particle-rebuilt)", "S-B (river pooled fraction x reported)"),
+  n_zero_samples = c(sum(monitoring$C_measured_pL == 0), sum(anchor_SB_mon$C_measured_pL == 0)),
+  W1_median = c(stats::median(anchor_A$C_sample_median$C_corr_med), stats::median(anchor_SB$C_sample_median$C_corr_med)),
+  EED_q50 = c(stats::median(anchor_A$eed_boot$q50), stats::median(anchor_SB$eed_boot$q50)),
+  EED_q95 = c(stats::median(anchor_A$eed_boot$q95), stats::median(anchor_SB$eed_boot$q95)),
+  log10_IQR = c(diff(log10(stats::quantile(anchor_A$C_sample_median$C_corr_med[anchor_A$C_sample_median$C_corr_med > 0], c(.25, .75)))),
+                diff(log10(stats::quantile(anchor_SB$C_sample_median$C_corr_med[anchor_SB$C_sample_median$C_corr_med > 0], c(.25, .75))))))
+knitr::kable(anchor_pooled_frac, digits = 3, caption = "S-B: river-level pooled in-window fraction")
+knitr::kable(anchor_sb_tbl, digits = 3, caption = "S-B: effect of the variance-reduced anchor on EED spread and zero-concentration samples (log10 IQR over non-zero samples)")
+anchor_params$S_B <- list(table = anchor_sb_tbl, pooled_fraction = anchor_pooled_frac)
+```
+
+### S-C. Shape-stratified rescaling (sensitivity bracket, not a competing estimate)
+
+Each shape's in-window concentration is that shape's QC-passing particle count inside the shape's own LOD window, times the sample's per-particle concentration (`C_reported_pL / count`). So the shapes sum to an all-shape total on the same basis as production. Shape slopes and LOD windows come from the pooled river fragment and fiber fits (`cpsd_fits_river_length`). Per-river × shape fits are reported for validity only. Slopes are drawn independently per shape with `slope_structural_sd`, and also in a fully correlated case (shared quantiles). Shapes are summed per sample before `bootstrap_eed()`. Following Segur et al. (2026), the power law is assumed to hold down to 1 µm; they note that log-normal behaviour below ~20 µm may need revisiting as better 1–20 µm data become available.
+
+```{r anchor-sc}
+shape_fits <- list(fragment = cpsd_fits_river_length$fragment, fiber = cpsd_fits_river_length$fiber)
+shape_valid <- dplyr::bind_rows(lapply(names(cpsd_loc_shape_length), function(r) dplyr::bind_rows(lapply(c("fragment", "fiber"), function(sh) {
+  f <- cpsd_loc_shape_length[[r]][[sh]]
+  tibble::tibble(river = r, shape = sh, valid = isTRUE(f$valid),
+                 n_bins = if (isTRUE(f$valid)) f$n_bins else NA_integer_, r2 = if (isTRUE(f$valid)) f$r2 else NA_real_,
+                 passes_rule = isTRUE(f$valid) && f$n_bins >= 3 && f$r2 >= 0.90)
+}))))
+knitr::kable(shape_valid, digits = 3, caption = "S-C: per-river x shape C-PSD fit validity (>= 3 bins and R2 >= 0.90). The arm below uses pooled-river shape fits.")
+
+shape_counts <- raw_particles_river |>
+  dplyr::filter(Client_ID_MSSupdate %in% monitoring$sample_id) |>
+  dplyr::mutate(in_win = (shape == "fragment" & length_um >= shape_fits$fragment$lower_lod_um & length_um < shape_fits$fragment$upper_lod_um) |
+                         (shape == "fiber" & length_um >= shape_fits$fiber$lower_lod_um & length_um < shape_fits$fiber$upper_lod_um)) |>
+  dplyr::count(sample_id = Client_ID_MSSupdate, shape, wt = in_win, name = "n_shape_lod") |>
+  tidyr::complete(sample_id = monitoring$sample_id, shape = c("fragment", "fiber"), fill = list(n_shape_lod = 0L))
+shape_mon <- shape_counts |>
+  dplyr::left_join(dplyr::select(monitoring, sample_id, river, C_reported_pL, count), by = "sample_id") |>
+  dplyr::mutate(C_shape_lod = n_shape_lod * C_reported_pL / count)
+
+shape_alpha_indep <- lapply(setNames(names(shape_fits), names(shape_fits)), function(sh) withr::with_seed(
+  13600 + match(sh, names(shape_fits)), alpha_dist(shape_fits[[sh]]$a_psd, shape_fits[[sh]]$se_a_psd, n = n_mc, structural_sd = slope_structural_sd)))
+shape_u <- withr::with_seed(13610, stats::runif(n_mc))
+shape_alpha_corr <- lapply(shape_fits, function(f) {
+  sd_tot <- sqrt(f$se_a_psd^2 + slope_structural_sd^2)
+  truncnorm::qtruncnorm(shape_u, a = -6, b = -1.1, mean = f$a_psd, sd = sd_tot)
+})
+shape_cf <- function(draws) lapply(setNames(names(shape_fits), names(shape_fits)), function(sh)
+  correction_factor(draws[[sh]], shape_fits[[sh]]$lower_lod_um, shape_fits[[sh]]$upper_lod_um, 1, 5000, slope_convention = "differential"))
+shape_arm <- function(draws, seed) {
+  cf <- shape_cf(draws)
+  idx <- withr::with_seed(seed, sample.int(n_mc, 3000, replace = TRUE))
+  per_sample <- shape_mon |>
+    dplyr::group_by(sample_id) |>
+    dplyr::summarise(C_corr_med = stats::median(
+      C_shape_lod[shape == "fragment"] * cf$fragment[idx] + C_shape_lod[shape == "fiber"] * cf$fiber[idx]), .groups = "drop")
+  list(cf = cf, C_sample_median = per_sample,
+       eed = withr::with_seed(seed + 1, bootstrap_eed(per_sample$C_corr_med, n_boot = n_boot, probs = c(0.5, 0.95))))
+}
+shape_indep <- shape_arm(shape_alpha_indep, 13620)
+shape_corr  <- shape_arm(shape_alpha_corr, 13620)
+
+anchor_sc_tbl <- tibble::tibble(
+  arm = c("Production (river slopes, all shapes)", "S-C shape slopes, independent", "S-C shape slopes, correlated"),
+  EED_q50 = c(stats::median(eed_boot$q50), stats::median(shape_indep$eed$q50), stats::median(shape_corr$eed$q50)),
+  EED_q95 = c(stats::median(eed_boot$q95), stats::median(shape_indep$eed$q95), stats::median(shape_corr$eed$q95)),
+  W1_median = c(stats::median(C_sample_median$C_corr_med), stats::median(shape_indep$C_sample_median$C_corr_med),
+                stats::median(shape_corr$C_sample_median$C_corr_med)))
+anchor_sc_cf <- tibble::tibble(
+  shape = names(shape_fits),
+  a_psd = vapply(shape_fits, `[[`, numeric(1), "a_psd"),
+  LOD_window_um = vapply(shape_fits, function(f) sprintf("%.0f–%.0f", f$lower_lod_um, f$upper_lod_um), character(1)),
+  CF_median = vapply(shape_indep$cf, stats::median, numeric(1)),
+  share_below_10um = share_below_10(vapply(shape_fits, `[[`, numeric(1), "a_psd")))
+anchor_sc_cf <- dplyr::bind_rows(anchor_sc_cf, tibble::tibble(
+  shape = "pooled (all)", a_psd = cpsd_fit_all$a_psd,
+  LOD_window_um = sprintf("%.0f–%.0f", cpsd_fit_all$lower_lod_um, cpsd_fit_all$upper_lod_um),
+  CF_median = stats::median(combined_cf_pooled), share_below_10um = share_below_10(cpsd_fit_all$a_psd)))
+knitr::kable(anchor_sc_cf, digits = 3, caption = "S-C: shape-specific slopes, LOD windows, CF medians (window -> 1-5000 µm), and share of the 1-5000 µm count below 10 µm")
+knitr::kable(anchor_sc_tbl, digits = 3, caption = "S-C: shape-stratified EED vs production (sensitivity bracket only; no hazards re-derived)")
+anchor_params$S_C <- list(table = anchor_sc_tbl, cf = anchor_sc_cf, fit_validity = shape_valid)
+```
+
+The fragment slope is much steeper than the fiber slope, so the fragment CF dominates the shape-stratified total, and almost all of that total lies below 10 µm. That is why S-C is a bracket and not a competing estimate: agreement or disagreement at 1–5000 µm is driven by the sub-10 µm extrapolation, not by measured particles.
+
+### S-D. Anchor, slope source and window for every CF and concentration
+
+```{r anchor-sd}
+anchor_sd_tbl <- tibble::tribble(
+  ~quantity, ~anchor, ~slope_source, ~window_um, ~CF_median, ~W1_median_L,
+  "Production W1 (headline)", "LOD window, particle-rebuilt concentration", "each river's own C-PSD slope", "river-specific LOD windows",
+    stats::median(combined_cf), stats::median(C_sample_median$C_corr_med),
+  "Pooled-slope W1 (sensitivity)", "pooled LOD window, particle-rebuilt", "pooled river slope", sprintf("%.0f–%.0f", L_meas_min_use, L_meas_max_use),
+    stats::median(combined_cf_pooled), stats::median(C_sample_median_pooled$C_corr_med),
+  "Two-segment W1 (sensitivity)", "pooled LOD window, particle-rebuilt", "pooled two-segment fit", sprintf("%.0f–%.0f", L_meas_min_use, L_meas_max_use),
+    pw_river$cf_piecewise, stats::median(monitoring_pooled_scope$C_measured_pL * pw_river$cf_piecewise),
+  "Sieve-anchored W1 (S-A arm B)", "50–500 µm sieve, reported concentration", "each river's own C-PSD slope", "50–500",
+    stats::median(anchor_B$combined_cf), stats::median(anchor_B$C_sample_median$C_corr_med),
+  "Nominal diagnostic CF (Section 10.2)", "50–500 µm nominal", "pooled river slope", "50–500",
+    stats::median(correction_factor(alpha, 50, 500, 1, 5000, slope_convention = "differential")), NA_real_,
+  "Shape-stratified W1 (S-C, independent)", "shape LOD windows, particle-rebuilt", "pooled fragment / fiber slopes", "fragment / fiber windows",
+    NA_real_, stats::median(shape_indep$C_sample_median$C_corr_med))
+knitr::kable(anchor_sd_tbl, digits = 3, caption = "S-D: every CF and concentration with its anchor, slope source and window. The unlabelled 22,465 / 1,850 / 2,403 values in earlier drafts are retired in favour of these rows. The pooled single-slope and two-segment rows share the same anchor.")
+utils::write.csv(anchor_sd_tbl, "data_output/anchor_cf_concentration_labels.csv", row.names = FALSE)
+anchor_params$S_D <- anchor_sd_tbl
+```
+
+### Part C. Slope-SE realism: particle-level bootstrap per river
+
+OLS standard errors on cumulative counts are probably too small, because adjacent cumulative bins are not independent. Each river's particles are resampled and the full Segur LOD algorithm is refit (`r if (is_production_budget) 1000 else 100` replicates; 1,000 at the production budget). Cochran's Q and I² are recomputed with the bootstrap SEs.
+
+```{r slope-bootstrap-se, cache=TRUE, cache.extra=list(n_boot, raw_data_cache_key)}
+slope_boot_reps <- if (is_production_budget) 1000 else 100
+slope_boot <- dplyr::bind_rows(lapply(names(cpsd_fits_by_loc), function(r) {
+  x <- raw_particles_river$length_um[raw_particles_river$sample_location == r]
+  a <- withr::with_seed(13700 + match(r, names(cpsd_fits_by_loc)), vapply(seq_len(slope_boot_reps), function(i) {
+    tryCatch(fit_cpsd_segur_r(sample(x, replace = TRUE), bin_um = 5)$a_cpsd, error = function(e) NA_real_)
+  }, numeric(1)))
+  tibble::tibble(river = r, a_cpsd = cpsd_fits_by_loc[[r]]$a_cpsd, se_ols = cpsd_fits_by_loc[[r]]$se_a_cpsd,
+                 se_boot = stats::sd(a, na.rm = TRUE), boot_ci_lo = stats::quantile(a, 0.025, na.rm = TRUE),
+                 boot_ci_hi = stats::quantile(a, 0.975, na.rm = TRUE), n_failed = sum(is.na(a)), reps = slope_boot_reps)
+}))
+```
+
+```{r slope-bootstrap-se-table}
+slope_het_boot <- slope_heterogeneity_test(slope_boot$a_cpsd, slope_boot$se_boot, slope_boot$river)
+knitr::kable(dplyr::mutate(slope_boot, se_ratio_boot_over_ols = se_boot / se_ols), digits = 3,
+  caption = "Per-river C-PSD slope: OLS SE vs particle-level bootstrap SE (full LOD algorithm refit per replicate)")
+cat(sprintf("Cochran's Q with OLS SEs: Q(%d) = %.2f, p = %.3g, I2 = %.1f%%\nCochran's Q with bootstrap SEs: Q(%d) = %.2f, p = %.3g, I2 = %.1f%%\n",
+            river_slope_heterogeneity$df, river_slope_heterogeneity$Q, river_slope_heterogeneity$p_value, river_slope_heterogeneity$i2,
+            slope_het_boot$df, slope_het_boot$Q, slope_het_boot$p_value, slope_het_boot$i2))
+anchor_params$slope_bootstrap <- list(table = slope_boot,
+  heterogeneity_boot = slope_het_boot[c("Q", "df", "p_value", "i2", "weighted_mean")])
+```
+
+```{r anchor-restore-rng, include=FALSE}
+if (!is.null(anchor_rng_state)) assign(".Random.seed", anchor_rng_state, envir = globalenv())
+```

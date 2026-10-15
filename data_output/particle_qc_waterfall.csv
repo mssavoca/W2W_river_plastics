@@ -1,0 +1,25 @@
+"matrix","stage","n","n_dropped"
+"River water","All rows (all matrices)",77335,NA
+"River water","Samples only (blanks removed)",75053,2282
+"River water","Matrix (sample_type)",36355,38698
+"River water","Canonical sample set",36044,311
+"River water","Plastic (not mineral/organic)",8840,27204
+"River water","Spectral QC (confident, bad_spectra == FALSE)",7148,1692
+"River water","Valid length",7148,0
+"River water","Inside 50-500 um",6885,263
+"Ocean water","All rows (all matrices)",77335,NA
+"Ocean water","Samples only (blanks removed)",75053,2282
+"Ocean water","Matrix (sample_type)",5351,69702
+"Ocean water","Canonical sample set",5170,181
+"Ocean water","Plastic (not mineral/organic)",2318,2852
+"Ocean water","Spectral QC (confident, bad_spectra == FALSE)",2184,134
+"Ocean water","Valid length",2184,0
+"Ocean water","Inside 50-500 um",2013,171
+"Beach sand","All rows (all matrices)",77335,NA
+"Beach sand","Samples only (blanks removed)",75053,2282
+"Beach sand","Matrix (sample_type)",32353,42700
+"Beach sand","Canonical sample set",27963,4390
+"Beach sand","Plastic (not mineral/organic)",10670,17293
+"Beach sand","Spectral QC (confident, bad_spectra == FALSE)",9734,936
+"Beach sand","Valid length",9734,0
+"Beach sand","Inside 50-500 um",8990,744

@@ -25,8 +25,8 @@ cat("\n== Loading raw particles ==\n")
 raw_particles <- readRDS("data_input/Part_dets_comb.rds") |>
   dplyr::filter(
     !material_class %in% c("mineral", "organic matter"),
-    acc_analy_conf == "confident",
-    bad_spectra
+    acc_analy_conf %in% "confident",
+    bad_spectra %in% FALSE   # bad_spectra TRUE = poor spectrum (see spectra_qc_pass())
   ) |>
   mutate(
     Client_ID_MSSupdate = sub("_[0-9]+$", "", Client_ID_MSSupdate),

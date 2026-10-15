@@ -1,0 +1,148 @@
+"matrix","aliquot_factor","ratio_qc_rows_to_summary","status","sample_id","location","summ_count","summ_extrap_count","n_qc_rows"
+"River water",1,211.333333333333,"rebuilt","CRR20231207SD","Carmel",3,3,634
+"River water",1,3.22406639004149,"rebuilt","CRR20231207SS","Carmel",241,241,777
+"River water",1,1.9,"rebuilt","CRR20240116SS","Carmel",10,10,19
+"River water",1,1.18032786885246,"rebuilt","CRR20240124SD","Carmel",61,61,72
+"River water",1,9.7,"rebuilt","CRR20240124SS","Carmel",10,10,97
+"River water",1,2,"rebuilt","CRR20240206SD","Carmel",33,33,66
+"River water",1,4,"rebuilt","CRR20240206SS","Carmel",5,5,20
+"River water",1,2.41666666666667,"rebuilt","CRR20240506SD","Carmel",12,12,29
+"River water",1,3.14814814814815,"rebuilt","CRR20240506SS","Carmel",27,27,85
+"River water",10,1.75,"rebuilt","CRR20250214SD","Carmel",4,40,7
+"River water",5,2.5,"rebuilt","CRR20250214SS","Carmel",2,10,5
+"River water",1.82823426573427,0.4375,"rebuilt","CRR20250313SD","Carmel",16,29.2517482517483,7
+"River water",10,2.16666666666667,"rebuilt","CRR20250318SD","Carmel",18,180,39
+"River water",5,1.73684210526316,"rebuilt","CRR20250318SS","Carmel",19,95,33
+"River water",1,1.25581395348837,"rebuilt","PRR20231218SD","Pajaro",129,129,162
+"River water",1,6.76543209876543,"rebuilt","PRR20231218SS","Pajaro",81,81,548
+"River water",1,1.83369330453564,"rebuilt","PRR20240123SD","Pajaro",463,463,849
+"River water",1,2.36231884057971,"rebuilt","PRR20240123SS","Pajaro",207,207,489
+"River water",1,1.5,"rebuilt","PRR20240208SD","Pajaro",6,6,9
+"River water",1,2.06818181818182,"rebuilt","PRR20240208SS","Pajaro",44,44,91
+"River water",1,2.33333333333333,"rebuilt","PRR20240501SD","Pajaro",3,3,7
+"River water",1,2.4,"rebuilt","PRR20240501SS","Pajaro",10,10,24
+"River water",5,1,"rebuilt","PRR20250207SD","Pajaro",5,25,5
+"River water",1,1.35294117647059,"rebuilt","PRR20250207SS","Pajaro",17,17,23
+"River water",10,1.35,"rebuilt","PRR20250218SD","Pajaro",20,200,27
+"River water",5,0.588235294117647,"rebuilt","PRR20250218SS","Pajaro",17,85,10
+"River water",1,1.97222222222222,"rebuilt","PRR20250306SD","Pajaro",36,36,71
+"River water",1,2.1875,"rebuilt","PRR20250306SS","Pajaro",16,16,35
+"River water",1,0.997907949790795,"rebuilt","SLR20231220SD","San Lorenzo",478,478,477
+"River water",1,1.08391608391608,"rebuilt","SLR20231220SS","San Lorenzo",715,715,775
+"River water",1,3.0952380952381,"rebuilt","SLR20240122SD","San Lorenzo",21,21,65
+"River water",1.45512933989636,2.15966386554622,"rebuilt","SLR20240122SS","San Lorenzo",119,173.160391447667,257
+"River water",1,1.63636363636364,"rebuilt","SLR20240330SD","San Lorenzo",44,44,72
+"River water",1,1.60377358490566,"rebuilt","SLR20240330SS","San Lorenzo",53,53,85
+"River water",1,2.22222222222222,"rebuilt","SLR20240430SD","San Lorenzo",18,18,40
+"River water",1,2,"rebuilt","SLR20240430SS","San Lorenzo",2,2,4
+"River water",10,1.25,"rebuilt","SLR20250205SD","San Lorenzo",4,40,5
+"River water",10,0.875,"rebuilt","SLR20250205SS","San Lorenzo",8,80,7
+"River water",8,2.33333333333333,"rebuilt","SLR20250220SD","San Lorenzo",3,24,7
+"River water",10,1.30769230769231,"rebuilt","SLR20250220SS","San Lorenzo",13,130,17
+"River water",10,1.87755102040816,"rebuilt","SLR20250308SD","San Lorenzo",49,490,92
+"River water",5,1.66666666666667,"rebuilt","SLR20250308SS","San Lorenzo",12,60,20
+"River water",1,0.43205574912892,"rebuilt","SRR20231207SD","Salinas",287,287,124
+"River water",1,4.21538461538462,"rebuilt","SRR20231207SS","Salinas",65,65,274
+"River water",1,1.9,"rebuilt","SRR20240205SD","Salinas",20,20,38
+"River water",1,2.47368421052632,"rebuilt","SRR20240205SS","Salinas",19,19,47
+"River water",3.33333333333333,3.42857142857143,"rebuilt","SRR20240221SD","Salinas",7,23.3333333333333,24
+"River water",1,1.14285714285714,"rebuilt","SRR20240221SS","Salinas",14,14,16
+"River water",3.33333333333333,4,"rebuilt","SRR20240303SD","Salinas",3,10,12
+"River water",1,1.45689655172414,"rebuilt","SRR20240303SS","Salinas",116,116,169
+"River water",1,1.63265306122449,"rebuilt","SRR20240429SD","Salinas",49,49,80
+"River water",1,4,"rebuilt","SRR20240429SS","Salinas",2,2,8
+"River water",1,0,"excluded: no particle-level rows","SRR20250303SD","Salinas",47,47,0
+"River water",1,1.75,"rebuilt","SRR20250303SS","Salinas",12,12,21
+"River water",10,1.375,"rebuilt","SRR20250314SS","Salinas",8,80,11
+"River water",2,2.44262295081967,"rebuilt","SRR20250403SD","Salinas",61,122,149
+"River water",1.81538461538462,0.923076923076923,"rebuilt","SRR20250403SS","Salinas",13,23.6,12
+"Ocean water",1,2.625,"rebuilt","CRO20240605S","Carmel",88,88,231
+"Ocean water",1,0,"excluded: no particle-level rows","CRO20250121S","Carmel",11,11,0
+"Ocean water",2.5,0,"excluded: no particle-level rows","CRO20250611S","Carmel",8,20,0
+"Ocean water",2,0,"excluded: no particle-level rows","CRO20251212","Carmel",7,14,0
+"Ocean water",1,2.25373134328358,"rebuilt","PRO20240606S","Pajaro",67,67,151
+"Ocean water",1,1.48148148148148,"rebuilt","PRO20240918S","Pajaro",216,216,320
+"Ocean water",2,0,"excluded: no particle-level rows","PRO20250122S","Pajaro",9,18,0
+"Ocean water",2,0,"excluded: no particle-level rows","PRO20250616S","Pajaro",13,26,0
+"Ocean water",1.66666666666667,0,"excluded: no particle-level rows","PRO20251210S","Pajaro",6,10,0
+"Ocean water",1,2.45939086294416,"rebuilt","SLO20240606S","San Lorenzo",394,394,969
+"Ocean water",1,1.69444444444444,"rebuilt","SLO20240918S","San Lorenzo",36,36,61
+"Ocean water",1,0,"excluded: no particle-level rows","SLO20250122S","San Lorenzo",2,2,0
+"Ocean water",2,0,"excluded: no particle-level rows","SLO20251210S","San Lorenzo",9,18,0
+"Ocean water",1,0.889763779527559,"rebuilt","SRO20240606S","Salinas",508,508,452
+"Ocean water",1,0,"excluded: no particle-level rows","SRO20250122S","Salinas",5,5,0
+"Beach sand",1,1.64102564102564,"rebuilt","CRL20240529S","Carmel",78,78,128
+"Beach sand",6.66666666666667,2.78703703703704,"rebuilt","CRL20240904S","Carmel",108,720,301
+"Beach sand",1,1.46153846153846,"rebuilt","CRL20241205S","Carmel",39,39,57
+"Beach sand",2,0,"excluded: no particle-level rows","CRL20250415S","Carmel",24,48,0
+"Beach sand",10,0,"excluded: no particle-level rows","CRL20250711S","Carmel",16,160,0
+"Beach sand",2,0,"excluded: no particle-level rows","CRL20251001S","Carmel",5,10,0
+"Beach sand",1,1.52882205513784,"rebuilt","CRM20240529S","Carmel",399,399,610
+"Beach sand",2,0,"excluded: no particle-level rows","CRM20250415S","Carmel",38,76,0
+"Beach sand",2.5,0,"excluded: no particle-level rows","CRM20251001S","Carmel",7,17.5,0
+"Beach sand",1,1.43805309734513,"rebuilt","CRU20240529S","Carmel",226,226,325
+"Beach sand",1,1.84615384615385,"rebuilt","CRU20241205S","Carmel",65,65,120
+"Beach sand",2,0,"excluded: no particle-level rows","CRU20250415S","Carmel",31,62,0
+"Beach sand",10,0,"excluded: no particle-level rows","CRU20250711S","Carmel",21,210,0
+"Beach sand",2.5,0,"excluded: no particle-level rows","CRU20251001S","Carmel",18,45,0
+"Beach sand",1,2.90566037735849,"rebuilt","PRL20240528S","Pajaro",159,159,462
+"Beach sand",6.66666666666667,2.12941176470588,"rebuilt","PRL20240903S","Pajaro",170,1133.33333333333,362
+"Beach sand",1,3.14285714285714,"rebuilt","PRL20241204S","Pajaro",7,7,22
+"Beach sand",1,0,"excluded: no particle-level rows","PRL20250414","Pajaro",1,1,0
+"Beach sand",2,0,"excluded: no particle-level rows","PRL20250414S","Pajaro",99,198,0
+"Beach sand",5,0,"excluded: no particle-level rows","PRL20250709S","Pajaro",1,5,0
+"Beach sand",2,0,"excluded: no particle-level rows","PRL20251202S","Pajaro",10,20,0
+"Beach sand",1,1.6075,"rebuilt","PRM20240528S","Pajaro",400,400,643
+"Beach sand",7.50000001875,0,"excluded: no particle-level rows","PRM20250414S","Pajaro",5,37.50000009375,0
+"Beach sand",3.33333333333333,0,"excluded: no particle-level rows","PRM20250709S","Pajaro",8,26.6666666666667,0
+"Beach sand",2.5,0,"excluded: no particle-level rows","PRM20250930S","Pajaro",13,32.5,0
+"Beach sand",2,0,"excluded: no particle-level rows","PRM20251202S","Pajaro",15,30,0
+"Beach sand",1,0.754208754208754,"rebuilt","PRU20240528S","Pajaro",297,297,224
+"Beach sand",1,1.65573770491803,"rebuilt","PRU20241204S","Pajaro",61,61,101
+"Beach sand",1,0,"excluded: no particle-level rows","PRU20241204_WaterBlank","Pajaro",5,5,0
+"Beach sand",3.000000003,0,"excluded: no particle-level rows","PRU20250414S","Pajaro",46,138.000000138,0
+"Beach sand",2.5,0,"excluded: no particle-level rows","PRU20250709S","Pajaro",3,7.5,0
+"Beach sand",1.66666666666667,0,"excluded: no particle-level rows","PRU20250930S","Pajaro",12,20,0
+"Beach sand",10,0,"excluded: no particle-level rows","PRU20251202S","Pajaro",11,110,0
+"Beach sand",1,1.68067226890756,"rebuilt","SLL20240314S","San Lorenzo",119,119,200
+"Beach sand",2,1.703125,"rebuilt","SLL20240528S","San Lorenzo",384,768,654
+"Beach sand",1,1.95,"rebuilt","SLL20241204S","San Lorenzo",200,200,390
+"Beach sand",1.6,0,"excluded: no particle-level rows","SLL20250414S","San Lorenzo",100,160,0
+"Beach sand",10,0,"excluded: no particle-level rows","SLL20250709S","San Lorenzo",41,410,0
+"Beach sand",10,0,"excluded: no particle-level rows","SLL20250930S","San Lorenzo",4,40,0
+"Beach sand",3.33333333333333,0,"excluded: no particle-level rows","SLL20251202S","San Lorenzo",15,50,0
+"Beach sand",6.66666666666667,2.12244897959184,"rebuilt","SLM20240314S","San Lorenzo",49,326.666666666667,104
+"Beach sand",4.16666666666667,1.25130890052356,"rebuilt","SLM20240528S","San Lorenzo",382,1591.66666666667,478
+"Beach sand",6.66666666666667,1.23618090452261,"rebuilt","SLM20240903S","San Lorenzo",199,1326.66666666667,246
+"Beach sand",3.000000003,0,"excluded: no particle-level rows","SLM20250414S","San Lorenzo",55,165.000000165,0
+"Beach sand",20,0,"excluded: no particle-level rows","SLM20250709S","San Lorenzo",28,560,0
+"Beach sand",10,0,"excluded: no particle-level rows","SLM20250930S","San Lorenzo",18,180,0
+"Beach sand",10,0,"excluded: no particle-level rows","SLM20251202S","San Lorenzo",12,120,0
+"Beach sand",6.66666666666667,1.375,"rebuilt","SLU20240314S","San Lorenzo",48,320,66
+"Beach sand",4.16666666666667,1.70186335403727,"rebuilt","SLU20240528S","San Lorenzo",161,670.833333333333,274
+"Beach sand",1,1.45403899721448,"rebuilt","SLU20240903S","San Lorenzo",359,359,522
+"Beach sand",4.333337666671,2.30769230769231,"rebuilt","SLU20241204S","San Lorenzo",39,169.000169000169,90
+"Beach sand",1,0,"excluded: no particle-level rows","SLU20250414","San Lorenzo",2,2,0
+"Beach sand",3.000000003,0,"excluded: no particle-level rows","SLU20250414S","San Lorenzo",130,390.00000039,0
+"Beach sand",10,0,"excluded: no particle-level rows","SLU20250709S","San Lorenzo",42,420,0
+"Beach sand",10,0,"excluded: no particle-level rows","SLU20250930S","San Lorenzo",4,40,0
+"Beach sand",10,0,"excluded: no particle-level rows","SLU20251202S","San Lorenzo",101,1010,0
+"Beach sand",1,1.2027027027027,"rebuilt","SRL20240315S","Salinas",370,370,445
+"Beach sand",2,3.21343873517787,"rebuilt","SRL20240529S","Salinas",253,506,813
+"Beach sand",6.66666666666667,1.6,"rebuilt","SRL20240904S","Salinas",105,700,168
+"Beach sand",6.66666666666667,2.96428571428571,"rebuilt","SRL20241205S","Salinas",28,186.666666666667,83
+"Beach sand",4,0,"excluded: no particle-level rows","SRL20250415S","Salinas",60,240,0
+"Beach sand",5,0,"excluded: no particle-level rows","SRL20250711S","Salinas",12,60,0
+"Beach sand",5,0,"excluded: no particle-level rows","SRL20251001S","Salinas",7,35,0
+"Beach sand",10,0,"excluded: no particle-level rows","SRL20251203S","Salinas",10,100,0
+"Beach sand",6.66666666666667,1.24657534246575,"rebuilt","SRM20240315S","Salinas",438,2920,546
+"Beach sand",2,0,"excluded: no particle-level rows","SRM20250415S","Salinas",72,144,0
+"Beach sand",10,0,"excluded: no particle-level rows","SRM20251203S","Salinas",4,40,0
+"Beach sand",1,1.33333333333333,"rebuilt","SRU20240315S","Salinas",9,9,12
+"Beach sand",4.16666666666667,1.06083333333333,"rebuilt","SRU20240529S","Salinas",1200,5000,1273
+"Beach sand",6.66666666666667,2.14285714285714,"rebuilt","SRU20241205S","Salinas",7,46.6666666666667,15
+"Beach sand",2,0,"excluded: no particle-level rows","SRU20250415S","Salinas",98,196,0
+"Beach sand",10,0,"excluded: no particle-level rows","SRU20250711S","Salinas",4,40,0
+"Beach sand",5,0,"excluded: no particle-level rows","SRU20251001L","Salinas",4,20,0
+"Beach sand",5,0,"excluded: no particle-level rows","SRU20251001S","Salinas",5,25,0
+"Beach sand",6.999999993,0,"excluded: no particle-level rows","SRU20251203S","Salinas",5,34.999999965,0
