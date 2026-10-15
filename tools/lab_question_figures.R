@@ -147,4 +147,39 @@ p7 <- ggplot(f7, aes(size_class, max_length_um)) +
        subtitle = "Dashed lines = reported 50-500 um range")
 save(p7, "fig7_size_class_vs_length.png", w = 8, h = 5)
 
+# 8. River 1-5000 um decomposition by river, with the RIVM Dutch-river benchmark
+rv <- plastic |> filter(sample_type == "river water", sample_or_blank == "sample")
+rv <- rv[spectra_qc_pass(rv), ] |> filter(sid %in% summ$sid)
+rfits <- lapply(split(rv$max_length_um, rv$sample_location), fit_cpsd_segur_r, bin_um = 5)
+rmon <- summ |> filter(sample_type == "river water", material_simple == "plastic", sample_or_blank == "sample") |>
+  group_by(sid) |> summarise(river = first(sample_location), count = sum(count), C = sum(extrap_conc_PPL) * 1000, .groups = "drop")
+rv$in_lod <- mapply(function(L, r) L >= rfits[[r]]$lower_lod_um & L < rfits[[r]]$upper_lod_um, rv$max_length_um, rv$sample_location)
+rrows <- rv |> group_by(sid) |> summarise(n50 = sum(max_length_um >= 50 & max_length_um <= 500), nlod = sum(in_lod), .groups = "drop")
+rx <- rmon |> left_join(rrows, by = "sid") |>
+  mutate(a = vapply(river, function(r) rfits[[r]]$a_psd, 1),
+         cf_sieve = correction_factor(a, 50, 500, 1, 5000),
+         cf_lod = mapply(function(a, r) correction_factor(a, rfits[[r]]$lower_lod_um, rfits[[r]]$upper_lod_um, 1, 5000), a, river),
+         A = C * cf_sieve, Cr = n50 * C / count * cf_sieve, D = nlod * C / count * cf_lod)
+step_levels <- c("A. Reported 50-500 um,\nsieve-anchored (= RIVM W1)", "B. Rebuilt from\nQC-passing rows", "C. Anchored on the\nLOD window (production)")
+rsteps <- dplyr::bind_rows(lapply(c("All rivers", sort(unique(rx$river))), function(r) {
+  d <- if (r == "All rivers") rx else rx[rx$river == r, ]
+  tibble::tibble(river = r, step = step_levels,
+                 value = c(median(d$A), median(d$Cr, na.rm = TRUE), median(d$D, na.rm = TRUE)))
+})) |> mutate(river = factor(river, levels = c("All rivers", sort(unique(rx$river)))), step = factor(step, levels = step_levels))
+tv <- read.csv("data_output/rivm_benchmark_text_values_v1.csv")
+dutch <- tibble::tibble(label = c("Meuse (FTIR)", "Dommel (FTIR)"),
+                        value = tv$value[match(c("dutch_Meuse_published_W1", "dutch_Dommel_published_W1"), tv$key)])
+p8 <- ggplot(rsteps, aes(river, value, fill = step)) +
+  geom_col(position = position_dodge(width = 0.85), width = 0.8) +
+  geom_hline(data = dutch, aes(yintercept = value, linetype = label), color = "#c0622b") +
+  scale_y_log10(labels = scales::label_comma()) +
+  scale_fill_manual(values = c("#9db8ae", "#4f9a85", "#1f6f5c"), name = NULL) +
+  scale_linetype_manual(values = c("Meuse (FTIR)" = "dashed", "Dommel (FTIR)" = "dotted"), name = "Dutch rivers, RIVM W1 median") +
+  labs(x = NULL, y = "River 1-5000 um concentration (MP per m3, log)",
+       title = "River water: the same rebuild and anchor steps, plus steep slopes in Pajaro and Salinas",
+       subtitle = sprintf("Median over samples. Fitted river slopes: %s",
+                          paste(sprintf("%s %.2f", names(rfits), vapply(rfits, function(f) f$a_psd, 1)), collapse = "; "))) +
+  theme(legend.position = "bottom", legend.box = "vertical")
+save(p8, "fig8_river_decomposition.png", w = 11, h = 6.5)
+
 cat("Wrote", length(list.files(out)), "figures to", out, "\n")

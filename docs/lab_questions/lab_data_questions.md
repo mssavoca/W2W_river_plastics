@@ -35,7 +35,7 @@ For the rescaling to be valid, **the concentration and the CF must describe the 
 
 - **A polarity error in our spectral filter.** Our pipeline kept particles with `bad_spectra == TRUE`, assuming TRUE meant a good spectrum. The data show TRUE means the match correlation is 0.66 or lower (Figure 1). We were therefore fitting slopes on the *poorly* matched particles only (1,195 of 7,148 QC-passing river particles). The filter now keeps `bad_spectra == FALSE`. This changes every slope and concentration.
 - **A provisional change to how concentrations are built.** Concentrations are now rebuilt from QC-passing particle rows scaled by your aliquot factor, rather than taking your reported concentration and multiplying it by the in-window share. We flagged this as needing your confirmation before publication, because it depends on what the particle rows represent (Q3–Q8).
-- **An unexpectedly high ocean estimate.** After these changes, our rescaled ocean concentrations came out about 40 times higher than the global MPsizeBase compilation. On identical measured size windows, Monterey Bay sits inside the literature range. Section 3 traces the gap to data-handling choices that only you can settle.
+- **Unexpectedly high rescaled estimates, in ocean and river water.** After these changes, our rescaled ocean concentrations came out about 40 times higher than the global MPsizeBase compilation. The all-river median came out 16–31 times higher than Dutch rivers measured by µFTIR (RIVM 2026 benchmark). On identical measured size windows, both sit inside or below the literature range. Section 3 traces the gaps to data-handling choices that only you can settle. Most of them affect river and ocean water alike.
 
 ---
 
@@ -77,7 +77,9 @@ For the rescaling to be valid, **the concentration and the CF must describe the 
 
 ---
 
-## 3. Why the ocean estimate is so high
+## 3. Why the rescaled estimates are so high
+
+### 3.1 Ocean water
 
 ![Figure 5](figs/fig5_ocean_decomposition.png)
 
@@ -87,7 +89,33 @@ For the rescaling to be valid, **the concentration and the CF must describe the 
 2. **Rebuild basis and blanks (×1.7).** The particle rows outnumber the summary counts and are not blank-corrected. → Q3, Q4
 3. **Anchor and extrapolation (×2.8).** With the corrected filter, the ocean fit window moved up to 250–985 µm. It holds 21% of the 50–500 µm particles where the fitted power law predicts 6.4%, so the measured distribution is flatter than the fitted slope at the small end. Rescaling from the upper window then puts 98% of the 1–5000 µm count below 10 µm. → Q6, Q14
 
-The report computes this decomposition live (Section 13.6, subsection D6). The same mechanisms affect river water, more mildly: the rebuilt river concentration is about 1.85 times the reported one.
+The report computes this decomposition live (Section 13.6, subsection D6).
+
+### 3.2 River water: the same mechanisms, plus steep slopes
+
+The river comparison uses the RIVM Dutch-river benchmark in the report (Section 13.4; Mintenig et al. 2020, 2025 and Mughini-Gras et al. 2021, compiled by Quik et al. 2026). On the measured 50–500 µm window, with no extrapolation, our four rivers have a median of about 200 particles per m³ from the reported concentrations. The FTIR-measured Dutch rivers have 250 (Meuse) and 350 (Dommel). Monterey Bay rivers are therefore not more contaminated where both studies actually counted particles. The gap opens only after rescaling to 1–5000 µm.
+
+![Figure 8](figs/fig8_river_decomposition.png)
+
+*Figure 8. River 1–5000 µm estimate step by step, by river (medians over samples). Dashed and dotted lines: Dutch FTIR rivers rescaled the same way (RIVM W1 medians, about 39,000 and 74,000 per m³).*
+
+| Step (median over samples, MP per m³) | All rivers | Carmel | Pajaro | Salinas | San Lorenzo |
+|---|---|---|---|---|---|
+| A. Reported 50–500 µm, sieve-anchored with each river's slope (= RIVM W1) | 282,000 | 78,400 | 3,060,000 | 350,000 | 70,100 |
+| B. Rebuilt from QC-passing particle rows | 559,000 | 197,000 | 4,510,000 | 934,000 | 97,300 |
+| C. Anchored on the LOD window (production) | 1,200,000 | 241,000 | 30,600,000 | 2,470,000 | 144,000 |
+| Fitted slope (a) | | −2.61 | −3.46 | −3.04 | −2.40 |
+| LOD window (µm) | | 165–535 | 145–535 | 145–480 | 80–330 |
+| Share of 1–5000 µm count below 10 µm | | 97.5% | 99.7% | 99.1% | 96.0% |
+
+How each ocean mechanism carries over to rivers:
+
+1. **Sample selection: small for rivers.** 56 of 57 river samples have particle rows; only SRR20250303SD (47 particles) is missing. Rivers do not have the ocean's ×7.6 selection bias, but the gap would reappear for any river samples added in 2025 without an updated export. → Q10
+2. **Rebuild basis and blanks: ×2.0.** QC-passing rows exceed the summary counts in every river (median ratio 1.65 for San Lorenzo to 2.29 for Carmel). Blanks matter more for rivers than the ratio suggests: the median field blank holds 11 QC-passing particles, 31% of the median river sample (35), and 22 of 57 river samples hold no more than twice the median blank. Without blank correction of the particle rows, low-concentration river samples are mostly contamination. → Q3, Q4, Q11
+3. **Anchor and extrapolation: ×2.1.** In every river the LOD window holds more particles than the fitted power law predicts: 1.45 times (San Lorenzo), 2.15 (Carmel), 3.2 (Salinas) and 4.1 (Pajaro). The measured size distribution is flatter than the fitted slope below about 150 µm, the pattern expected if particles of 50–150 µm are under-detected or lost in processing. → Q6, Q14
+4. **River-specific: steep slopes.** Even before the rebuild and anchor steps (step A), Carmel and San Lorenzo match the Dutch FTIR rivers (1–2 times), but Salinas is 5–9 times and Pajaro 40–80 times higher. That is because Pajaro (−3.46) and Salinas (−3.04) have much steeper fitted slopes than the Dutch FTIR rivers (about −2.3). Rescaling from 50–500 µm multiplies by about 15,000 for Pajaro and 3,000 for Salinas, against 45–430 for the Dutch data. A steep fitted slope can be real, but it can also come from incomplete detection near the bottom of the fit window or from the fit window itself, so the measurement definitions and detection floor matter here too. → Q14
+
+In short, the river and ocean overestimates share their causes: particle rows that are not blank-corrected and do not match the summary counts, a flatter-than-power-law distribution at the small end, and steep slopes that put almost the whole 1–5000 µm count below 10 µm. The ocean adds a sample-selection bias that rivers largely escape.
 
 ---
 
