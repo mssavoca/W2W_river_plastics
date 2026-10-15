@@ -182,19 +182,28 @@ si_format_property_table <- function(tbl, include_matrix = FALSE) {
 #'
 #' @param monitoring Monitoring data returned by correct_and_bootstrap_eed().
 #' @param corrected_draws Draw-level output returned by correct_and_bootstrap_eed().
-#' @param concentration_col Measured-concentration column in monitoring.
+#' @param concentration_col C-PSD-valid concentration column in monitoring.
+#' @param reported_concentration_col Nominal reported-concentration column used
+#'   to normalize the C-PSD-valid concentration.
 #' @param matrix_label,concentration_unit Labels carried into the output.
 #' @param slope_col Column in monitoring containing the applied point-estimate
 #'   differential PSD slope.
-#' @return One row per sample with reported mesh limits, applied PSD slope,
-#'   median correction factor, bias-corrected LOD limits, and concentrations.
+#' @param psd_model Label for the PSD/CF scenario applied to the sample.
+#' @param location_col Optional monitoring column to report as Location.
+#' @param location_label Location label used when location_col is NULL.
+#' @return One row per sample with nominal reported limits/concentration,
+#'   C-PSD-valid window/concentration, applied slope, and rescaled concentration.
 si_rescaling_sample_rows <- function(monitoring, corrected_draws, concentration_col,
                                      matrix_label, concentration_unit,
-                                     slope_col = "a_psd_default") {
+                                     slope_col = "a_psd_default", psd_model = "Pooled",
+                                     location_col = NULL, location_label = "All locations",
+                                     reported_concentration_col = sub("^C_measured", "C_reported", concentration_col)) {
   required_monitoring <- c(
-    "sample_id", concentration_col, "Lmin_measured_um", "Lmax_measured_um",
-    "Lmin_biascorr_um", "Lmax_biascorr_um", slope_col
+    "sample_id", concentration_col, reported_concentration_col,
+    "Lmin_reported_um", "Lmax_reported_um", "Lmin_measured_um", "Lmax_measured_um",
+    "Lmin_biascorr_um", "Lmax_biascorr_um", "lod_particle_fraction", slope_col
   )
+  if (!is.null(location_col)) required_monitoring <- c(required_monitoring, location_col)
   required_draws <- c("sample_id", "cf", "C_corrected")
   missing_monitoring <- setdiff(required_monitoring, names(monitoring))
   missing_draws <- setdiff(required_draws, names(corrected_draws))
@@ -209,14 +218,17 @@ si_rescaling_sample_rows <- function(monitoring, corrected_draws, concentration_
   sample_metadata <- monitoring |>
     dplyr::group_by(sample_id) |>
     dplyr::summarise(
+      Location = if (is.null(location_col)) location_label else dplyr::first(.data[[location_col]]),
       `Reported mesh size limit (µm)` = paste0(
-        trimws(formatC(dplyr::first(Lmin_measured_um), format = "fg", digits = 6)), "–",
-        trimws(formatC(dplyr::first(Lmax_measured_um), format = "fg", digits = 6))
+        trimws(formatC(dplyr::first(Lmin_reported_um), format = "fg", digits = 6)), "–",
+        trimws(formatC(dplyr::first(Lmax_reported_um), format = "fg", digits = 6))
       ),
       `Default PSD slope (a_PSD)` = dplyr::first(.data[[slope_col]]),
       `LOD lower (µm)` = dplyr::first(Lmin_biascorr_um),
       `LOD upper (µm)` = dplyr::first(Lmax_biascorr_um),
-      `Measured concentration (median)` = stats::median(.data[[concentration_col]], na.rm = TRUE),
+      `LOD-window particle fraction` = stats::median(lod_particle_fraction, na.rm = TRUE),
+      `Reported concentration (median)` = stats::median(.data[[reported_concentration_col]], na.rm = TRUE),
+      `C-PSD-valid concentration (median)` = stats::median(.data[[concentration_col]], na.rm = TRUE),
       .groups = "drop"
     )
 
@@ -233,27 +245,33 @@ si_rescaling_sample_rows <- function(monitoring, corrected_draws, concentration_
     dplyr::transmute(
       Matrix = matrix_label,
       `Sample ID` = sample_id,
+      Location,
+      `PSD model` = psd_model,
       `Concentration unit` = concentration_unit,
       `Reported mesh size limit (µm)`,
       `Default PSD slope (a_PSD)`,
       `LOD lower (µm)`,
       `LOD upper (µm)`,
+      `LOD-window particle fraction`,
       `CF (median)`,
-      `Measured concentration (median)`,
+      `Reported concentration (median)`,
+      `C-PSD-valid concentration (median)`,
       `Rescaled concentration (median)`
     ) |>
     dplyr::arrange(`Sample ID`)
 }
 
-#' Summarize measured and rescaled concentrations by matrix
+#' Summarize measured and rescaled concentrations by selected SI groupings
 #'
 #' @param sample_rows Output of si_rescaling_sample_rows(), row-bound across
 #'   matrices.
-#' @return One row per matrix and concentration unit, with mean, median, range,
-#'   and interquartile range for measured and rescaled concentrations.
-si_rescaling_matrix_summary <- function(sample_rows) {
+#' @param group_cols Columns used to define summary rows.
+#' @return One row per requested grouping, with mean, median, range,
+#'   and interquartile range for C-PSD-valid and rescaled concentrations.
+si_rescaling_matrix_summary <- function(sample_rows,
+                                        group_cols = c("Matrix", "PSD model", "Concentration unit")) {
   required <- c(
-    "Matrix", "Concentration unit", "Measured concentration (median)",
+    group_cols, "C-PSD-valid concentration (median)",
     "Rescaled concentration (median)"
   )
   missing <- setdiff(required, names(sample_rows))
@@ -264,10 +282,10 @@ si_rescaling_matrix_summary <- function(sample_rows) {
 
   sample_rows |>
     tidyr::pivot_longer(
-      cols = c(`Measured concentration (median)`, `Rescaled concentration (median)`),
+      cols = c(`C-PSD-valid concentration (median)`, `Rescaled concentration (median)`),
       names_to = "data_type", values_to = "concentration"
     ) |>
-    dplyr::group_by(Matrix, `Concentration unit`, data_type) |>
+    dplyr::group_by(dplyr::across(dplyr::all_of(group_cols)), data_type) |>
     dplyr::summarise(
       n = sum(is.finite(concentration)),
       mean = mean(concentration, na.rm = TRUE),
@@ -280,7 +298,7 @@ si_rescaling_matrix_summary <- function(sample_rows) {
     dplyr::mutate(
       data_type = dplyr::recode(
         data_type,
-        `Measured concentration (median)` = "Measured",
+        `C-PSD-valid concentration (median)` = "C-PSD-valid",
         `Rescaled concentration (median)` = "Rescaled"
       )
     ) |>
@@ -289,15 +307,14 @@ si_rescaling_matrix_summary <- function(sample_rows) {
       values_from = c(n, mean, median, min, max, IQR),
       names_glue = "{data_type} {.value}"
     ) |>
-    dplyr::transmute(
-      Matrix,
-      `Concentration unit`,
-      `n` = `Measured n`,
-      `Measured mean` = `Measured mean`,
-      `Measured median` = `Measured median`,
-      `Measured min` = `Measured min`,
-      `Measured max` = `Measured max`,
-      `Measured IQR` = `Measured IQR`,
+    dplyr::select(
+      dplyr::all_of(group_cols),
+      `n` = `C-PSD-valid n`,
+      `C-PSD-valid mean` = `C-PSD-valid mean`,
+      `C-PSD-valid median` = `C-PSD-valid median`,
+      `C-PSD-valid min` = `C-PSD-valid min`,
+      `C-PSD-valid max` = `C-PSD-valid max`,
+      `C-PSD-valid IQR` = `C-PSD-valid IQR`,
       `Rescaled mean` = `Rescaled mean`,
       `Rescaled median` = `Rescaled median`,
       `Rescaled min` = `Rescaled min`,
@@ -320,7 +337,8 @@ si_format_rescaling_sample_table <- function(tbl) {
       `LOD lower (µm)` = fmt(`LOD lower (µm)`, digits = 0),
       `LOD upper (µm)` = fmt(`LOD upper (µm)`, digits = 0),
       `CF (median)` = fmt(`CF (median)`),
-      `Measured concentration (median)` = fmt(`Measured concentration (median)`),
+      `Reported concentration (median)` = fmt(`Reported concentration (median)`),
+      `C-PSD-valid concentration (median)` = fmt(`C-PSD-valid concentration (median)`),
       `Rescaled concentration (median)` = fmt(`Rescaled concentration (median)`)
     )
 }
@@ -333,25 +351,27 @@ si_format_rescaling_summary_table <- function(tbl) {
              formatC(x, format = "e", digits = 3),
              formatC(x, format = "f", digits = 3, big.mark = ",")))
   }
+  numeric_cols <- setdiff(names(tbl)[vapply(tbl, is.numeric, logical(1))], "n")
   tbl |>
     dplyr::mutate(
-      dplyr::across(-c(Matrix, `Concentration unit`, n), fmt),
+      dplyr::across(dplyr::all_of(numeric_cols), fmt),
       n = as.character(n)
     )
 }
 
-#' Write SI Tables S5-S10 to a Word document with variable definitions
+#' Write SI Tables S5-S11 to a Word document with variable definitions
 #'
 #' @param path Output .docx path.
 #' @param props_river,props_ocean_sed si_particle_properties() outputs.
 #' @param fits_river,fits_ocean_sed si_cpsd_fit_rows() outputs (row-bound).
 #' @param alt_river,alt_ocean_sed Alternative-model tables (already formatted).
-#' @param rescaling_samples,rescaling_summary Sample-level and matrix-level
-#'   concentration-rescaling tables.
+#' @param rescaling_samples,rescaling_summary,rescaling_location_summary
+#'   Sample-level, matrix-level, and location-level concentration-rescaling tables.
 #' @param n_river,n_ocean,n_sed Particle counts per matrix, for captions.
 si_write_docx <- function(path, props_river, props_ocean_sed, fits_river, fits_ocean_sed,
                           alt_river, alt_ocean_sed, rescaling_samples,
-                          rescaling_summary, n_river, n_ocean, n_sed) {
+                          rescaling_summary, rescaling_location_summary,
+                          n_river, n_ocean, n_sed) {
   fp_txt  <- officer::fp_text(font.family = "Calibri", font.size = 11)
   fp_bold <- update(fp_txt, bold = TRUE)
   fmt_n <- function(x) format(x, big.mark = ",")
@@ -388,7 +408,7 @@ si_write_docx <- function(path, props_river, props_ocean_sed, fits_river, fits_o
       flextable::padding(padding = 1.5, part = "all")
     label_cols <- intersect(c("Matrix", "Property", "Metric", "Subset", "Shape", "Model",
                               "Parameters", "Fit statistics", "Sample ID", "Concentration unit",
-                              "Reported mesh size limit (µm)"), names(df))
+                              "Reported mesh size limit (µm)", "Location", "PSD model"), names(df))
     value_cols <- setdiff(names(df), label_cols)
     ft <- flextable::align(ft, j = label_cols, align = "left", part = "all")
     if (length(value_cols)) ft <- flextable::align(ft, j = value_cols, align = "right", part = "all")
@@ -425,12 +445,12 @@ si_write_docx <- function(path, props_river, props_ocean_sed, fits_river, fits_o
     type = "nextPage")
 
   doc <- officer::read_docx()
-  doc <- heading(doc, "Supplementary Tables S5–S10: Particle properties, particle-size distribution fits, and concentration rescaling", 16)
+  doc <- heading(doc, "Supplementary Tables S5–S11: Particle properties, particle-size distribution fits, and concentration rescaling", 16)
   doc <- para(doc, txt(paste0(
     "These tables report the measured particle properties, and the fitted parameters and fit statistics, for every particle-size ",
     "probability distribution (PDF) fitted in this work. They are formatted after Kooi et al. (2021, Water Research 198:117011, SI Tables S3–S4). ",
     "River water (freshwater; n = ", fmt_n(n_river), " particles) is reported in Tables S5 and S7. Ocean water (n = ", fmt_n(n_ocean),
-    ") and beach sand (n = ", fmt_n(n_sed), ") are reported together in Tables S6 and S8. Tables S9 and S10 report the existing sample-level concentration rescaling and its matrix summaries. Every particle was identified by µFTIR as ",
+    ") and beach sand (n = ", fmt_n(n_sed), ") are reported together in Tables S6 and S8. Table S9 reports sample-level concentration rescaling; Tables S10 and S11 summarize those values by matrix and by matrix plus location, respectively. Every particle was identified by µFTIR as ",
     "plastic with a confident spectral match; non-plastic (mineral, organic) particles were excluded before any summary or fit.")))
 
   # ---- Variable definitions ----
@@ -494,17 +514,21 @@ si_write_docx <- function(path, props_river, props_ocean_sed, fits_river, fits_o
     txt(", with its two-sided p-value. R > 0 favors the power law and R < 0 favors the lognormal. A non-significant p means the data cannot distinguish the two models."))
   doc <- defn(doc, "ΔAIC vs. single slope", txt("AIC of the two-segment fit minus AIC of the single-slope fit, over the same bins. Negative values favor the two-segment model; values below about −2 are conventionally treated as meaningful."))
 
-  doc <- heading(doc, "Concentration-rescaling tables (Tables S9 and S10)", 11.5)
+  doc <- heading(doc, "Concentration-rescaling tables (Tables S9–S11)", 11.5)
   doc <- defn(doc, "Sample ID", txt("The monitoring-sample identifier used in the concentration analysis."))
-  doc <- defn(doc, "Concentration unit", txt("Reported unit of the measured concentration. Beach-sand values are processing-volume-normalized particles/L-equivalent values, not particles/kg dry weight, and remain illustrative because sample dry mass is unavailable."))
-  doc <- defn(doc, "Reported mesh size limit (µm)", txt("The sample's reported lower and upper size limits before C-PSD bias correction (50–500 µm in the current monitoring input)."))
+  doc <- defn(doc, "Location", txt("River name for river-water samples and sampled location for ocean-water and beach-sand samples."))
+  doc <- defn(doc, "PSD model", txt("The C-PSD slope and LOD-window scenario used for rescaling. River-water samples are reported under both the production river-specific model and the pooled-river comparison; ocean-water and beach-sand samples use their available pooled-matrix model."))
+  doc <- defn(doc, "Concentration unit", txt("Reported unit of the measured concentration. Beach-sand concentrations are expressed as particles/L."))
+  doc <- defn(doc, "Reported mesh size limit (µm)", txt("The sample's reported lower and upper size limits before C-PSD windowing (50–500 µm in the current monitoring input)."))
   doc <- defn(doc, list(bold("Default PSD slope (a"), bsub("PSD"), bold(")")),
-    txt("Differential length-PSD slope used by the production rescaling. River samples receive their river-specific single-slope C-PSD fit; ocean-water and beach-sand samples receive their pooled matrix single-slope fit. No monitoring sample is refit here."))
-  doc <- defn(doc, "LOD lower, LOD upper (µm)", txt("The reported lower/upper size limits after clipping to the applicable C-PSD fitting window; these are the limits used in the correction-factor calculation."))
-  doc <- defn(doc, "CF (median)", txt("Median Monte Carlo correction factor for rescaling the applicable LOD-limited measured concentration to 1–5,000 µm. The full calculation propagates slope uncertainty; this table reports its median for readability."))
-  doc <- defn(doc, "Measured concentration (median)", txt("Median reported concentration across the plastic material-class records for one monitoring sample, before size-range rescaling. This matches the production sample-level corrected-concentration summary."))
-  doc <- defn(doc, "Rescaled concentration (median)", txt("Median across the sample's Monte Carlo corrected-concentration draws (measured concentration × correction factor), on the 1–5,000 µm target range."))
-  doc <- defn(doc, "Mean, median, min, max, IQR", txt("Arithmetic mean, median, minimum, maximum, and interquartile range across the sample-level measured or rescaled values within each matrix."))
+    txt("Differential length-PSD slope used by the named PSD model. The river-specific and pooled-river scenarios use their respective existing single-slope C-PSD fits; ocean-water and beach-sand samples use their pooled matrix single-slope fit. No monitoring sample is refit here."))
+  doc <- defn(doc, "LOD lower, LOD upper (µm)", txt("The applicable C-PSD fit window. Both the reconstructed concentration and correction-factor denominator use these limits."))
+  doc <- defn(doc, "LOD-window particle fraction", txt("Fraction of each sample's QC-passing particle count in its nominal reported window that falls inside the applicable C-PSD-valid window."))
+  doc <- defn(doc, "Reported concentration (median)", txt("The data owner's nominal reported concentration before C-PSD windowing; it supplies the sample-specific analytical-volume and aliquot normalization."))
+  doc <- defn(doc, "C-PSD-valid concentration (median)", txt("The reported concentration multiplied by the sample-specific LOD-window particle fraction. This is the concentration passed to the correction factor."))
+  doc <- defn(doc, "CF (median)", txt("Median Monte Carlo correction factor for rescaling the C-PSD-valid concentration to 1–5,000 µm. The full calculation propagates slope uncertainty; this table reports its median for readability."))
+  doc <- defn(doc, "Rescaled concentration (median)", txt("Median across the sample's Monte Carlo corrected-concentration draws (C-PSD-valid concentration × correction factor), on the 1–5,000 µm target range."))
+  doc <- defn(doc, "Mean, median, min, max, IQR", txt("Arithmetic mean, median, minimum, maximum, and interquartile range across the sample-level C-PSD-valid or rescaled values within each matrix."))
 
   doc <- officer::body_end_block_section(doc, officer::block_section(portrait))
 
@@ -544,14 +568,17 @@ si_write_docx <- function(path, props_river, props_ocean_sed, fits_river, fits_o
   doc <- footnote(doc, "Columns as in Table S7b.")
   doc <- officer::body_add_break(doc)
 
-  doc <- caption(doc, "Table S9.", txt("Sample-level median measured and 1–5,000 µm rescaled concentrations, grouped by matrix. The differential PSD slope shown is the production slope assigned to that sample; CF and rescaled concentration are medians across the production Monte Carlo draws."))
+  doc <- caption(doc, "Table S9.", txt("Sample-level nominal reported, C-PSD-valid, and 1–5,000 µm rescaled concentrations, grouped by matrix and location. River-water samples are reported under both river-specific and pooled-river PSD models; CF and rescaled concentration are medians across Monte Carlo draws."))
   doc <- flextable::body_add_flextable(doc, style_ft(si_format_rescaling_sample_table(rescaling_samples), "Matrix"))
-  doc <- footnote(doc, "Beach-sand concentrations are particles/L-equivalent processing-volume values, not particles/kg dry weight; see the concentration-unit definition.")
   doc <- officer::body_add_break(doc)
 
-  doc <- caption(doc, "Table S10.", txt("Matrix-level summary statistics for the sample-level median measured and rescaled concentrations in Table S9."))
+  doc <- caption(doc, "Table S10.", txt("Matrix- and PSD-model-level summary statistics for the sample-level C-PSD-valid and rescaled concentrations in Table S9."))
   doc <- flextable::body_add_flextable(doc, style_ft(si_format_rescaling_summary_table(rescaling_summary), "Matrix"))
-  doc <- footnote(doc, "IQR = interquartile range. Units are carried in the concentration-unit column; beach-sand values remain illustrative processing-volume-normalized concentrations.")
+  doc <- officer::body_add_break(doc)
+
+  doc <- caption(doc, "Table S11.", txt("Matrix-, location-, and PSD-model-level summary statistics for the sample-level C-PSD-valid and rescaled concentrations in Table S9."))
+  doc <- flextable::body_add_flextable(doc, style_ft(si_format_rescaling_summary_table(rescaling_location_summary), c("Matrix", "Location")))
+  doc <- footnote(doc, "IQR = interquartile range. Units are carried in the concentration-unit column.")
 
   doc <- officer::body_set_default_section(doc, landscape)
   print(doc, target = path)

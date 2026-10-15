@@ -184,7 +184,10 @@ raw_particles <- readRDS("data_input/Part_dets_comb.rds") |>
   assign_polymer_density(lookup = polymer_density_tbl) |>
   # Restrict to the canonical sample set (same sample-ID corrections as the
   # monitoring table) so PSD fits and concentrations describe the same samples.
-  dplyr::mutate(Client_ID_MSSupdate = dplyr::recode(Client_ID_MSSupdate, "SRR20240205SS_2" = "SRR20240205SS")) |>
+  dplyr::mutate(
+    Client_ID_MSSupdate = sub("_[0-9]+$", "", Client_ID_MSSupdate),
+    Client_ID_MSSupdate = dplyr::recode(Client_ID_MSSupdate, "SRR20240205SS_2" = "SRR20240205SS")
+  ) |>
   dplyr::filter(Client_ID_MSSupdate %in% unique(monitoring_raw$Client_ID_MSSupdate))
 
 # subset by matrix for downstream analysis
@@ -290,7 +293,7 @@ knitr::kable(polymer_density_composition_tbl, caption = "River particle density 
 
 ## 3.2 Monitoring concentration observations (site replicates)
 
-Here we load monitoring replicate concentrations (particles/L) that were *reported for limited size ranges* (e.g., 300–5000 µm typical of net tows).
+Here we load the data owner's reported monitoring concentrations (particles/L) and retain their nominal 50–500 µm range. These reported values are used only to preserve each sample's analytical-volume and aliquot normalization; Section 4.2.2 rebuilds the exposure concentration from the particle-level fraction inside the C-PSD-valid window before any correction factor is applied.
 
 ```{r}
 monitoring <- monitoring_raw |> 
@@ -318,19 +321,21 @@ monitoring <- monitoring_raw |>
     ) 
   ) %>%
   rename(river = sample_location,
-         C_measured_pL = extrap_conc_PPL) |>
-          # should adjust based on power law LLOD determined below
-  mutate(Lmin_measured_um = 50,
-         Lmax_measured_um = 500,
+         C_reported_pL = extrap_conc_PPL) |>
+  mutate(Lmin_reported_um = 50,
+         Lmax_reported_um = 500,
+         C_measured_pL = C_reported_pL,
+         Lmin_measured_um = Lmin_reported_um,
+         Lmax_measured_um = Lmax_reported_um,
          sample_id = Client_ID_MSSupdate) |>
   # One row per SAMPLE: total plastic concentration = sum over polymer classes.
   # (Previously each polymer-class row was treated as a sample, which
   # understated exposure by roughly the number of classes per sample.)
-  collapse_to_sample_totals(sum_cols = c("count", "extrap_count", "C_measured_pL"))
+  collapse_to_sample_totals(sum_cols = c("count", "extrap_count", "C_reported_pL", "C_measured_pL"))
 
 stopifnot(!anyDuplicated(monitoring$sample_id))
-cat("River monitoring samples:", nrow(monitoring), "| median total concentration:",
-    round(median(monitoring$C_measured_pL), 3), "particles/L (50-500 µm)\n")
+cat("River monitoring samples:", nrow(monitoring), "| median reported concentration:",
+    round(median(monitoring$C_reported_pL), 3), "particles/L (50-500 µm)\n")
 head(monitoring)
 ```
 
@@ -342,10 +347,10 @@ river_manifest <- monitoring |>
     sample_id, river, date,
     season = factor(dplyr::if_else(date < as.Date("2024-08-01"), "Season 1", "Season 2")),
     depth = sample_depth_general,
-    volume_L = extrap_count / C_measured_pL,
+    volume_L = extrap_count / C_reported_pL,
     n_particles_50_500 = count,
     n_particles_50_500_extrap = extrap_count,
-    conc_50_500_L = C_measured_pL,
+    conc_50_500_L = C_reported_pL,
     QC_pass = TRUE, QC_reason = NA_character_)
 
 legacy_ids <- readRDS("data_input/Part_dets_summ.rds") |>
@@ -460,6 +465,44 @@ loc_summary <- dplyr::bind_rows(lapply(names(cpsd_fits_by_loc), function(loc) {
 }))
 
 knitr::kable(loc_summary, caption = "C-PSD length fits by river location (Segur 2026 algorithm)")
+```
+
+### 4.2.2 LOD-scoped monitoring concentrations
+
+The exposure concentration and correction-factor denominator must refer to the same particle-size interval. For each sample, we therefore retain the data owner's reported concentration only as its sample-specific normalization, then multiply it by the fraction of that sample's QC-passing particle count that lies within its river's C-PSD fit window. The resulting `C_measured_pL` is the concentration within that C-PSD-valid window, and its lower and upper bounds are passed unchanged to the correction factor. Samples without a QC-passing particle in the valid window receive a zero LOD-window concentration; they remain in the EED as non-detects.
+
+```{r river-lod-scoped-concentrations}
+monitoring <- lod_scope_monitoring_concentrations(
+  monitoring = monitoring,
+  raw_particles = raw_particles_river,
+  reported_conc_col = "C_reported_pL",
+  output_conc_col = "C_measured_pL",
+  cpsd_fit = cpsd_fit_all,
+  group_col = "river",
+  cpsd_fit_by_group = cpsd_fits_by_loc
+)
+
+stopifnot(
+  all(monitoring$Lmin_measured_um < monitoring$Lmax_measured_um),
+  all(monitoring$lod_particle_fraction >= 0 & monitoring$lod_particle_fraction <= 1),
+  all(monitoring$C_measured_pL <= monitoring$C_reported_pL)
+)
+
+river_lod_conc_summary <- monitoring |>
+  dplyr::group_by(river, Lmin_measured_um, Lmax_measured_um) |>
+  dplyr::summarise(
+    n_samples = dplyr::n(),
+    n_zero_lod_concentration = sum(C_measured_pL == 0),
+    median_particle_fraction = stats::median(lod_particle_fraction),
+    median_reported_pL = stats::median(C_reported_pL),
+    median_lod_window_pL = stats::median(C_measured_pL),
+    .groups = "drop"
+  )
+knitr::kable(
+  river_lod_conc_summary,
+  digits = 3,
+  caption = "River monitoring concentrations reconstructed within each river's C-PSD-valid length window. The reported 50-500 µm concentration supplies only the sample-specific normalization; downstream exposure uses the LOD-window concentration."
+)
 ```
 
 ```{r cpsd-location-heterogeneity}
@@ -1135,8 +1178,9 @@ cat(sprintf(
 The equivalent check is also encoded as an automated `testthat` guard in `tests/testthat/test-correction_factor.R`, so the convention is protected both in interactive/rendered use and in CI-style test runs.
 
 ```{r rescaling-cf}
-# correct_and_bootstrap_eed() (sourced from R/mp_risk_utils.R) bundles the LOD bias
-# correction, the power-law correction_factor() rescale, the Monte Carlo corrected-
+# correct_and_bootstrap_eed() (sourced from R/mp_risk_utils.R) uses the already
+# reconstructed LOD-window concentration, its matching power-law correction factor,
+# the Monte Carlo corrected-
 # concentration draws, and the EED bootstrap into one shared step used identically
 # across river/sediment/ocean.
 stopifnot(slope_application %in% c("river", "pooled"))
@@ -1172,10 +1216,16 @@ eed_boot           <- river_corr$eed_boot
 # Pooled-slope exposure (sensitivity). ALIGNMENT RULE: any risk calculation that
 # uses these pooled-slope exposures must pair them with the pooled-slope hazard
 # (haz_pooled), never with the river-specific hazards (see README).
+# Pooled-slope analyses use the POOLED C-PSD window, so their concentrations are
+# re-scoped to that window (same size interval as their CF denominator).
+monitoring_pooled_scope <- lod_scope_monitoring_concentrations(
+  monitoring = dplyr::select(monitoring, -dplyr::any_of(c("reported_lower_um", "reported_upper_um", "lod_lower_um", "lod_upper_um", "n_particles_reported_window", "n_particles_lod_window", "lod_particle_fraction"))),
+  raw_particles = raw_particles_river, reported_conc_col = "C_reported_pL",
+  output_conc_col = "C_measured_pL", cpsd_fit = cpsd_fit_all)
 if (use_river_slopes) {
   set.seed(9111)
   river_corr_pooled <- correct_and_bootstrap_eed(
-    monitoring = monitoring, conc_col = "C_measured_pL", cpsd_fit = cpsd_fit_all, alpha_draws = alpha,
+    monitoring = monitoring_pooled_scope, conc_col = "C_measured_pL", cpsd_fit = cpsd_fit_all, alpha_draws = alpha,
     L_tar_min = 1, L_tar_max = 5000, n_draws = 3000, n_boot = n_boot, probs = c(0.5, 0.95),
     slope_convention = "differential")
 } else {
@@ -1216,7 +1266,7 @@ knitr::kable(dplyr::bind_rows(cf_by_river_tbl, pooled_ref_row), digits = 3,
 
 The differential-slope convention (length, area, volume, mass) is the current basis; Appendix A quantifies the effect of each prior convention error.
 
-Exposure rescaling uses `r if (use_river_slopes) "each river's own C-PSD slope and LOD window (river-specific; default)" else "the pooled C-PSD slope and LOD window"`. Across all applied draws the median rescaling factor is `r round(median(combined_cf), 2)` (90% CI: `r round(quantile(combined_cf, 0.05), 2)` – `r round(quantile(combined_cf, 0.95), 2)`), converting concentrations to the target range of 1 – 5000 µm; the table above gives the factor for each river and, for reference, the pooled-slope factor (median `r round(median(cf_pooled_ref), 2)`, measured window `r round(L_meas_min_use)` – `r round(L_meas_max_use)` µm). The measured-window convention (LOD window vs. sieve window) is unchanged here and remains under review (G1/G2). This is a model-based count correction: `correction_factor()` integrates the differential PSD exponent directly as `L^(a + 1)`, and no internal conversion is applied when `slope_convention = "differential"`.
+Exposure rescaling uses `r if (use_river_slopes) "each river's own C-PSD slope and LOD-window concentration (river-specific; default)" else "the pooled C-PSD slope and matching LOD-window concentration"`. Across all applied draws the median rescaling factor is `r round(median(combined_cf), 2)` (90% CI: `r round(quantile(combined_cf, 0.05), 2)` – `r round(quantile(combined_cf, 0.95), 2)`), converting each C-PSD-valid concentration to the target range of 1 – 5000 µm; the table above gives the factor for each river and, for reference, the pooled-slope factor (median `r round(median(cf_pooled_ref), 2)`, measured window `r round(L_meas_min_use)` – `r round(L_meas_max_use)` µm). This prevents already counted particles outside the fitted LOD window from being reconstructed a second time. This is a model-based count correction: `correction_factor()` integrates the differential PSD exponent directly as `L^(a + 1)`, and no internal conversion is applied when `slope_convention = "differential"`.
 
 ## 5.2 Optional additional bias terms as probability distributions
 
@@ -1243,7 +1293,7 @@ quantile(combined_cf, c(0.05, 0.5, 0.95))
 
 We treat each monitoring sample's corrected concentration as:
 
-`C_corrected = C_measured * combined_cf_draw`, with `combined_cf_draw` sampled in Monte Carlo.
+`C_corrected = C_LOD-window * combined_cf_draw`, with `combined_cf_draw` sampled in Monte Carlo. `C_LOD-window` is reconstructed from only the particle-level measurements in the C-PSD-valid range, so it is on exactly the same size basis as the correction-factor denominator.
 
 This yields a **distribution per monitoring sample**, and a pooled exposure distribution across samples.
 
@@ -1592,7 +1642,12 @@ ecdf_overlap_plot <- if (use_river_slopes) {
     eed_vals     = C_sample_median$C_corr_med[C_sample_median$river == r],
     haz_df       = haz_by_river[[r]],
     matrix_label = paste0("River water: ", r),
-    n_boot       = n_boot)), ncol = 2) + patchwork::plot_layout(guides = "collect")
+    n_boot       = n_boot) +
+      ggplot2::labs(title = r, subtitle = NULL) +
+      ggplot2::theme_minimal(base_size = 12) +
+      ggplot2::theme(plot.caption = ggplot2::element_text(size = 8, hjust = 0))), ncol = 2) +
+    patchwork::plot_layout(guides = "collect") +
+    patchwork::plot_annotation(title = "River water: exposure vs. each river's own aligned hazard distributions")
 } else plot_ecdf_overlap(
   eed_vals     = C_sample_median_pooled$C_corr_med,
   haz_df       = haz_pooled,
@@ -1600,7 +1655,8 @@ ecdf_overlap_plot <- if (use_river_slopes) {
   n_boot       = n_boot
 )
 
-ggsave(ecdf_overlap_plot, filename = "figures/ecdf_overlap_plot.png", width = 10, height = 6, dpi = 300)
+ggsave(ecdf_overlap_plot, filename = "figures/ecdf_overlap_plot.png",
+       width = if (use_river_slopes) 14 else 10, height = if (use_river_slopes) 9 else 6, dpi = 300)
 ecdf_overlap_plot
 ```
 
@@ -1716,7 +1772,7 @@ hoffman_slope_sensitivity <- dplyr::bind_rows(lapply(slope_sd_grid, function(sd_
     fit_volume = cpsd_fit_volume, fit_area = cpsd_fit_area, n = n_boot,
     seed = 5300 + as.integer(sd_i * 1000), psd_key = paste0("river:pooled:sd", sd_i))$haz
   mc_i <- mc2d_risk(
-    monitoring_df = monitoring,
+    monitoring_df = monitoring_pooled_scope,
     combined_cf = cf_i,
     haz_df = haz_i,
     n_uncertainty = 100,
@@ -1806,7 +1862,11 @@ depth_sensitivity <- dplyr::bind_rows(lapply(depth_levels, function(depth_i) {
     fit_volume = fit_cpsd_segur_r(part_i$V_um3, bin_um = vol_bin_um, fit_range_um = vlb_river$all),
     fit_area = fit_cpsd_segur_r(part_i$area_um2, bin_um = 500, fit_range_um = c(2000, 500000)),
     n = n_boot, seed = 5400 + 10 * match(depth_i, depth_levels), psd_key = paste0("river:depth:", depth_i))$haz
-  mon_i <- monitoring |> dplyr::filter(sample_depth_general == depth_i)
+  mon_i <- lod_scope_monitoring_concentrations(
+    monitoring = monitoring |> dplyr::filter(sample_depth_general == depth_i) |>
+      dplyr::select(-dplyr::any_of(c("reported_lower_um", "reported_upper_um", "lod_lower_um", "lod_upper_um", "n_particles_reported_window", "n_particles_lod_window", "lod_particle_fraction"))),
+    raw_particles = part_i, reported_conc_col = "C_reported_pL",
+    output_conc_col = "C_measured_pL", cpsd_fit = fit_i)
   corr_i <- correct_and_bootstrap_eed(
     monitoring = mon_i,
     conc_col = "C_measured_pL",
@@ -1936,7 +1996,7 @@ A Morris elementary-effects screen (global sensitivity ranking of RQ uncertainty
 
 ### Instrument configuration
 
-The µFTIR analysis used an objective equivalent to ~4× magnification with **25 µm pixel size**. At this pixel resolution, the practical minimum detectable particle size (requiring ≥ 2 pixels across the shortest dimension) is approximately **50 µm** — consistent with the `L_meas_min = 50 µm` parameter used throughout this workflow. This value is **already embedded in the correction factor (CF) calculation** and is not an additional bias to correct.
+The µFTIR analysis used an objective equivalent to ~4× magnification with **25 µm pixel size**. At this pixel resolution, the practical nominal minimum detectable particle size (requiring ≥ 2 pixels across the shortest dimension) is approximately **50 µm**. The reported 50–500 µm interval is retained only to normalize each sample's particle concentration; the production exposure and CF denominator use the C-PSD-valid window selected from the particle data for that river.
 
 ### Why the Wang et al. (2026) ×33 scaling factor does not apply here
 
@@ -1944,7 +2004,7 @@ Wang et al. (2026) found that a 4× µFTIR objective (20 µm pixel) detects only
 
 **1. The 97% "missed" particles lie almost entirely below our measurement floor.**
 
-The 25× objective in Wang et al. detects particles as small as ~4 µm. The 4× objective detects only those ≥ ~40–50 µm. The difference (97% of total particle count) is dominated by particles in the 4–50 µm size class. Our workflow already treats `L_meas_min = 50 µm` as the lower detection floor and uses the power-law CF to extrapolate particle counts from this floor down to 1 µm. The Wang et al. sub-50 µm particles are not "missing" from our analysis — they are the precise population that the `correction_factor()` function reconstructs via power-law integration.
+The 25× objective in Wang et al. detects particles as small as ~4 µm. The 4× objective detects only those ≥ ~40–50 µm. The difference (97% of total particle count) is dominated by particles in the 4–50 µm size class. Our workflow uses the C-PSD-valid lower bound, rather than the nominal 50 µm reporting limit, and extrapolates from that measured window down to 1 µm. The Wang et al. sub-window particles are therefore the population that `correction_factor()` reconstructs via power-law integration.
 
 **2. Within the measured range (50–500 µm), the 4×/25 µm system is effective.**
 
@@ -1967,9 +2027,9 @@ The Segur LOD search specifically identifies the size window where the C-PSD is 
 
 The current CF has a median of `r round(median(combined_cf), 1)`× (90% CI: `r round(quantile(combined_cf, 0.05), 1)`–`r round(quantile(combined_cf, 0.95), 1)`×). This already accounts for the unmeasured sub-50 µm population via power-law extrapolation. Multiplying `C_corrected` by an additional 33× would apply a second, conflicting correction to the same particle pool, producing a total inflation factor of ~`r round(median(combined_cf) * 33, 0)`× — far in excess of any defensible estimate.
 
-### Residual uncertainty: the 50–100 µm marginal zone
+### Residual uncertainty: the nominal 50–100 µm marginal zone
 
-The one genuine uncertainty from the 4×/25 µm configuration is **incomplete counting in the 50–100 µm particle size class**. Particles in this range occupy 2–4 pixels and may be undercounted by approximately 10–30% relative to what a 15× system would detect. The sensitivity analysis below quantifies the effect of adjusting `L_meas_min` from 50 µm to 100 µm, which effectively removes the marginal zone from the measured concentration estimate and lets the CF extrapolate it instead.
+The one genuine uncertainty from the 4×/25 µm configuration is **incomplete counting in the 50–100 µm particle size class**. Particles in this range occupy 2–4 pixels and may be undercounted relative to a higher-magnification system. The C-PSD fit-window selection addresses this directly in the production workflow: concentrations and correction-factor denominators are restricted to the fitted valid window. The following nominal-window calculation is retained only as an instrument-context diagnostic, not as a production exposure scenario.
 
 ```{r lmeas-sensitivity, message=FALSE, warning=FALSE}
 # Compare CF and risk outcomes under two L_meas_min assumptions:
@@ -2012,9 +2072,9 @@ cf_50  <- lmeas_cf_summary$CF_med[lmeas_cf_summary$scenario == "L_meas_min = 50 
 cf_100 <- lmeas_cf_summary$CF_med[lmeas_cf_summary$scenario == "L_meas_min = 100 µm (conservative)"]
 ```
 
-Raising `L_meas_min` from 50 to 100 µm increases the median CF from `r cf_50`× to `r cf_100`× — a modest change that reflects the additional particles in the 50–100 µm range being moved from "measured" to "extrapolated." This is the appropriate sensitivity analysis for this instrument configuration: it brackets the range of outcomes depending on whether the marginal detection zone is treated as reliably measured or excluded and reconstructed via power-law. The current workflow (`L_meas_min = 50 µm`) is the less conservative (lower CF) choice; if the 50–100 µm counts are systematically low due to detection limits, the true concentration may be closer to the `L_meas_min = 100 µm` estimate.
+Raising the *nominal* lower bound from 50 to 100 µm increases the diagnostic median CF from `r cf_50`× to `r cf_100`× because more particles are treated as extrapolated. This calculation does not change the production result: the production workflow uses the C-PSD-selected LOD window and recomputes each sample's input concentration within that same window.
 
-**Summary.** No additional objective-based correction factor is applied to `C_measured_pL`. The existing workflow already accounts for instrument detection limits through (1) the `L_meas_min = 50 µm` floor that reflects the 4×/25 µm pixel detection limit, and (2) the power-law CF that extrapolates particle counts from this floor to the 1 µm target. The Segur LOD fitting window (≥ `r round(cpsd_fit_all$lower_lod_used_um)` µm) lies entirely within the reliable detection zone of the instrument. The Wang et al. (2026) ×33 factor would be appropriate only if converting a 4× total particle count to an equivalent 25× total count *without* any power-law extrapolation — not in combination with the CF approach used here.
+**Summary.** No additional objective-based correction factor is applied to `C_measured_pL`. The workflow accounts for detection reliability by rebuilding each sample concentration within its C-PSD-selected window and then applying the power-law CF from that same window to the 1 µm target. The Wang et al. (2026) ×33 factor would be appropriate only if converting a 4× total particle count to an equivalent 25× total count *without* this size-resolved reconstruction and power-law extrapolation.
 
 # 11. Sediment — Beach Sand
 
@@ -2203,7 +2263,9 @@ raw_sed_check <- part_dets_summ_raw |>
 # extrap_conc_PPL is reconstructed here as extrap_count / divisor to check whether
 # it is a per-liter (water/processing-volume) concentration -- the same quantity
 # used, under the identical column name and identical construction, for river
-# water (C_measured_pL = extrap_conc_PPL, Section 5) and ocean water (Section 12).
+# water (where extrap_conc_PPL is the reported normalization before Section 5
+# reconstructs C_measured_pL over the C-PSD-valid interval) and ocean water
+# (Section 12).
 implied_divisor_sed <- round(raw_sed_check$extrap_count / raw_sed_check$extrap_conc_PPL, 3)
 cat("\nSediment ('beach sand') rows: n =", nrow(raw_sed_check),
     "| implied denominator of extrap_conc_PPL (extrap_count / extrap_conc_PPL), summary:\n")
@@ -2246,12 +2308,23 @@ monitoring_sed <- monitoring_raw |>
     # pipeline below can serve as an illustrative/methods demonstration; see
     # `sediment_concentration_is_quantitative` (FALSE) and the Section 11.4/14/15
     # caveats before reading any downstream sediment RQ as a real risk estimate.
-    C_measured_pkg = extrap_conc_PPL,
-    Lmin_measured_um = 50,
-    Lmax_measured_um = 500
+    C_reported_pkg = extrap_conc_PPL,
+    C_measured_pkg = C_reported_pkg,
+    Lmin_reported_um = 50,
+    Lmax_reported_um = 500,
+    Lmin_measured_um = Lmin_reported_um,
+    Lmax_measured_um = Lmax_reported_um
   ) |>
   # One row per sample (sum over polymer classes); see the river monitoring chunk.
-  collapse_to_sample_totals(sum_cols = c("count", "extrap_count", "extrap_conc_PPL", "C_measured_pkg"))
+  collapse_to_sample_totals(sum_cols = c("count", "extrap_count", "extrap_conc_PPL", "C_reported_pkg", "C_measured_pkg"))
+
+monitoring_sed <- lod_scope_monitoring_concentrations(
+  monitoring = monitoring_sed,
+  raw_particles = raw_particles_sed,
+  reported_conc_col = "C_reported_pkg",
+  output_conc_col = "C_measured_pkg",
+  cpsd_fit = cpsd_fit_sed_all
+)
 
 set.seed(9102)
 sed_corr <- correct_and_bootstrap_eed(
@@ -3506,12 +3579,23 @@ monitoring_ocean <- monitoring_raw |>
     date_raw      = stringr::str_extract(Client_ID_MSSupdate, "\\d{8}"),
     date          = lubridate::ymd(date_raw),
     sample_id     = Client_ID_MSSupdate,
-    C_measured_pL = extrap_conc_PPL,
-    Lmin_measured_um = 50,
-    Lmax_measured_um = 500
+    C_reported_pL = extrap_conc_PPL,
+    C_measured_pL = C_reported_pL,
+    Lmin_reported_um = 50,
+    Lmax_reported_um = 500,
+    Lmin_measured_um = Lmin_reported_um,
+    Lmax_measured_um = Lmax_reported_um
   ) |>
   # One row per sample (sum over polymer classes); see the river monitoring chunk.
-  collapse_to_sample_totals(sum_cols = c("count", "extrap_count", "extrap_conc_PPL", "C_measured_pL"))
+  collapse_to_sample_totals(sum_cols = c("count", "extrap_count", "extrap_conc_PPL", "C_reported_pL", "C_measured_pL"))
+
+monitoring_ocean <- lod_scope_monitoring_concentrations(
+  monitoring = monitoring_ocean,
+  raw_particles = raw_particles_ocean,
+  reported_conc_col = "C_reported_pL",
+  output_conc_col = "C_measured_pL",
+  cpsd_fit = cpsd_fit_ocean_all
+)
 
 cat("Ocean monitoring samples:", nrow(monitoring_ocean), "\n")
 
@@ -4121,7 +4205,7 @@ pw_ocean <- piecewise_cf_row("Ocean water", dplyr::filter(critical_piecewise_tbl
 # is unchanged, so any RQ shift below is attributable to the piecewise CF alone.
 set.seed(9401)
 eed_boot_piecewise_river <- if (is.finite(pw_river$cf_piecewise)) {
-  bootstrap_eed(monitoring$C_measured_pL * pw_river$cf_piecewise, n_boot = n_boot, probs = c(0.5, 0.95))
+  bootstrap_eed(monitoring_pooled_scope$C_measured_pL * pw_river$cf_piecewise, n_boot = n_boot, probs = c(0.5, 0.95))
 } else NULL
 set.seed(9402)
 eed_boot_piecewise_sed <- if (is.finite(pw_sed$cf_piecewise)) {
@@ -4557,7 +4641,7 @@ rave_override_ocean <- function(pm) {
 
 m12_river_results <- dplyr::bind_rows(lapply(m12_floors, function(L) {
   m12_run_one_floor(
-    L_tar_min = L, matrix_label = "River water", monitoring_df = monitoring,
+    L_tar_min = L, matrix_label = "River water", monitoring_df = monitoring_pooled_scope,
     cpsd_fit = cpsd_fit_all, alpha_draws = alpha, tox_data_base = tox_data,
     param_values_base = param_values, environments = c("Freshwater"),
     matrix_extra_args = list(), rave_override_fn = rave_override_river,
@@ -4742,7 +4826,7 @@ m2_floors <- c(1, 2.5, 5, 7.5, 10) # adds 7.5 µm vs the spec's motivating {1,2.
 
 m2_get_cfg <- function(compartment) {
   if (compartment == "river") {
-    list(monitoring_df = monitoring, cpsd_fit = cpsd_fit_all, alpha_draws = alpha,
+    list(monitoring_df = monitoring_pooled_scope, cpsd_fit = cpsd_fit_all, alpha_draws = alpha,
          tox_data_base = tox_data, tox_fixed = tox_fixed_river,
          param_values_base = param_values, environments = c("Freshwater"),
          matrix_extra_args = list(), rave_override_fn = rave_override_river, env_key = "Freshwater",
@@ -5499,7 +5583,7 @@ m13_propagate_one <- function(fit, L_meas_min, L_meas_max, monitoring_df, conc_c
 }
 
 m13_river_rq <- m13_propagate_one(
-  m13_river_fit, L_meas_min_use, L_meas_max_use, monitoring, "C_measured_pL",
+  m13_river_fit, L_meas_min_use, L_meas_max_use, monitoring_pooled_scope, "C_measured_pL",
   haz_pooled, n_risk, cpsd_fit_all$a_psd, combined_cf_pooled, seed_base = 72001
 )
 m13_ocean_rq <- m13_propagate_one(
@@ -6301,7 +6385,7 @@ Two convention fixes, made at different times, both change the Food Dilution ris
 # only recomputes the corrected-concentration draws with the legacy CF vector
 # already computed above (A.1, legacy_cf_river).
 set.seed(9202)
-C_legacycf_draws <- monitoring |>
+C_legacycf_draws <- monitoring_pooled_scope |>
   dplyr::mutate(idx = dplyr::row_number()) |>
   tidyr::crossing(draw = seq_len(3000)) |>
   dplyr::mutate(
@@ -6878,9 +6962,9 @@ table_s3_species_ec <- dplyr::bind_rows(
 knitr::kable(table_s3_species_ec, caption = "Table S3: SSD species membership and most-sensitive-species EC values, by matrix and ERM")
 ```
 
-## 16.1 SI Tables S5–S10: particle properties, fit statistics, and concentration rescaling
+## 16.1 SI Tables S5–S11: particle properties, fit statistics, and concentration rescaling
 
-Supplementary tables reporting the particle properties underlying, the fitted parameters and fit statistics of every particle-size probability distribution fitted in this report, and the production concentration rescaling for every monitoring sample, formatted after Kooi et al. (2021, *Water Research* 198:117011, SI Tables S3–S4). River water (freshwater) is reported separately (Tables S5, S7) from ocean water and beach sand (Tables S6, S8). Tables S9 and S10 summarize the existing rescaling outputs: river samples use their river-specific single-slope C-PSD fit by default, while ocean-water and beach-sand samples use their pooled matrix single-slope fit. Each C-PSD row reports the fitted window [x~min~, x~max~) selected by the Segur et al. (2026) two-step LOD algorithm (or fixed by the length/width-consistent volume bounds, Section 4.2.3; area fits use a fixed lower search bound, Section 4.2.2), the cumulative slope α~CPSD~ and log~10~ intercept *b* of log~10~ N(≥x) = *b* + α~CPSD~ log~10~ x (± OLS standard error), the differential BN-PSD slope a~PSD~ = α~CPSD~ − 1 (same SE; the Kooi et al. positive PDF exponent is α = |a~PSD~|), R², and the number of populated bins fitted. Lower/upper quartiles are the 25th/75th percentiles. Mass is volume × polymer-resolved density (Section 3.1.1), reported in µg. Fits are summarized from the fit objects above, not refit -- except the depth-stratified river length fits, which are deterministically refit here (identical call to Section 10.0) to retain intercepts and bin counts, and checked against `depth_shape_fits`.
+Supplementary tables reporting the particle properties underlying, the fitted parameters and fit statistics of every particle-size probability distribution fitted in this report, and the concentration rescaling for every monitoring sample, formatted after Kooi et al. (2021, *Water Research* 198:117011, SI Tables S3–S4). River water (freshwater) is reported separately (Tables S5, S7) from ocean water and beach sand (Tables S6, S8). Table S9 provides every sample's location, PSD model, slope, correction factor, and rescaled concentration; river samples appear under both river-specific and pooled-river scenarios. Table S10 summarizes those values by matrix and PSD model, and Table S11 additionally breaks them down by location. Ocean-water and beach-sand samples are shown under their available pooled-matrix model. Each C-PSD row reports the fitted window [x~min~, x~max~) selected by the Segur et al. (2026) two-step LOD algorithm (or fixed by the length/width-consistent volume bounds, Section 4.2.3; area fits use a fixed lower search bound, Section 4.2.2), the cumulative slope α~CPSD~ and log~10~ intercept *b* of log~10~ N(≥x) = *b* + α~CPSD~ log~10~ x (± OLS standard error), the differential BN-PSD slope a~PSD~ = α~CPSD~ − 1 (same SE; the Kooi et al. positive PDF exponent is α = |a~PSD~|), R², and the number of populated bins fitted. Lower/upper quartiles are the 25th/75th percentiles. Mass is volume × polymer-resolved density (Section 3.1.1), reported in µg. Fits are summarized from the fit objects above, not refit -- except the depth-stratified river length fits, which are deterministically refit here (identical call to Section 10.0) to retain intercepts and bin counts, and checked against `depth_shape_fits`.
 
 ```{r si-pdf-fit-tables}
 source(file.path(proj_root, "R", "si_pdf_tables.R"))
@@ -6985,8 +7069,8 @@ si_alt_models_river     <- dplyr::filter(si_alt_models, Matrix == "River water")
 si_alt_models_ocean_sed <- dplyr::filter(si_alt_models, Matrix != "River water") |>
   dplyr::arrange(factor(Matrix, levels = c("Ocean water", "Beach sand")))
 
-# ---- Existing production concentration-rescaling outputs (Tables S9-S10) ----
-monitoring_river_si <- monitoring |>
+# ---- Existing production and pooled concentration-rescaling outputs (Tables S9-S11) ----
+monitoring_river_specific_si <- monitoring |>
   dplyr::mutate(
     a_psd_default = if (use_river_slopes) {
       vapply(as.character(river), function(location) {
@@ -6996,6 +7080,8 @@ monitoring_river_si <- monitoring |>
       rep(cpsd_fit_all$a_psd, dplyr::n())
     }
   )
+monitoring_river_pooled_si <- river_corr_pooled$monitoring |>
+  dplyr::mutate(a_psd_default = cpsd_fit_all$a_psd)
 monitoring_sed_si <- monitoring_sed |>
   dplyr::mutate(a_psd_default = cpsd_fit_sed_all$a_psd)
 monitoring_ocean_si <- monitoring_ocean |>
@@ -7003,43 +7089,64 @@ monitoring_ocean_si <- monitoring_ocean |>
 
 si_rescaling_samples <- dplyr::bind_rows(
   si_rescaling_sample_rows(
-    monitoring_river_si, C_corrected_draws, "C_measured_pL", "River water",
-    "particles/L"
+    monitoring_river_specific_si, C_corrected_draws, "C_measured_pL", "River water",
+    "particles/L", psd_model = "River-specific", location_col = "river"
+  ),
+  si_rescaling_sample_rows(
+    monitoring_river_pooled_si, river_corr_pooled$C_corrected_draws, "C_measured_pL", "River water",
+    "particles/L", psd_model = "Pooled", location_col = "river"
   ),
   si_rescaling_sample_rows(
     monitoring_ocean_si, C_corrected_draws_ocean, "C_measured_pL", "Ocean water",
-    "particles/L"
+    "particles/L", psd_model = "Pooled", location_col = "sample_location"
   ),
   si_rescaling_sample_rows(
     monitoring_sed_si, C_corrected_draws_sed, "C_measured_pkg", "Beach sand",
-    "particles/L-equivalent (illustrative; not particles/kg dry weight)"
+    "particles/L", psd_model = "Pooled", location_col = "sample_location"
   )
-)
+) |>
+  dplyr::arrange(
+    factor(Matrix, levels = c("River water", "Ocean water", "Beach sand")),
+    Location,
+    `Sample ID`,
+    factor(`PSD model`, levels = c("River-specific", "Pooled"))
+  )
 stopifnot(
-  nrow(si_rescaling_samples) == nrow(monitoring) + nrow(monitoring_ocean) + nrow(monitoring_sed),
+  nrow(si_rescaling_samples) == 2 * nrow(monitoring) + nrow(monitoring_ocean) + nrow(monitoring_sed),
+  all(!is.na(si_rescaling_samples$Location)),
+  all(!is.na(si_rescaling_samples$`PSD model`)),
   all(is.finite(si_rescaling_samples$`CF (median)`)),
-  all(is.finite(si_rescaling_samples$`Measured concentration (median)`)),
+  all(is.finite(si_rescaling_samples$`Reported concentration (median)`)),
+  all(is.finite(si_rescaling_samples$`C-PSD-valid concentration (median)`)),
   all(is.finite(si_rescaling_samples$`Rescaled concentration (median)`))
 )
-si_rescaling_summary <- si_rescaling_matrix_summary(si_rescaling_samples)
+si_rescaling_summary <- si_rescaling_matrix_summary(
+  si_rescaling_samples,
+  group_cols = c("Matrix", "PSD model", "Concentration unit")
+)
+si_rescaling_location_summary <- si_rescaling_matrix_summary(
+  si_rescaling_samples,
+  group_cols = c("Matrix", "Location", "PSD model", "Concentration unit")
+)
 
 # Full-precision numeric versions (formatted versions go to the manuscript workbook)
 si_csv_dir <- file.path(proj_root, "data_output", "si_pdf_tables")
 dir.create(si_csv_dir, showWarnings = FALSE)
 for (nm in c("si_props_river", "si_props_ocean_sed", "si_fits_river", "si_fits_ocean_sed",
-             "si_rescaling_samples", "si_rescaling_summary")) {
+             "si_rescaling_samples", "si_rescaling_summary", "si_rescaling_location_summary")) {
   utils::write.csv(get(nm), file.path(si_csv_dir, paste0(nm, ".csv")), row.names = FALSE,
                    fileEncoding = "UTF-8")
 }
 
-# Word version of Tables S5-S10, with a variable-definitions section
+# Word version of Tables S5-S11, with a variable-definitions section
 si_docx_path <- si_write_docx(
-  file.path(proj_root, "docs", "SI_Tables_S5-S10_PDF_fits_and_rescaling.docx"),
+  file.path(proj_root, "docs", "SI_Tables_S5-S11_PDF_fits_and_rescaling.docx"),
   props_river = si_props_river, props_ocean_sed = si_props_ocean_sed,
   fits_river = si_fits_river, fits_ocean_sed = si_fits_ocean_sed,
   alt_river = si_alt_models_river, alt_ocean_sed = si_alt_models_ocean_sed,
   rescaling_samples = si_rescaling_samples,
   rescaling_summary = si_rescaling_summary,
+  rescaling_location_summary = si_rescaling_location_summary,
   n_river = nrow(raw_particles_river), n_ocean = nrow(raw_particles_ocean),
   n_sed = nrow(raw_particles_sed)
 )
@@ -7058,9 +7165,11 @@ knitr::kable(si_format_cpsd_table(si_fits_ocean_sed, include_matrix = TRUE),
 knitr::kable(si_alt_models_ocean_sed,
   caption = "Table S8b. Alternative size-distribution models fitted to pooled ocean-water and beach-sand particle length (MLE/lognormal fitted for ocean water only; Section 12.5.2).")
 knitr::kable(si_format_rescaling_sample_table(si_rescaling_samples),
-  caption = "Table S9. Sample-level median measured and 1–5,000 µm rescaled concentrations, with reported mesh-size limits, the default production PSD slope, correction factor, and C-PSD-clipped LOD limits. CF and rescaled concentrations are medians across production Monte Carlo draws.")
+  caption = "Table S9. Sample-level nominal reported, C-PSD-valid, and 1–5,000 µm rescaled concentrations, with location, PSD model, reported mesh-size limits, PSD slope, correction factor, and C-PSD-valid LOD limits. River-water samples are reported under both river-specific and pooled PSD models; CF and rescaled concentrations are medians across Monte Carlo draws.")
 knitr::kable(si_format_rescaling_summary_table(si_rescaling_summary),
-  caption = "Table S10. Matrix-level mean, median, minimum, maximum, and interquartile range of the sample-level median measured and rescaled concentrations in Table S9.")
+  caption = "Table S10. Matrix- and PSD-model-level mean, median, minimum, maximum, and interquartile range of the sample-level C-PSD-valid and rescaled concentrations in Table S9.")
+knitr::kable(si_format_rescaling_summary_table(si_rescaling_location_summary),
+  caption = "Table S11. Matrix-, location-, and PSD-model-level mean, median, minimum, maximum, and interquartile range of the sample-level C-PSD-valid and rescaled concentrations in Table S9.")
 ```
 
 ```{r manuscript-tables-workbook}
@@ -7086,7 +7195,8 @@ manuscript_tables <- list(
   "S8a_CPSD_Fits_OceanSand" = si_format_cpsd_table(si_fits_ocean_sed, include_matrix = TRUE),
   "S8b_AltModels_OceanSand" = si_alt_models_ocean_sed,
   "S9_SampleRescaling"      = si_format_rescaling_sample_table(si_rescaling_samples),
-  "S10_RescalingSummary"    = si_format_rescaling_summary_table(si_rescaling_summary)
+  "S10_RescalingSummary"    = si_format_rescaling_summary_table(si_rescaling_summary),
+  "S11_LocationSummary"     = si_format_rescaling_summary_table(si_rescaling_location_summary)
 )
 
 manuscript_table_index <- tibble::tribble(
@@ -7109,8 +7219,9 @@ manuscript_table_index <- tibble::tribble(
   "S7b_AltModels_River",       "Table S7", "River-water alternative PSD models (MLE power law, lognormal, two-segment)",
   "S8a_CPSD_Fits_OceanSand",   "Table S8", "Ocean-water and beach-sand C-PSD fit parameters and statistics",
   "S8b_AltModels_OceanSand",   "Table S8", "Ocean-water and beach-sand alternative PSD models",
-  "S9_SampleRescaling",        "Table S9", "Sample-level measured and rescaled concentrations with applied slope, CF, and LOD limits",
-  "S10_RescalingSummary",      "Table S10", "Matrix-level summary statistics for measured and rescaled concentrations"
+  "S9_SampleRescaling",        "Table S9", "Sample-level measured and rescaled concentrations by location and PSD model",
+  "S10_RescalingSummary",      "Table S10", "Matrix- and PSD-model-level summary statistics for measured and rescaled concentrations",
+  "S11_LocationSummary",       "Table S11", "Matrix-, location-, and PSD-model-level summary statistics for measured and rescaled concentrations"
 )
 
 wb <- openxlsx::createWorkbook()
@@ -7508,7 +7619,7 @@ sessionInfo()
 
 # Appendix M. Manuscript parameter export (single source of truth)
 
-Every PSD, rescaling and risk number quoted in the Savoca et al. manuscript and SI is written here to `data_output/psd_rescaling_params.json` (and a flat CSV), at full precision, from the objects computed above. Rounding happens only in the manuscript-generation step. W1 values use the 50–500 µm sieve window and river-specific slopes, which are the benchmark-section conventions the manuscript Methods describe.
+Every PSD, rescaling and risk number quoted in the Savoca et al. manuscript and SI is written here to `data_output/psd_rescaling_params.json` (and a flat CSV), at full precision, from the objects computed above. Rounding happens only in the manuscript-generation step. W1 values use the resolved rescaling basis: concentrations restricted to each C-PSD window, with each river's own slope (pooled slope and two-segment model as sensitivities). W2 is the reported 50–500 µm concentration.
 
 ```{r manuscript-params-export}
 .nb <- function(f) tryCatch(stats::nobs(f$fit), error = function(e) NA_integer_)
@@ -7516,9 +7627,8 @@ fit_row <- function(f) list(a_cum = f$a_cpsd, a_cum_SE = f$se_a_cpsd, a_diff = f
                             CI95_a_diff = f$a_psd + c(-1.96, 1.96) * f$se_a_psd, R2 = f$r2, n_bins = .nb(f),
                             window_LOD_um = c(f$lower_lod_um, f$upper_lod_um))
 pw_row <- dplyr::filter(critical_piecewise_tbl, Matrix == "River water")
-cf_sieve <- function(a) correction_factor(a, 50, 500, 1, 5000, slope_convention = "differential")
-rivm_v <- utils::read.csv("data_output/rivm_benchmark_text_values_v1.csv", check.names = FALSE)
-w1 <- function(key) { r <- rivm_v[rivm_v$key == key, ]; list(median_L = r$value / 1000, q25_L = r$q25 / 1000, q75_L = r$q75 / 1000, n = r$n) }
+qsum <- function(x) list(median_L = stats::median(x), q25_L = stats::quantile(x, 0.25, names = FALSE),
+                        q75_L = stats::quantile(x, 0.75, names = FALSE), mean_L = mean(x), n = length(x))
 rs_row <- function(x, erm) { r <- dplyr::filter(x, ERM == erm, HCx == 5); list(RQ_p50 = r$RQ_p50, RQ_p95 = r$RQ_p95, P_exceed = r$P_exceed) }
 
 psd_params <- list(
@@ -7535,16 +7645,22 @@ psd_params <- list(
                      a_fine_cum = pw_row$piecewise_low_a_cpsd, a_coarse_cum = pw_row$piecewise_high_a_cpsd,
                      a_fine_diff = pw_row$piecewise_low_a_cpsd - 1, a_coarse_diff = pw_row$piecewise_high_a_cpsd - 1,
                      dAIC = pw_row$piecewise_delta_aic),
-  sieve_window = list(
-    CF_single_pooled = cf_sieve(cpsd_fit_all$a_psd),
-    CF_single_pooled_CI95 = cf_sieve(cpsd_fit_all$a_psd + c(1.96, -1.96) * cpsd_fit_all$se_a_psd),
-    CF_single_by_river = lapply(cpsd_fits_by_loc, function(f) cf_sieve(f$a_psd)),
-    CF_two = correction_factor_piecewise(pw_row$piecewise_low_a_cpsd, pw_row$piecewise_high_a_cpsd, pw_row$piecewise_break_um,
-                                         50, 500, 1, 5000, slope_convention = "cumulative"),
-    C_W2 = w1("ours_allrivers_river_W2"),
-    C_W1_river = w1("ours_allrivers_river_W1"),
-    C_W1_single_pooled = w1("ours_allrivers_pooled_W1"),
-    C_W1_two = w1("ours_allrivers_piecewise_W1")),
+  # Rescaling on the resolved basis: concentrations restricted to each C-PSD
+  # window (Section 4.2.2), CF from that same window to 1-5000 um.
+  rescaling = list(
+    basis = "C-PSD-window concentration (reported 50-500 um concentration x in-window particle fraction); CF from the same window to 1-5000 um",
+    n_nondetect_river_window = sum(monitoring$C_measured_pL == 0),
+    C_W2_reported = qsum(monitoring$C_reported_pL),
+    C_lod_window_river = qsum(monitoring$C_measured_pL),
+    lod_fraction_median = stats::median(monitoring$lod_particle_fraction),
+    windows_by_river = lapply(split(river_corr$L_meas_by_group, river_corr$L_meas_by_group$group), function(w) c(w$L_meas_min, w$L_meas_max)),
+    CF_by_river = lapply(combined_cf_by_river, function(x) stats::quantile(x, c(0.05, 0.5, 0.95), names = FALSE)),
+    CF_pooled = stats::quantile(combined_cf_pooled, c(0.05, 0.5, 0.95), names = FALSE),
+    CF_pooled_window = c(L_meas_min_use, L_meas_max_use),
+    CF_two = pw_river$cf_piecewise,
+    C_W1_river = qsum(C_sample_median$C_corr_med),
+    C_W1_pooled = qsum(C_sample_median_pooled$C_corr_med),
+    C_W1_two = qsum(monitoring_pooled_scope$C_measured_pL * pw_river$cf_piecewise)),
   risk_headline = list(food_dilution_HC5 = rs_row(risk_summary, "Food Dilution"),
                        tissue_translocation_HC5 = rs_row(risk_summary, "Tissue Translocation")),
   risk_by_river = if (!is.null(risk_summary_by_river)) lapply(split(risk_summary_by_river, risk_summary_by_river$river), function(x)
@@ -7553,7 +7669,7 @@ psd_params <- list(
                            tissue_translocation_HC5 = rs_row(risk_summary_pooled, "Tissue Translocation")),
   eed_river_q50_median_L = stats::median(eed_boot$q50)
 )
-psd_params$sieve_window$ratio_W1_river_over_two <- psd_params$sieve_window$C_W1_river$median_L / psd_params$sieve_window$C_W1_two$median_L
+psd_params$rescaling$ratio_W1_river_over_two <- psd_params$rescaling$C_W1_river$median_L / psd_params$rescaling$C_W1_two$median_L
 
 jsonlite::write_json(psd_params, "data_output/psd_rescaling_params.json", auto_unbox = TRUE, digits = NA, pretty = TRUE)
 flat <- unlist(psd_params)

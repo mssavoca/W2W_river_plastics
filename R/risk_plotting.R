@@ -21,7 +21,24 @@ ERM_PALETTE <- c(
 #' @param risk_draws Output of draw_rq_mc1d() (columns ERM, HCx, RQ).
 #' @param matrix_label Character label for the matrix (e.g. "River water").
 #' @return A ggplot object.
+# Log-axis RQ plots cannot show RQ = 0 (non-detect exposure); drop those rows
+# and report the share so the plot does not silently overstate risk.
+.drop_nonpositive <- function(df, col) {
+  keep <- is.finite(df[[col]]) & df[[col]] > 0
+  list(df = df[keep, , drop = FALSE], n_drop = sum(!keep), n = nrow(df))
+}
+.empty_rq_plot <- function(title, d) {
+  ggplot2::ggplot() +
+    ggplot2::annotate("text", x = 0, y = 0, size = 6,
+                      label = sprintf("All %d RQ draws are 0: the exposure distribution is non-detect
+(no QC-passing particles inside the C-PSD window).", d$n)) +
+    ggplot2::labs(title = title) + ggplot2::theme_void(base_size = 16)
+}
+.nd_caption <- function(d) if (d$n_drop > 0) sprintf("%d of %d draws (%.1f%%) have RQ = 0 (non-detect exposure) and are not shown on the log axis.", d$n_drop, d$n, 100 * d$n_drop / d$n) else NULL
+
 plot_rq_hist <- function(risk_draws, matrix_label) {
+  d <- .drop_nonpositive(risk_draws, "RQ"); risk_draws <- d$df
+  if (!nrow(risk_draws)) return(.empty_rq_plot(paste("Monte Carlo risk quotients:", matrix_label), d))
   ggplot2::ggplot(risk_draws, ggplot2::aes(x = RQ, fill = as.factor(ERM))) +
     ggplot2::geom_histogram(bins = 60) +
     ggplot2::scale_x_log10() +
@@ -33,7 +50,8 @@ plot_rq_hist <- function(risk_draws, matrix_label) {
       x        = "Risk Quotient (Exposure / Hazard) [log10 scale]",
       y        = "count",
       title    = "Monte Carlo risk quotient distributions by ERM and HCx",
-      subtitle = matrix_label
+      subtitle = matrix_label,
+      caption  = .nd_caption(d)
     ) +
     ggplot2::theme_minimal(base_size = 20) +
     ggplot2::theme(legend.position = "none")
@@ -58,6 +76,8 @@ plot_rq_hist_combined <- function(risk_draws_list) {
     })
   )
   combined$Matrix <- factor(combined$Matrix, levels = names(risk_draws_list))
+  d <- .drop_nonpositive(combined, "RQ"); combined <- d$df
+  if (!nrow(combined)) return(.empty_rq_plot("1D Monte Carlo risk quotient comparison across matrices", d))
 
   ggplot2::ggplot(combined, ggplot2::aes(x = RQ, fill = as.factor(HCx))) +
     ggplot2::geom_histogram(bins = 60, position = "identity", alpha = 0.6) +
@@ -69,7 +89,8 @@ plot_rq_hist_combined <- function(risk_draws_list) {
       x        = "Risk Quotient (Exposure / Hazard) [log10 scale]",
       y        = "count",
       title    = "1D Monte Carlo risk quotient comparison across matrices",
-      subtitle = "Rows = matrix, columns = exposure route model (ERM). Dashed line = RQ = 1."
+      subtitle = "Rows = matrix, columns = exposure route model (ERM). Dashed line = RQ = 1.",
+      caption  = .nd_caption(d)
     ) +
     ggplot2::theme_minimal(base_size = 16) +
     ggplot2::theme(
@@ -163,10 +184,14 @@ plot_eed_bootstrap <- function(eed_boot, n_boot, matrix_label) {
 #' @param grid_n Number of points in the common x-grid (default 200).
 #' @return A ggplot object.
 plot_ecdf_overlap <- function(eed_vals, haz_df, matrix_label, n_boot, grid_n = 200) {
+  # Non-detects (zero exposure) cannot sit on a log axis. They stay in the EED
+  # ECDF (which therefore starts at the non-detect fraction at the left edge)
+  # and are counted in the subtitle; the axis range uses positive values only.
+  n_nd   <- sum(eed_vals == 0, na.rm = TRUE)
   all_x  <- c(eed_vals, haz_df$PNEC)
-  grid_x <- 10^seq(log10(min(all_x, na.rm = TRUE)),
-                   log10(max(all_x, na.rm = TRUE)),
-                   length.out = grid_n)
+  pos_x  <- all_x[is.finite(all_x) & all_x > 0]
+  grid_x <- 10^seq(log10(min(pos_x)), log10(max(pos_x)), length.out = grid_n)
+  all_x  <- pos_x
 
   eed_band <- ecdf_bands(eed_vals, grid_x, n_boot = n_boot) |>
     dplyr::mutate(source = "EED", ERM = NA_character_, HCx = NA_real_)
@@ -229,7 +254,8 @@ plot_ecdf_overlap <- function(eed_vals, haz_df, matrix_label, n_boot, grid_n = 2
       y        = "Cumulative probability",
       title    = "Overlap of Exposure and Hazard distributions",
       subtitle = paste0(matrix_label, " — EED = Environmental Exposure Distribution; HC5/HC10 = Hazard Concentration (5th/10th percentile of SSD)"),
-      caption  = paste0("Shaded bands = bootstrap 95% CI (n = ", n_boot, " replicates). Log₁₀ x-axis, trimmed to the 0.5-99.5 percentile range.")
+      caption  = paste0("Shaded bands = bootstrap 95% CI (n = ", n_boot, " replicates). Log₁₀ x-axis, trimmed to the 0.5-99.5 percentile range.",
+                        if (n_nd > 0) paste0(" ", n_nd, " of ", length(eed_vals), " exposure values are non-detects (0); the EED curve starts at that fraction.") else "")
     ) +
     ggplot2::theme_minimal(base_size = 20) +
     ggplot2::theme(
@@ -300,6 +326,7 @@ plot_mc2d_diagnostic <- function(mc2d_df, matrix_label,
   # type == "rq_density"
   mc2d_long <- tidyr::pivot_longer(mc2d_df, cols = c(RQ_p50, RQ_p95, RQ_p99),
                                     names_to = "stat", values_to = "value")
+  mc2d_long <- .drop_nonpositive(mc2d_long, "value")$df
   ggplot2::ggplot(mc2d_long, ggplot2::aes(x = value, fill = ERM)) +
     ggplot2::geom_density(alpha = 0.5) +
     ggplot2::geom_vline(xintercept = 1, linetype = "dashed", color = "red") +

@@ -2,7 +2,7 @@
 
 This section compares this study's particle-length PSD slopes and rescaled concentrations with water-based (per-volume) Dutch river data compiled for RIVM letter report 2026-0069 ([Quik et al. 2026](https://doi.org/10.21945/RIVM-2026-0069); data and code: [rivm-syso/MicroplasticsERA_water](https://github.com/rivm-syso/MicroplasticsERA_water), EUPL-1.2). The Dutch concentrations come from Mintenig et al. (2020; Meuse and Dommel, FTIR), Mughini-Gras et al. (2021; Rhine at Lobith and Lek canal at Vianen, LDIR) and Mintenig, Hunnestad & Koelmans (2025; Dommel, FTIR). The Dutch slopes are RIVM's published poweRlaw maximum-likelihood fits (`param == "longest"`), and they are used as published: no Dutch particle data are refitted here. All logic is in `R/rivm_utils.R`. This child document only orchestrates it, and it is self-contained: it saves and restores the global RNG state, so it does not change any upstream or downstream result.
 
-**Windows.** W2 = 50–500 µm is the primary comparison: it is this study's sieve window and lies inside both Dutch measured ranges (20–5000 µm FTIR; 10–500 µm LDIR), so it needs interior rescaling only. W1 = 1–5000 µm is the Koelmans et al. (2020) default and a long extrapolation for every dataset. **Measured window for this study.** Following RIVM's treatment of the Dutch data (rescaling from the sampling limits LLm/ULm), this study's concentrations are rescaled from the 50/500 µm sampling sieves (`rivm_L_meas_ours`). This is a benchmark-only setting and does not change the pipeline's `L_meas_min_use`/`L_meas_max_use` (Section 5.1). **Slopes for this study.** Each river's own C-PSD slope is the primary application, matching the pipeline default (`slope_application`); the pooled single slope and the pooled two-segment model are sensitivities.
+**Windows.** W2 = 50–500 µm is the primary comparison: it is this study's sieve window and lies inside both Dutch measured ranges (20–5000 µm FTIR; 10–500 µm LDIR), so it needs interior rescaling only. W1 = 1–5000 µm is the Koelmans et al. (2020) default and a long extrapolation for every dataset. **Measured window for this study.** Following RIVM's treatment of the Dutch data (rescaling from the sampling limits LLm/ULm), this study's concentrations are rescaled from the 50/500 µm sampling sieves (`rivm_L_meas_ours`). This is a benchmark-only setting and does not change the pipeline's `L_meas_min_use`/`L_meas_max_use` (Section 5.1). **Slopes for this study.** Each river's own C-PSD slope is used for both rescaled concentrations and slope comparisons, matching the pipeline default (`slope_application`).
 
 ```{r rivm-setup}
 # Save the global RNG state so this section cannot perturb later chunks.
@@ -17,31 +17,32 @@ source(file.path(proj_root, "R", "rivm_utils.R"))
 
 # Standalone render (quarto render R/rivm_benchmark.qmd): rebuild the pipeline
 # objects this section needs from the main document's knitr cache.
-if (!exists("cpsd_fit_all") || !exists("cpsd_loc_shape_length") || !exists("alpha")) {
+if (!exists("cpsd_loc_shape_length")) {
   rivm_bootstrap_pipeline_objects(proj_root)
 }
 
 rivm_L_meas_ours <- c(50, 500)
 rivm_paths_ <- rivm_paths(proj_root)
 rivm_hashes <- rivm_input_hashes(rivm_paths_)
-rivm_pipeline_key <- digest::digest(list(cpsd_fit_all$a_psd, cpsd_fit_all$se_a_psd,
+rivm_pipeline_key <- digest::digest(list(
                                          lapply(cpsd_loc_shape_length, function(x) x$all[c("a_psd", "se_a_psd")]),
-                                         summary(alpha), monitoring$C_measured_pL, monitoring$sample_id,
+                                         monitoring$C_reported_pL, monitoring$sample_id,
                                          rivm_L_meas_ours))
 ```
 
 ```{r rivm-compute, cache=TRUE, cache.extra=list(rivm_hashes, rivm_pipeline_key, tools::md5sum(file.path(proj_root, "R", "rivm_utils.R")))}
 rivm_inputs <- rivm_load_inputs(rivm_paths_)
-rivm_ours_totals <- ours_sample_totals(monitoring)
+# Benchmark compares on the sieve window (as RIVM does), so it uses the data
+# owner's REPORTED 50-500 um concentration, not the C-PSD-window concentration.
+rivm_ours_totals <- ours_sample_totals(monitoring, conc_col = "C_reported_pL")
 rivm_river_fits <- lapply(cpsd_loc_shape_length, `[[`, "all")
 
 rivm_samples_tbl <- run_rivm_benchmark(
-  rivm_inputs, rivm_ours_totals, alpha_pooled = alpha, river_fits = rivm_river_fits,
-  pooled_fit = cpsd_fit_all, n_rivm = 5000, n_mc = n_mc,
+  rivm_inputs, rivm_ours_totals, river_fits = rivm_river_fits, n_rivm = 5000, n_mc = n_mc,
   structural_sd = slope_structural_sd, L_meas_ours = rivm_L_meas_ours)
 
-rivm_slopes_tbl <- rivm_slope_table(rivm_inputs$alphas, cpsd_fit_all, cpsd_fit_frag, cpsd_fit_fiber,
-                                    rivm_river_fits, structural_sd = slope_structural_sd)
+rivm_slopes_tbl <- rivm_slope_table(rivm_inputs$alphas, rivm_river_fits,
+                                    structural_sd = slope_structural_sd)
 rivm_regression <- rivm_regression_check(rivm_samples_tbl)
 rivm_pub_check <- rivm_published_vs_reconstructed(rivm_samples_tbl)
 ```
@@ -57,7 +58,7 @@ utils::write.csv(rivm_pub_check, file.path(rivm_out_dir, "rivm_benchmark_publish
 
 rivm_samples_csv <- tibble::as_tibble(utils::read.csv(file.path(rivm_out_dir, "rivm_benchmark_samples_v1.csv"), check.names = FALSE))
 rivm_slopes_csv  <- tibble::as_tibble(utils::read.csv(file.path(rivm_out_dir, "rivm_benchmark_slopes_v1.csv"), check.names = FALSE)) |>
-  dplyr::mutate(facet = factor(.data$facet, levels = c("Dutch FTIR", "Dutch LDIR", "This study: by river", "This study: by shape")))
+  dplyr::mutate(facet = factor(.data$facet, levels = c("Dutch FTIR", "Dutch LDIR", "This study: by river")))
 rivm_groups_csv  <- rivm_group_summary(rivm_samples_csv)
 utils::write.csv(rivm_groups_csv, file.path(rivm_out_dir, "rivm_benchmark_groups_v1.csv"), row.names = FALSE)
 
@@ -93,7 +94,7 @@ knitr::kable(
 **Checks.** The re-implementation of the RIVM uncertainty method reproduces the prototype regression targets, with all `r nrow(rivm_regression)` water-body × window medians within ±10% (`r sum(rivm_regression$pass)` of `r nrow(rivm_regression)` pass). RIVM's own published W1 medians (`Rescaled_concentrations_2026-05-13.Rds`) agree with the reconstruction within a factor of `r sprintf("%.2f", max(c(rivm_pub_check$ratio, 1 / rivm_pub_check$ratio)))`.
 
 ```{r rivm-si-table}
-knitr::kable(rivm_si_tbl, caption = "Included sample sets. a, differential slope (Dutch: RIVM bootstrap 95% CI; this study: ±1.96 SE). Rescaled values: median of per-sample medians [lowest per-sample 5th–highest per-sample 95th percentile], particles m⁻³; Dutch reconstructed with the RIVM method, this study pooled single slope (W2 measured).")
+knitr::kable(rivm_si_tbl, caption = "Included sample sets. a, differential slope (Dutch: RIVM bootstrap 95% CI; this study: ±1.96 SE). Rescaled values: median of per-sample medians [lowest per-sample 5th–highest per-sample 95th percentile], particles m⁻³; Dutch reconstructed with the RIVM method, this study river-specific C-PSD slope (W2 measured).")
 ```
 
 ```{r rivm-checks-table}
@@ -101,13 +102,13 @@ knitr::kable(rivm_regression, digits = 3, caption = "Prototype regression check 
 knitr::kable(rivm_pub_check, digits = 3, caption = "RIVM published vs reconstructed W1 medians (particles m⁻³)")
 ```
 
-**Results.** Rescaled to the common 50–500 µm window (W2), the Dutch water-body medians were `r rivm_rv("dutch_Meuse_published_W2")` (Meuse, FTIR), `r rivm_rv("dutch_Dommel_published_W2")` (Dommel, FTIR), `r rivm_rv("dutch_Rhine_published_W2")` (Rhine, LDIR) and `r rivm_rv("dutch_Lekcanal_published_W2")` (Lek canal, LDIR) particles m⁻³. This study's measured median was `r rivm_rv("ours_allrivers_river_W2")` particles m⁻³. Extrapolated to 1–5000 µm (W1), this study's median with river-specific slopes (primary) is `r rivm_rv("ours_allrivers_river_W1")`, with the pooled single slope `r rivm_rv("ours_allrivers_pooled_W1")`, and the two-segment median is `r rivm_rv("ours_allrivers_piecewise_W1")`. W1 differences are dominated by slope and fitting method (next figure) and are secondary to the W2 comparison.
+**Results.** Rescaled to the common 50–500 µm window (W2), the Dutch water-body medians were `r rivm_rv("dutch_Meuse_published_W2")` (Meuse, FTIR), `r rivm_rv("dutch_Dommel_published_W2")` (Dommel, FTIR), `r rivm_rv("dutch_Rhine_published_W2")` (Rhine, LDIR) and `r rivm_rv("dutch_Lekcanal_published_W2")` (Lek canal, LDIR) particles m⁻³. This study's measured median was `r rivm_rv("ours_allrivers_river_W2")` particles m⁻³. Extrapolated to 1–5000 µm (W1), this study's median with river-specific slopes is `r rivm_rv("ours_allrivers_river_W1")`. W1 is secondary to the W2 comparison because it is a long extrapolation.
 
 ```{r rivm-fig7, fig.width=7, fig.height=7.5, fig.cap=rivm_caps$fig7}
 rivm_fig7 <- plot_rivm_fig7(rivm_samples_csv)
 save_rivm_figure(rivm_fig7, "rivm_fig7_concentrations", width = 7, height = 7.5,
                  data = dplyr::filter(rivm_samples_csv, .data$scenario == "primary",
-                                      .data$method_variant %in% c("published", "published_rivm", "river", "pooled", "piecewise")),
+                                      .data$method_variant %in% c("published", "published_rivm", "river")),
                  dir = file.path(proj_root, "figures"))
 rivm_fig7
 ```
@@ -141,7 +142,7 @@ rivm_figSB
 rivm_figSC <- plot_rivm_cf_alpha(rivm_samples_csv)
 save_rivm_figure(rivm_figSC, "rivm_figSC_cf_vs_slope", width = 7, height = 4.5,
                  data = dplyr::filter(rivm_samples_csv, .data$window == "W1", .data$scenario == "primary",
-                                      .data$method_variant %in% c("published", "pooled", "river")),
+                                      .data$method_variant %in% c("published", "river")),
                  dir = file.path(proj_root, "figures"))
 rivm_figSC
 ```

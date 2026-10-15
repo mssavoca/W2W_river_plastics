@@ -167,11 +167,12 @@ rr = trk.OxmlElement("w:r"); cr = trk.OxmlElement("w:commentReference"); cr.set(
 ref_run.addnext(rr)
 
 # ── PSD / extrapolation numbers from the production pipeline (psd_rescaling_params.json) ──
-sw = P["sieve_window"]; pooled = P["pooled"]; br = P["by_river"]; het = P["heterogeneity"]; two = P["two_segment"]
+rs = P["rescaling"]; pooled = P["pooled"]; br = P["by_river"]; het = P["heterogeneity"]; two = P["two_segment"]
 d3 = lambda x: f"{x:.3f}"
 sigL = lambda x: vals.sig(x, 2)
 cf3 = lambda x: vals.sig(x, 3)
-W1r, W1p, W1t, W2 = sw["C_W1_river"], sw["C_W1_single_pooled"], sw["C_W1_two"], sw["C_W2"]
+W1r, W1p, W1t, W2, Wlod = rs["C_W1_river"], rs["C_W1_pooled"], rs["C_W1_two"], rs["C_W2_reported"], rs["C_lod_window_river"]
+cfm = lambda q: q[1]   # [p05, p50, p95] -> median
 assert het["p_value"] < 0.001, "Cochran P no longer < 0.001; update wording"
 
 # Abstract
@@ -185,11 +186,16 @@ if r01:
 
 # Methods: river-specific rescaling, MC uncertainty, pooled LOD window
 p_cf = find_p("To estimate microplastic concentrations across the full 1-5000")
+trk.tracked_replace(p_cf, "and empirically measured (50-500 µm) size ranges", ["and the C-PSD fitting (LOD) window of each river"])
+trk.tracked_replace(p_cf, "multiplied by the empirical 50-500 µm concentration.",
+                    ["multiplied by the concentration within that window. That concentration was obtained by multiplying each sample’s reported 50-500 µm concentration by the fraction of its QC-passing particles lying inside the window, "
+                     "so that the concentration and the correction factor refer to the same size interval; samples with no particle inside the window were retained as non-detects (zero)."])
 trk.tracked_replace(p_cf, "Uncertainty in the extrapolated concentration was estimated by propagating the 95% confidence interval of the fitted differential PSD slope through the same integration.",
                     ["Because slopes differed significantly among rivers (Results), each river’s samples were rescaled with that river’s own fitted slope; the pooled slope and a two-segment model are reported for comparison. "
                      "Slope uncertainty was propagated by Monte Carlo sampling of each fitted slope (fit standard error plus a structural standard deviation of " + str(P["meta"]["slope_structural_sd"]) + ")."])
 lo, hi = pooled["window_LOD_um"]
-trk.tracked_replace(p_cf, "165-385", [f"{lo:.0f}-{hi:.0f}"]) if f"{lo:.0f}-{hi:.0f}" != "165-385" else None
+trk.tracked_replace(p_cf, "The 165-385 µm limit-of-detection (LOD) window was used to estimate the power-law slope and does not represent the empirical concentration interval; the latter was defined operationally by the 50- and 500-µm sampling sieves.",
+                    [f"The 50- and 500-µm sampling sieves define the reported concentration, whereas the C-PSD window ({lo:.0f}-{hi:.0f} µm for the pooled fit; river-specific windows in the Supporting Information) defines the size interval over which both the concentration and the power-law slope are empirically supported."])
 
 # Results: pooled / shape slopes
 p71 = find_p("As in numerous other studies, our microplastic abundance")
@@ -211,20 +217,20 @@ trk.tracked_replace(p72, " = 98.7%)", [f" = {het['i2']:.1f}%)"])
 
 # Results: extrapolation paragraph
 p73 = find_p("The steep river-water PSD indicates")
-cf_r = sw["CF_single_by_river"]
+cf_r = {r: cfm(v) for r, v in rs["CF_by_river"].items()}
 trk.tracked_replace(p73,
     "Using the pooled differential PSD slope (a = -2.920 ± 0.035 SE), integration of the fitted power law yielded a correction factor of approximately 1,850 from the 50-500 µm fraction to the full 1-5000 µm range. "
     "Applying this correction to the empirically measured mean concentration of 0.33 particles L⁻¹ yielded a model-derived estimate of approximately 600 microplastics L⁻¹ (slope-derived 95% CI: 460–790 microplastics L⁻¹) across 1-5000 µm.",
-    ["Because slopes differed among rivers, each river’s samples were rescaled with its own fitted differential slope, giving correction factors from the 50-500 µm fraction to the full 1-5000 µm range of "
+    ["Because slopes differed among rivers, each river’s C-PSD-window concentrations (median " + f"{Wlod['median_L']:.2f}" + " particles L⁻¹; " + str(rs["n_nondetect_river_window"]) + " non-detects) were rescaled with that river’s own fitted differential slope, giving median correction factors from the C-PSD window to the full 1-5000 µm range of "
      + ", ".join(f"{cf3(cf_r[r])} ({r})" for r in sorted(cf_r))
-     + f"; the pooled slope (a = {pooled['a_diff']:.3f} ± {pooled['a_diff_SE']:.3f} SE) gives {cf3(sw['CF_single_pooled'])}. "
+     + f"; the pooled slope (a = {pooled['a_diff']:.3f} ± {pooled['a_diff_SE']:.3f} SE) over the pooled window gives {cf3(cfm(rs['CF_pooled']))}. "
      f"Applied to the per-sample concentrations, this yielded a model-derived median of approximately {sigL(W1r['median_L'])} microplastics L⁻¹ "
      f"(IQR {sigL(W1r['q25_L'])}–{sigL(W1r['q75_L'])}; n = {W1r['n']}) across 1-5000 µm, compared with {sigL(W1p['median_L'])} microplastics L⁻¹ using the pooled slope."])
 trk.tracked_replace(p73, "The fitted slope was estimated over the empirically supported 165-385 µm C-PSD window",
-                    [f"The fitted slopes were estimated over each river’s empirically supported C-PSD window ({lo:.0f}-{hi:.0f} µm for the pooled fit)"])
+                    [f"The fitted slopes and concentrations were both restricted to each river’s empirically supported C-PSD window ({lo:.0f}-{hi:.0f} µm for the pooled fit)"])
 trk.tracked_replace(p73, "(ΔAIC = -44.0)",
                     [f"(ΔAIC = {two['dAIC']:.1f}; breakpoint {two['breakpoint_um']:.0f} µm; differential slopes {two['a_fine_diff']:.2f} below and {two['a_coarse_diff']:.2f} above), "
-                     f"giving a correction factor of {cf3(sw['CF_two'])} and a median of {sigL(W1t['median_L'])} microplastics L⁻¹ ({sw['ratio_W1_river_over_two']:.1f}-fold lower than with river-specific single slopes)"])
+                     f"giving a correction factor of {cf3(rs['CF_two'])} and a median of {sigL(W1t['median_L'])} microplastics L⁻¹ ({rs['ratio_W1_river_over_two']:.1f}-fold lower than with river-specific single slopes)"])
 
 # Conclusions
 p77 = find_p("Our results also demonstrate how environmental microplastic abundance")

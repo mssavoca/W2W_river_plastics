@@ -34,7 +34,7 @@ Any new analysis that pairs an exposure with a hazard must follow this rule, or 
 
 ## Canonical monitoring data
 
-`data_input/Part_dets_summ_final.rds` is the data owner's final QC'd per-sample summary. It reproduces manuscript Table 1 exactly (57 river samples, 3,777 particles), and the pipeline asserts this. `monitoring` is collapsed to one row per sample (the sum over polymer classes) before rescaling. The canonical river manifest is written to `data_output/sample_manifest_river_v1.csv`. The earlier `Part_dets_summ.rds` is kept only to list the samples excluded from the canonical set. Render budget: `quarto render R/probabilistic_risk_characterization.qmd -P budget:quick` for fast iteration (n_boot = 100); the default `production` budget uses n_boot = 1000.
+`data_input/Part_dets_summ_final.rds` is the data owner's final QC'd per-sample summary. It reproduces manuscript Table 1 exactly (57 river samples, 3,777 particles), and the pipeline asserts this. `monitoring` is collapsed to one row per sample (the sum over polymer classes). Before rescaling, `lod_scope_monitoring_concentrations()` uses the QC-passing particle-level data to calculate each sample's fraction inside the applicable C-PSD fit window, applies that fraction to the reported concentration, and sets the correction-factor denominator to the same window. The canonical river manifest preserves the reported 50–500 µm data and is written to `data_output/sample_manifest_river_v1.csv`. The earlier `Part_dets_summ.rds` is kept only to list the samples excluded from the canonical set. Render budget: `quarto render R/probabilistic_risk_characterization.qmd -P budget:quick` for fast iteration (n_boot = 100); the default `production` budget uses n_boot = 1000.
 
 ---
 

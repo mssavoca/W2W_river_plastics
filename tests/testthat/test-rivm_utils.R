@@ -84,3 +84,18 @@ testthat::test_that("prototype regression targets (+/-10%) and published-vs-reco
   w1 <- dplyr::filter(tbl, .data$window == "W1")
   testthat::expect_true(min(w1$cf_p50) > 40 && max(w1$cf_p50) < 480)
 })
+
+testthat::test_that("our benchmark rescaling only uses river-specific slopes", {
+  totals <- tibble::tibble(sample_id = c("a", "b"), river = c("River A", "River B"),
+                           reported_conc_m3 = c(100, 200))
+  river_fits <- list(
+    "River A" = list(a_psd = -2.2, se_a_psd = 0.05),
+    "River B" = list(a_psd = -3.0, se_a_psd = 0.05)
+  )
+
+  got <- rescale_ours(totals, river_fits, n_mc = 100, structural_sd = 0)
+
+  testthat::expect_setequal(got$method_variant, "river")
+  testthat::expect_equal(nrow(got), nrow(totals) * nrow(rivm_windows()))
+  testthat::expect_true(all(dplyr::filter(got, .data$window == "W2")$cf_p50 == 1))
+})

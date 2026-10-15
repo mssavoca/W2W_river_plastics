@@ -439,15 +439,14 @@ rescale_factor <- function(a, L_meas_min, L_meas_max, L_tar_min, L_tar_max) {
   num / den
 }
 
-# Bias-corrected lower POD bound (Segur et al. draft, MP#max rule)
-# Replace the reported Lmin with a bias-corrected L_lower_POD when the BN-PSD shows
-# low-bias at small sizes.
-monitoring <- monitoring |>
-  mutate(
-    Lmin_biascorr_um = pmax(Lmin_measured_um, cpsd_fit_frag$lower_pod_um, na.rm = TRUE)
-  )
-
-L_meas_min_use <- median(monitoring$Lmin_biascorr_um, na.rm = TRUE)
+# The correction-factor denominator must be the same interval represented by
+# C_measured_pL. Do not clip only the denominator to a C-PSD LOD range: first
+# recompute each sample concentration from its particles in that range (and its
+# corresponding sample-volume denominator), then use those same bounds here.
+# The production workflow implements that reconstruction with
+# lod_scope_monitoring_concentrations(). This simple example has no
+# sample-resolved particle table, so it retains its declared 300–5000 um range.
+L_meas_min_use <- median(monitoring$Lmin_measured_um, na.rm = TRUE)
 L_meas_max_use <- median(monitoring$Lmax_measured_um, na.rm = TRUE)
 
 # Example: convert net-tow-like 300–5000 µm to 1–5000 µm using alpha_frag draws
@@ -485,6 +484,11 @@ quantile(combined_cf, c(0.05, 0.5, 0.95))
 We treat each monitoring sample's corrected concentration as:
 
 `C_corrected = C_measured * combined_cf_draw`, with `combined_cf_draw` sampled in Monte Carlo.
+
+`C_measured` must already represent the same lower and upper size bounds used
+in `CF`. When particle-level data and C-PSD LOD bounds are available, first
+recompute it using only LOD-valid particles and the corresponding sample-volume
+denominator; particles outside that interval must not remain in the numerator.
 
 This yields a **distribution per monitoring sample**, and a pooled exposure distribution across samples.
 

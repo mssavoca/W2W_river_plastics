@@ -430,6 +430,101 @@ correction_factor <- function(a, L_meas_min, L_meas_max, L_tar_min, L_tar_max,
   num / den
 }
 
+#' Restrict reported sample concentrations to a C-PSD-valid size window
+#'
+#' The reported concentration supplies the sample-specific analytical-volume and
+#' aliquot normalization, while particle-level measurements supply the fraction
+#' of that sample falling inside the C-PSD fit window. This keeps the
+#' concentration and correction-factor denominator on the same size basis.
+#'
+#' @param monitoring One row per sample, with reported concentration and
+#'   reported lower/upper size-limit columns.
+#' @param raw_particles Particle-level data containing a sample ID and length.
+#' @param reported_conc_col,output_conc_col Input reported-concentration and
+#'   output LOD-window-concentration column names.
+#' @param reported_lmin_col,reported_lmax_col Reported size-window columns.
+#' @param cpsd_fit A pooled fit supplying lower_lod_um/upper_lod_um.
+#' @param group_col,cpsd_fit_by_group Optional group-specific fit mapping.
+#' @param sample_id_col,raw_sample_id_col,raw_length_col,raw_count_col Input
+#'   column names; raw_count_col is summed when present, otherwise rows count.
+#' @return `monitoring` with C-PSD LOD bounds, raw particle counts/fraction, and
+#'   `output_conc_col` restricted to the corresponding LOD window.
+lod_scope_monitoring_concentrations <- function(
+    monitoring, raw_particles, reported_conc_col, output_conc_col,
+    reported_lmin_col = "Lmin_reported_um", reported_lmax_col = "Lmax_reported_um",
+    cpsd_fit, group_col = NULL, cpsd_fit_by_group = NULL,
+    sample_id_col = "sample_id", raw_sample_id_col = "Client_ID_MSSupdate",
+    raw_length_col = "length_um", raw_count_col = "count") {
+  required_monitoring <- c(sample_id_col, reported_conc_col, reported_lmin_col, reported_lmax_col)
+  required_raw <- c(raw_sample_id_col, raw_length_col)
+  stopifnot(is.data.frame(monitoring), is.data.frame(raw_particles),
+            all(required_monitoring %in% names(monitoring)),
+            all(required_raw %in% names(raw_particles)))
+  grouped <- !is.null(group_col)
+  if (grouped) {
+    stopifnot(group_col %in% names(monitoring), !is.null(cpsd_fit_by_group),
+              all(unique(monitoring[[group_col]]) %in% names(cpsd_fit_by_group)))
+  }
+
+  lod_bounds <- if (grouped) {
+    monitoring |>
+      dplyr::transmute(
+        !!sample_id_col := .data[[sample_id_col]],
+        reported_lower_um = .data[[reported_lmin_col]],
+        reported_upper_um = .data[[reported_lmax_col]],
+        lod_lower_um = unname(vapply(.data[[group_col]], function(group) {
+          cpsd_fit_by_group[[group]]$lower_lod_um
+        }, numeric(1))),
+        lod_upper_um = unname(vapply(.data[[group_col]], function(group) {
+          cpsd_fit_by_group[[group]]$upper_lod_um
+        }, numeric(1)))
+      )
+  } else {
+    monitoring |>
+      dplyr::transmute(
+        !!sample_id_col := .data[[sample_id_col]],
+        reported_lower_um = .data[[reported_lmin_col]],
+        reported_upper_um = .data[[reported_lmax_col]],
+        lod_lower_um = cpsd_fit$lower_lod_um,
+        lod_upper_um = cpsd_fit$upper_lod_um
+      )
+  }
+  stopifnot(all(lod_bounds$lod_lower_um < lod_bounds$lod_upper_um))
+
+  raw_counts <- raw_particles |>
+    dplyr::transmute(
+      !!sample_id_col := .data[[raw_sample_id_col]],
+      raw_length_um = .data[[raw_length_col]],
+      raw_count = if (raw_count_col %in% names(raw_particles)) .data[[raw_count_col]] else 1
+    ) |>
+    dplyr::inner_join(lod_bounds, by = sample_id_col) |>
+    dplyr::mutate(
+      in_reported_window = raw_length_um >= reported_lower_um & raw_length_um <= reported_upper_um,
+      in_lod_window = raw_length_um >= lod_lower_um & raw_length_um < lod_upper_um
+    ) |>
+    dplyr::summarise(
+      n_particles_reported_window = sum(raw_count[in_reported_window], na.rm = TRUE),
+      n_particles_lod_window = sum(raw_count[in_lod_window], na.rm = TRUE),
+      .by = dplyr::all_of(sample_id_col)
+    )
+
+  monitoring |>
+    dplyr::left_join(lod_bounds, by = sample_id_col) |>
+    dplyr::left_join(raw_counts, by = sample_id_col) |>
+    dplyr::mutate(
+      n_particles_reported_window = dplyr::coalesce(n_particles_reported_window, 0),
+      n_particles_lod_window = dplyr::coalesce(n_particles_lod_window, 0),
+      lod_particle_fraction = dplyr::if_else(
+        n_particles_reported_window > 0,
+        n_particles_lod_window / n_particles_reported_window,
+        0
+      ),
+      Lmin_measured_um = lod_lower_um,
+      Lmax_measured_um = lod_upper_um,
+      !!output_conc_col := .data[[reported_conc_col]] * lod_particle_fraction
+    )
+}
+
 #' Polymer density lookup used for particle-level density sensitivity
 #'
 #' Values are screening defaults in g/cm3 for broad FTIR library classes. They
@@ -609,7 +704,9 @@ correction_factor_piecewise <- function(a_low, a_high, break_um,
 #' @param probs Quantile levels to track (default c(0.5, 0.95)).
 #' @return Data frame with one column per probability (named q50, q95, etc.).
 bootstrap_eed <- function(x, n_boot = 5000, probs = c(0.5, 0.95)) {
-  x <- x[is.finite(x) & x > 0]
+  # Zeros are non-detects (no QC-passing particle in the C-PSD window) and are
+  # kept: dropping them would bias the exposure distribution upward.
+  x <- x[is.finite(x) & x >= 0]
   stopifnot(length(x) >= 5)
   boot_stats <- replicate(n_boot, {
     xb <- sample(x, size = length(x), replace = TRUE)
@@ -658,7 +755,7 @@ ecdf_bands <- function(x, grid, n_boot = 100, probs = c(0.025, 0.5, 0.975)) {
 #' @param n_risk Number of paired draws per ERM × HCx group.
 #' @return Grouped tibble with columns ERM, HCx, E, H, RQ.
 draw_rq_mc1d <- function(haz_df, exposure_draws, n_risk = 1000) {
-  exposure_draws <- exposure_draws[is.finite(exposure_draws) & exposure_draws > 0]
+  exposure_draws <- exposure_draws[is.finite(exposure_draws) & exposure_draws >= 0]   # zeros = non-detects
   stopifnot(length(exposure_draws) >= 5)
   haz_df |>
     dplyr::group_by(ERM, HCx) |>
@@ -719,7 +816,7 @@ mc2d_risk <- function(monitoring_df,
     stop("mc2d_risk(): group-specific CFs require group-aligned hazards (haz_by_group)", call. = FALSE)
   }
   if (!is.null(haz_by_group)) stopifnot(setequal(names(haz_by_group), names(cf_by_group)))
-  keep <- is.finite(monitoring_df$C_measured_pL) & monitoring_df$C_measured_pL > 0
+  keep <- is.finite(monitoring_df$C_measured_pL) & monitoring_df$C_measured_pL >= 0
   measured <- monitoring_df$C_measured_pL[keep]
   stopifnot(length(measured) >= 5)
   grouped <- !is.null(cf_by_group)
@@ -743,7 +840,8 @@ mc2d_risk <- function(monitoring_df,
     } else {
       measured[idx] * cf_i
     }
-    if (grouped) cf_i <- stats::median(E_var / measured[idx])
+    # Grouped: summarise the CFs actually applied (not E/C, which is 0/0 for non-detects).
+    if (grouped) cf_i <- stats::median(cf_rows)
     dplyr::bind_rows(lapply(haz_groups, function(hg) {
       if (grouped) {
         erm <- unique(hg$ERM); hcx <- unique(hg$HCx)
@@ -838,10 +936,10 @@ fit_cpsd_by_shape <- function(df, value_col, shape_col = "shape", config) {
   stats::setNames(out, names(config))
 }
 
-#' Bias-correct monitoring data, apply power-law CF, and bootstrap the EED
+#' Apply a power-law CF to a window-matched monitoring concentration and bootstrap the EED
 #'
-#' Shared post-load pipeline step: bias-corrects the measured LOD window
-#' against the C-PSD fit, computes the power-law correction_factor(), draws
+#' Shared post-load pipeline step: uses the declared concentration window as the
+#' correction-factor denominator, draws
 #' Monte Carlo corrected concentrations, collapses to per-sample medians, and
 #' bootstraps the Environmental Exposure Distribution. Matrix-specific
 #' monitoring *loading* (query filters, one-off date/QA fixes, unit columns)
@@ -850,7 +948,7 @@ fit_cpsd_by_shape <- function(df, value_col, shape_col = "shape", config) {
 #' @param monitoring Data frame with columns sample_id, Lmin_measured_um,
 #'   Lmax_measured_um, and `conc_col`.
 #' @param conc_col Name of the measured-concentration column (e.g. "C_measured_pL").
-#' @param cpsd_fit A fit_cpsd_segur_r() output supplying lower_lod_um/upper_lod_um.
+#' @param cpsd_fit A fit_cpsd_segur_r() output used by pooled callers.
 #' @param alpha_draws Numeric vector of BN-PSD slope draws (alpha_dist() output).
 #' @param L_tar_min,L_tar_max Target size range in µm (default 1, 5000).
 #' @param n_draws Monte Carlo draws per monitoring sample (default 3000).
@@ -858,11 +956,10 @@ fit_cpsd_by_shape <- function(df, value_col, shape_col = "shape", config) {
 #' @param probs Quantile levels for bootstrap_eed() (default c(0.5, 0.95)).
 #' @param group_col,cpsd_fit_by_group,alpha_draws_by_group Optional group-specific
 #'   slopes (e.g. river-specific C-PSD fits). When supplied, each monitoring row
-#'   is rescaled with its own group's slope draws and that group's LOD window
-#'   (the same convention as the by-river analysis); `cpsd_fit`/`alpha_draws`
+#'   is rescaled with its own group's slope draws; `cpsd_fit`/`alpha_draws`
 #'   then only define the pooled L_meas_min_use/L_meas_max_use returned for
 #'   pooled-model sensitivities.
-#' @return List: monitoring (with bias-corrected LOD columns), combined_cf,
+#' @return List: monitoring (with its declared concentration-window columns), combined_cf,
 #'   C_corrected_draws (with a generic $C_corrected column), C_sample_median,
 #'   eed_boot, L_meas_min_use, L_meas_max_use. With groups, also
 #'   combined_cf_by_group and L_meas_by_group, and combined_cf is the mixture of
@@ -879,9 +976,10 @@ correct_and_bootstrap_eed <- function(monitoring, conc_col, cpsd_fit, alpha_draw
 
   monitoring <- monitoring |>
     dplyr::mutate(
-      Lmin_biascorr_um = pmax(Lmin_measured_um, cpsd_fit$lower_lod_um, na.rm = TRUE),
-      Lmax_biascorr_um = pmin(Lmax_measured_um, cpsd_fit$upper_lod_um,  na.rm = TRUE)
+      Lmin_biascorr_um = Lmin_measured_um,
+      Lmax_biascorr_um = Lmax_measured_um
     )
+  stopifnot(all(monitoring$Lmin_biascorr_um < monitoring$Lmax_biascorr_um))
 
   L_meas_min_use <- stats::median(monitoring$Lmin_biascorr_um, na.rm = TRUE)
   L_meas_max_use <- stats::median(monitoring$Lmax_biascorr_um, na.rm = TRUE)
@@ -899,15 +997,8 @@ correct_and_bootstrap_eed <- function(monitoring, conc_col, cpsd_fit, alpha_draw
               all(unique(monitoring[[group_col]]) %in% names(cpsd_fit_by_group)),
               all(unique(monitoring[[group_col]]) %in% names(alpha_draws_by_group)))
     groups <- sort(unique(monitoring[[group_col]]))
-    # Each group's own LOD window, clipped to the measured window.
-    monitoring <- monitoring |>
-      dplyr::mutate(
-        lod_lo = vapply(.data[[group_col]], function(g) cpsd_fit_by_group[[g]]$lower_lod_um, numeric(1)),
-        lod_hi = vapply(.data[[group_col]], function(g) cpsd_fit_by_group[[g]]$upper_lod_um, numeric(1)),
-        Lmin_biascorr_um = pmax(Lmin_measured_um, .data$lod_lo, na.rm = TRUE),
-        Lmax_biascorr_um = pmin(Lmax_measured_um, .data$lod_hi, na.rm = TRUE)
-      ) |>
-      dplyr::select(-"lod_lo", -"lod_hi")
+    # Group-specific callers must provide concentrations and size windows on
+    # the same basis (for example via lod_scope_monitoring_concentrations()).
     L_meas_by_group <- monitoring |>
       dplyr::group_by(group = .data[[group_col]]) |>
       dplyr::summarise(L_meas_min = stats::median(.data$Lmin_biascorr_um, na.rm = TRUE),

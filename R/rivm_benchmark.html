@@ -1,0 +1,1086 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.10.19">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+
+<title>rivm_benchmark</title>
+<style>
+/* Default styles provided by pandoc.
+** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+*/
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: 1.5em;}
+div.column{flex: auto;}
+@media screen {
+div.columns{gap: min(4vw, 1.5em);}
+div.column{overflow-x: auto;}
+}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+/* CSS for syntax highlighting */
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+</style>
+
+
+<script src="rivm_benchmark_files/libs/clipboard/clipboard.min.js"></script>
+<script src="rivm_benchmark_files/libs/quarto-html/quarto.js" type="module"></script>
+<script src="rivm_benchmark_files/libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="rivm_benchmark_files/libs/quarto-html/popper.min.js"></script>
+<script src="rivm_benchmark_files/libs/quarto-html/tippy.umd.min.js"></script>
+<script src="rivm_benchmark_files/libs/quarto-html/anchor.min.js"></script>
+<link href="rivm_benchmark_files/libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="rivm_benchmark_files/libs/quarto-html/quarto-syntax-highlighting-bf27225e3a48a9273f3daa8f8e829971.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="rivm_benchmark_files/libs/bootstrap/bootstrap.min.js"></script>
+<link href="rivm_benchmark_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="rivm_benchmark_files/libs/bootstrap/bootstrap-215b371544c282197b31c8aa00ce3677.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+
+
+</head>
+
+<body class="fullcontent quarto-light">
+
+<div id="quarto-content" class="page-columns page-rows-contents page-layout-article">
+
+<main class="content" id="quarto-document-content">
+
+
+
+
+<section id="benchmark-against-dutch-river-datasets-rivm-2026-0069" class="level2">
+<h2 class="anchored" data-anchor-id="benchmark-against-dutch-river-datasets-rivm-2026-0069">13.4 Benchmark against Dutch river datasets (RIVM 2026-0069)</h2>
+<p>This section compares this study’s particle-length PSD slopes and rescaled concentrations with water-based (per-volume) Dutch river data compiled for RIVM letter report 2026-0069 (<a href="https://doi.org/10.21945/RIVM-2026-0069">Quik et al.&nbsp;2026</a>; data and code: <a href="https://github.com/rivm-syso/MicroplasticsERA_water">rivm-syso/MicroplasticsERA_water</a>, EUPL-1.2). The Dutch concentrations come from Mintenig et al.&nbsp;(2020; Meuse and Dommel, FTIR), Mughini-Gras et al.&nbsp;(2021; Rhine at Lobith and Lek canal at Vianen, LDIR) and Mintenig, Hunnestad &amp; Koelmans (2025; Dommel, FTIR). The Dutch slopes are RIVM’s published poweRlaw maximum-likelihood fits (<code>param == "longest"</code>), and they are used as published: no Dutch particle data are refitted here. All logic is in <code>R/rivm_utils.R</code>. This child document only orchestrates it, and it is self-contained: it saves and restores the global RNG state, so it does not change any upstream or downstream result.</p>
+<p><strong>Windows.</strong> W2 = 50–500 µm is the primary comparison: it is this study’s sieve window and lies inside both Dutch measured ranges (20–5000 µm FTIR; 10–500 µm LDIR), so it needs interior rescaling only. W1 = 1–5000 µm is the Koelmans et al.&nbsp;(2020) default and a long extrapolation for every dataset. <strong>Measured window for this study.</strong> Following RIVM’s treatment of the Dutch data (rescaling from the sampling limits LLm/ULm), this study’s concentrations are rescaled from the 50/500 µm sampling sieves (<code>rivm_L_meas_ours</code>). This is a benchmark-only setting and does not change the pipeline’s <code>L_meas_min_use</code>/<code>L_meas_max_use</code> (Section 5.1). <strong>Slopes for this study.</strong> Each river’s own C-PSD slope is used for both rescaled concentrations and slope comparisons, matching the pipeline default (<code>slope_application</code>).</p>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb1"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Save the global RNG state so this section cannot perturb later chunks.</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>rivm_rng_state <span class="ot">&lt;-</span> <span class="cf">if</span> (<span class="fu">exists</span>(<span class="st">".Random.seed"</span>, <span class="at">envir =</span> <span class="fu">globalenv</span>())) <span class="fu">get</span>(<span class="st">".Random.seed"</span>, <span class="at">envir =</span> <span class="fu">globalenv</span>()) <span class="cf">else</span> <span class="cn">NULL</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> (<span class="sc">!</span><span class="fu">exists</span>(<span class="st">"proj_root"</span>)) {</span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>  proj_root <span class="ot">&lt;-</span> <span class="fu">tryCatch</span>(<span class="fu">normalizePath</span>(<span class="fu">file.path</span>(<span class="fu">dirname</span>(knitr<span class="sc">::</span><span class="fu">current_input</span>(<span class="at">dir =</span> <span class="cn">TRUE</span>)), <span class="st">".."</span>)),</span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>                        <span class="at">error =</span> <span class="cf">function</span>(e) <span class="fu">normalizePath</span>(<span class="st">"."</span>))</span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> (<span class="sc">!</span><span class="fu">exists</span>(<span class="st">"correction_factor"</span>)) <span class="fu">source</span>(<span class="fu">file.path</span>(proj_root, <span class="st">"R"</span>, <span class="st">"mp_risk_utils.R"</span>))</span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a><span class="fu">source</span>(<span class="fu">file.path</span>(proj_root, <span class="st">"R"</span>, <span class="st">"rivm_utils.R"</span>))</span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a><span class="co"># Standalone render (quarto render R/rivm_benchmark.qmd): rebuild the pipeline</span></span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a><span class="co"># objects this section needs from the main document's knitr cache.</span></span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> (<span class="sc">!</span><span class="fu">exists</span>(<span class="st">"cpsd_loc_shape_length"</span>)) {</span>
+<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a>  <span class="fu">rivm_bootstrap_pipeline_objects</span>(proj_root)</span>
+<span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb1-16"><a href="#cb1-16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-17"><a href="#cb1-17" aria-hidden="true" tabindex="-1"></a>rivm_L_meas_ours <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="dv">50</span>, <span class="dv">500</span>)</span>
+<span id="cb1-18"><a href="#cb1-18" aria-hidden="true" tabindex="-1"></a>rivm_paths_ <span class="ot">&lt;-</span> <span class="fu">rivm_paths</span>(proj_root)</span>
+<span id="cb1-19"><a href="#cb1-19" aria-hidden="true" tabindex="-1"></a>rivm_hashes <span class="ot">&lt;-</span> <span class="fu">rivm_input_hashes</span>(rivm_paths_)</span>
+<span id="cb1-20"><a href="#cb1-20" aria-hidden="true" tabindex="-1"></a>rivm_pipeline_key <span class="ot">&lt;-</span> digest<span class="sc">::</span><span class="fu">digest</span>(<span class="fu">list</span>(</span>
+<span id="cb1-21"><a href="#cb1-21" aria-hidden="true" tabindex="-1"></a>                                         <span class="fu">lapply</span>(cpsd_loc_shape_length, <span class="cf">function</span>(x) x<span class="sc">$</span>all[<span class="fu">c</span>(<span class="st">"a_psd"</span>, <span class="st">"se_a_psd"</span>)]),</span>
+<span id="cb1-22"><a href="#cb1-22" aria-hidden="true" tabindex="-1"></a>                                         monitoring<span class="sc">$</span>C_measured_pL, monitoring<span class="sc">$</span>sample_id,</span>
+<span id="cb1-23"><a href="#cb1-23" aria-hidden="true" tabindex="-1"></a>                                         rivm_L_meas_ours))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</div>
+<div class="cell" data-cache.extra="[[&quot;daf8b69d4fae4b5292cf77c2666f218b&quot;,&quot;a128964b0e426b8c6416cce38e7847b6&quot;,&quot;0661a3d6e023669f98268f063fe0eed2&quot;,&quot;23c386ded4006bb914334f7eaa95a885&quot;,&quot;2ace644c509b79f8fd1c48578cf34883&quot;,&quot;8782228f36f2651f096b50b4a25c5ef0&quot;,&quot;7535412843fe22bc0e6b2be4853cf3f1&quot;],&quot;ea95d328e8fecffaf8a6725170933daa&quot;,&quot;6b32cdaa3ebb322e9e4dd1bce9f35652&quot;]">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb2"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a>rivm_inputs <span class="ot">&lt;-</span> <span class="fu">rivm_load_inputs</span>(rivm_paths_)</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>rivm_ours_totals <span class="ot">&lt;-</span> <span class="fu">ours_sample_totals</span>(monitoring)</span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>rivm_river_fits <span class="ot">&lt;-</span> <span class="fu">lapply</span>(cpsd_loc_shape_length, <span class="st">`</span><span class="at">[[</span><span class="st">`</span>, <span class="st">"all"</span>)</span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>rivm_samples_tbl <span class="ot">&lt;-</span> <span class="fu">run_rivm_benchmark</span>(</span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>  rivm_inputs, rivm_ours_totals, <span class="at">river_fits =</span> rivm_river_fits, <span class="at">n_rivm =</span> <span class="dv">5000</span>, <span class="at">n_mc =</span> n_mc,</span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">structural_sd =</span> slope_structural_sd, <span class="at">L_meas_ours =</span> rivm_L_meas_ours)</span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a>rivm_slopes_tbl <span class="ot">&lt;-</span> <span class="fu">rivm_slope_table</span>(rivm_inputs<span class="sc">$</span>alphas, rivm_river_fits,</span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a>                                    <span class="at">structural_sd =</span> slope_structural_sd)</span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a>rivm_regression <span class="ot">&lt;-</span> <span class="fu">rivm_regression_check</span>(rivm_samples_tbl)</span>
+<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a>rivm_pub_check <span class="ot">&lt;-</span> <span class="fu">rivm_published_vs_reconstructed</span>(rivm_samples_tbl)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</div>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb3"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Tidy outputs. Every figure below re-renders from these CSVs.</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>rivm_out_dir <span class="ot">&lt;-</span> <span class="fu">file.path</span>(proj_root, <span class="st">"data_output"</span>)</span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>utils<span class="sc">::</span><span class="fu">write.csv</span>(rivm_samples_tbl, <span class="fu">file.path</span>(rivm_out_dir, <span class="st">"rivm_benchmark_samples_v1.csv"</span>), <span class="at">row.names =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>utils<span class="sc">::</span><span class="fu">write.csv</span>(rivm_slopes_tbl, <span class="fu">file.path</span>(rivm_out_dir, <span class="st">"rivm_benchmark_slopes_v1.csv"</span>), <span class="at">row.names =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>utils<span class="sc">::</span><span class="fu">write.csv</span>(rivm_inputs<span class="sc">$</span>audit, <span class="fu">file.path</span>(rivm_out_dir, <span class="st">"rivm_benchmark_audit_v1.csv"</span>), <span class="at">row.names =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>utils<span class="sc">::</span><span class="fu">write.csv</span>(rivm_regression, <span class="fu">file.path</span>(rivm_out_dir, <span class="st">"rivm_benchmark_regression_check_v1.csv"</span>), <span class="at">row.names =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a>utils<span class="sc">::</span><span class="fu">write.csv</span>(rivm_pub_check, <span class="fu">file.path</span>(rivm_out_dir, <span class="st">"rivm_benchmark_published_vs_reconstructed_v1.csv"</span>), <span class="at">row.names =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a>rivm_samples_csv <span class="ot">&lt;-</span> tibble<span class="sc">::</span><span class="fu">as_tibble</span>(utils<span class="sc">::</span><span class="fu">read.csv</span>(<span class="fu">file.path</span>(rivm_out_dir, <span class="st">"rivm_benchmark_samples_v1.csv"</span>), <span class="at">check.names =</span> <span class="cn">FALSE</span>))</span>
+<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a>rivm_slopes_csv  <span class="ot">&lt;-</span> tibble<span class="sc">::</span><span class="fu">as_tibble</span>(utils<span class="sc">::</span><span class="fu">read.csv</span>(<span class="fu">file.path</span>(rivm_out_dir, <span class="st">"rivm_benchmark_slopes_v1.csv"</span>), <span class="at">check.names =</span> <span class="cn">FALSE</span>)) <span class="sc">|&gt;</span></span>
+<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">mutate</span>(<span class="at">facet =</span> <span class="fu">factor</span>(.data<span class="sc">$</span>facet, <span class="at">levels =</span> <span class="fu">c</span>(<span class="st">"Dutch FTIR"</span>, <span class="st">"Dutch LDIR"</span>, <span class="st">"This study: by river"</span>)))</span>
+<span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a>rivm_groups_csv  <span class="ot">&lt;-</span> <span class="fu">rivm_group_summary</span>(rivm_samples_csv)</span>
+<span id="cb3-13"><a href="#cb3-13" aria-hidden="true" tabindex="-1"></a>utils<span class="sc">::</span><span class="fu">write.csv</span>(rivm_groups_csv, <span class="fu">file.path</span>(rivm_out_dir, <span class="st">"rivm_benchmark_groups_v1.csv"</span>), <span class="at">row.names =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb3-14"><a href="#cb3-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-15"><a href="#cb3-15" aria-hidden="true" tabindex="-1"></a>rivm_si_tbl <span class="ot">&lt;-</span> <span class="fu">rivm_si_table</span>(rivm_samples_csv, rivm_slopes_csv)</span>
+<span id="cb3-16"><a href="#cb3-16" aria-hidden="true" tabindex="-1"></a>utils<span class="sc">::</span><span class="fu">write.csv</span>(rivm_si_tbl, <span class="fu">file.path</span>(rivm_out_dir, <span class="st">"rivm_benchmark_si_table_v1.csv"</span>), <span class="at">row.names =</span> <span class="cn">FALSE</span>, <span class="at">fileEncoding =</span> <span class="st">"UTF-8"</span>)</span>
+<span id="cb3-17"><a href="#cb3-17" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-18"><a href="#cb3-18" aria-hidden="true" tabindex="-1"></a>rivm_vals <span class="ot">&lt;-</span> <span class="fu">rivm_manuscript_values</span>(rivm_samples_csv, rivm_groups_csv, rivm_slopes_csv)</span>
+<span id="cb3-19"><a href="#cb3-19" aria-hidden="true" tabindex="-1"></a>utils<span class="sc">::</span><span class="fu">write.csv</span>(rivm_vals, <span class="fu">file.path</span>(rivm_out_dir, <span class="st">"rivm_benchmark_text_values_v1.csv"</span>), <span class="at">row.names =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb3-20"><a href="#cb3-20" aria-hidden="true" tabindex="-1"></a>rivm_caps <span class="ot">&lt;-</span> <span class="fu">rivm_figure_captions</span>(rivm_vals)</span>
+<span id="cb3-21"><a href="#cb3-21" aria-hidden="true" tabindex="-1"></a>utils<span class="sc">::</span><span class="fu">write.csv</span>(tibble<span class="sc">::</span><span class="fu">tibble</span>(<span class="at">figure =</span> <span class="fu">names</span>(rivm_caps), <span class="at">caption =</span> <span class="fu">unlist</span>(rivm_caps)),</span>
+<span id="cb3-22"><a href="#cb3-22" aria-hidden="true" tabindex="-1"></a>                 <span class="fu">file.path</span>(rivm_out_dir, <span class="st">"rivm_benchmark_captions_v1.csv"</span>), <span class="at">row.names =</span> <span class="cn">FALSE</span>, <span class="at">fileEncoding =</span> <span class="st">"UTF-8"</span>)</span>
+<span id="cb3-23"><a href="#cb3-23" aria-hidden="true" tabindex="-1"></a>rivm_rv <span class="ot">&lt;-</span> <span class="cf">function</span>(k) rivm_vals<span class="sc">$</span>formatted[rivm_vals<span class="sc">$</span>key <span class="sc">==</span> k]</span>
+<span id="cb3-24"><a href="#cb3-24" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-25"><a href="#cb3-25" aria-hidden="true" tabindex="-1"></a><span class="co"># Guards (Section 7 of the benchmark spec).</span></span>
+<span id="cb3-26"><a href="#cb3-26" aria-hidden="true" tabindex="-1"></a><span class="fu">stopifnot</span>(<span class="sc">!</span><span class="fu">any</span>(rivm_samples_csv<span class="sc">$</span>water_type <span class="sc">==</span> <span class="st">"Effluent WWTP"</span>),</span>
+<span id="cb3-27"><a href="#cb3-27" aria-hidden="true" tabindex="-1"></a>          <span class="sc">!</span><span class="fu">any</span>(rivm_samples_csv<span class="sc">$</span>dataset <span class="sc">==</span> <span class="st">"Dutch rivers"</span> <span class="sc">&amp;</span> rivm_samples_csv<span class="sc">$</span>LLm <span class="sc">&gt;=</span> <span class="dv">300</span>),</span>
+<span id="cb3-28"><a href="#cb3-28" aria-hidden="true" tabindex="-1"></a>          <span class="sc">!</span><span class="fu">any</span>(<span class="fu">grepl</span>(<span class="st">"uerlein|Leslie"</span>, rivm_samples_csv<span class="sc">$</span>study)))</span>
+<span id="cb3-29"><a href="#cb3-29" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> (<span class="sc">!</span><span class="fu">all</span>(rivm_regression<span class="sc">$</span>pass)) <span class="fu">warning</span>(<span class="st">"RIVM benchmark: prototype regression targets not met; see rivm_benchmark_regression_check_v1.csv"</span>)</span>
+<span id="cb3-30"><a href="#cb3-30" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> (<span class="fu">nrow</span>(rivm_pub_check) <span class="sc">&amp;&amp;</span> <span class="sc">!</span><span class="fu">all</span>(rivm_pub_check<span class="sc">$</span>within_2x)) {</span>
+<span id="cb3-31"><a href="#cb3-31" aria-hidden="true" tabindex="-1"></a>  <span class="fu">warning</span>(<span class="st">"RIVM published W1 medians differ from the reconstruction by more than 2x; review before use"</span>)</span>
+<span id="cb3-32"><a href="#cb3-32" aria-hidden="true" tabindex="-1"></a>}</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</div>
+<p><strong>Inputs and exclusions.</strong> Inputs were read from RIVM clone (rebuilt derived CSVs). In total, 37 Dutch surface-water samples were retained and 16 were excluded (table below): WWTP effluent; the nine Mintenig et al.&nbsp;(2020) samples analysed only above 300 µm, which have no total in <code>Corrected_concentrations_total</code>; and the four Mughini-Gras et al.&nbsp;(2021) samples without a reported total. Bäuerlein et al.&nbsp;(2022, 2023) particle data are not public. Their slopes appear in the slope comparison, but their samples are excluded from the concentration figures. For this study, the per-sample concentration is the sum over plastic polymer classes of the pipeline’s <code>monitoring$C_measured_pL</code> (57 samples, ×1000 to particles m⁻³).</p>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb4"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a>knitr<span class="sc">::</span><span class="fu">kable</span>(</span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>  rivm_inputs<span class="sc">$</span>audit <span class="sc">|&gt;</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>    dplyr<span class="sc">::</span><span class="fu">count</span>(.data<span class="sc">$</span>study, .data<span class="sc">$</span>river, .data<span class="sc">$</span>technique, .data<span class="sc">$</span>included, .data<span class="sc">$</span>exclusion_reason),</span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">caption =</span> <span class="st">"Dutch sample audit: inclusion status by study and water body"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output-display">
+<table class="caption-top table table-sm table-striped small">
+<caption>Dutch sample audit: inclusion status by study and water body</caption>
+<colgroup>
+<col style="width: 16%">
+<col style="width: 6%">
+<col style="width: 6%">
+<col style="width: 6%">
+<col style="width: 62%">
+<col style="width: 2%">
+</colgroup>
+<thead>
+<tr class="header">
+<th style="text-align: left;">study</th>
+<th style="text-align: left;">river</th>
+<th style="text-align: left;">technique</th>
+<th style="text-align: left;">included</th>
+<th style="text-align: left;">exclusion_reason</th>
+<th style="text-align: right;">n</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">Mintenig et al.&nbsp;2020</td>
+<td style="text-align: left;">Dommel</td>
+<td style="text-align: left;">FTIR</td>
+<td style="text-align: left;">FALSE</td>
+<td style="text-align: left;">WWTP effluent (not surface water)</td>
+<td style="text-align: right;">2</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Mintenig et al.&nbsp;2020</td>
+<td style="text-align: left;">Dommel</td>
+<td style="text-align: left;">FTIR</td>
+<td style="text-align: left;">TRUE</td>
+<td style="text-align: left;">NA</td>
+<td style="text-align: right;">18</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Mintenig et al.&nbsp;2020</td>
+<td style="text-align: left;">Meuse</td>
+<td style="text-align: left;">FTIR</td>
+<td style="text-align: left;">FALSE</td>
+<td style="text-align: left;">LLm = 300 um (no total in Corrected_concentrations_total)</td>
+<td style="text-align: right;">7</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Mintenig et al.&nbsp;2020</td>
+<td style="text-align: left;">Meuse</td>
+<td style="text-align: left;">FTIR</td>
+<td style="text-align: left;">FALSE</td>
+<td style="text-align: left;">WWTP effluent (not surface water)</td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Mintenig et al.&nbsp;2020</td>
+<td style="text-align: left;">Meuse</td>
+<td style="text-align: left;">FTIR</td>
+<td style="text-align: left;">FALSE</td>
+<td style="text-align: left;">WWTP effluent (not surface water); LLm = 300 um (no total in Corrected_concentrations_total)</td>
+<td style="text-align: right;">2</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Mintenig et al.&nbsp;2020</td>
+<td style="text-align: left;">Meuse</td>
+<td style="text-align: left;">FTIR</td>
+<td style="text-align: left;">TRUE</td>
+<td style="text-align: left;">NA</td>
+<td style="text-align: right;">11</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Mintenig et al.&nbsp;2025</td>
+<td style="text-align: left;">Dommel</td>
+<td style="text-align: left;">FTIR</td>
+<td style="text-align: left;">TRUE</td>
+<td style="text-align: left;">NA</td>
+<td style="text-align: right;">4</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Mughini-Gras et al.&nbsp;2021</td>
+<td style="text-align: left;">Lek canal</td>
+<td style="text-align: left;">LDIR</td>
+<td style="text-align: left;">FALSE</td>
+<td style="text-align: left;">No total concentration reported</td>
+<td style="text-align: right;">2</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Mughini-Gras et al.&nbsp;2021</td>
+<td style="text-align: left;">Lek canal</td>
+<td style="text-align: left;">LDIR</td>
+<td style="text-align: left;">TRUE</td>
+<td style="text-align: left;">NA</td>
+<td style="text-align: right;">2</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Mughini-Gras et al.&nbsp;2021</td>
+<td style="text-align: left;">Rhine</td>
+<td style="text-align: left;">LDIR</td>
+<td style="text-align: left;">FALSE</td>
+<td style="text-align: left;">No total concentration reported</td>
+<td style="text-align: right;">2</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Mughini-Gras et al.&nbsp;2021</td>
+<td style="text-align: left;">Rhine</td>
+<td style="text-align: left;">LDIR</td>
+<td style="text-align: left;">TRUE</td>
+<td style="text-align: left;">NA</td>
+<td style="text-align: right;">2</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<p><strong>Checks.</strong> The re-implementation of the RIVM uncertainty method reproduces the prototype regression targets, with all 8 water-body × window medians within ±10% (8 of 8 pass). RIVM’s own published W1 medians (<code>Rescaled_concentrations_2026-05-13.Rds</code>) agree with the reconstruction within a factor of 1.02.</p>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb5"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a>knitr<span class="sc">::</span><span class="fu">kable</span>(rivm_si_tbl, <span class="at">caption =</span> <span class="st">"Included sample sets. a, differential slope (Dutch: RIVM bootstrap 95% CI; this study: ±1.96 SE). Rescaled values: median of per-sample medians [lowest per-sample 5th–highest per-sample 95th percentile], particles m⁻³; Dutch reconstructed with the RIVM method, this study river-specific C-PSD slope (W2 measured)."</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output-display">
+<table class="caption-top table table-sm table-striped small">
+<caption>Included sample sets. a, differential slope (Dutch: RIVM bootstrap 95% CI; this study: ±1.96 SE). Rescaled values: median of per-sample medians [lowest per-sample 5th–highest per-sample 95th percentile], particles m⁻³; Dutch reconstructed with the RIVM method, this study river-specific C-PSD slope (W2 measured).</caption>
+<colgroup>
+<col style="width: 13%">
+<col style="width: 6%">
+<col style="width: 1%">
+<col style="width: 5%">
+<col style="width: 10%">
+<col style="width: 11%">
+<col style="width: 8%">
+<col style="width: 13%">
+<col style="width: 11%">
+<col style="width: 17%">
+</colgroup>
+<thead>
+<tr class="header">
+<th style="text-align: left;">Study</th>
+<th style="text-align: left;">Water body</th>
+<th style="text-align: right;">n</th>
+<th style="text-align: left;">Technique</th>
+<th style="text-align: left;">Measured range (µm)</th>
+<th style="text-align: left;">a [95% CI]</th>
+<th style="text-align: left;">Fit window</th>
+<th style="text-align: left;">Reported (particles m⁻³)</th>
+<th style="text-align: left;">W2 50–500 µm</th>
+<th style="text-align: left;">W1 1–5000 µm</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">Mintenig et al.&nbsp;2020</td>
+<td style="text-align: left;">Dommel</td>
+<td style="text-align: right;">18</td>
+<td style="text-align: left;">FTIR</td>
+<td style="text-align: left;">20–5000</td>
+<td style="text-align: left;">−2.35 [−2.40, −2.31]</td>
+<td style="text-align: left;">xmin 170 µm</td>
+<td style="text-align: left;">160–12,000</td>
+<td style="text-align: left;">180 [40–3,500]</td>
+<td style="text-align: left;">38,000 [8,200–7.6 × 10⁵]</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Mintenig et al.&nbsp;2020</td>
+<td style="text-align: left;">Meuse</td>
+<td style="text-align: right;">11</td>
+<td style="text-align: left;">FTIR</td>
+<td style="text-align: left;">20–5000</td>
+<td style="text-align: left;">−2.29 [−2.41, −2.11]</td>
+<td style="text-align: left;">xmin 268 µm</td>
+<td style="text-align: left;">67–1,400</td>
+<td style="text-align: left;">250 [18–460]</td>
+<td style="text-align: left;">39,000 [2,200–83,000]</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Mintenig et al.&nbsp;2025</td>
+<td style="text-align: left;">Dommel</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: left;">FTIR</td>
+<td style="text-align: left;">20–5000</td>
+<td style="text-align: left;">−2.35 [−2.40, −2.31]</td>
+<td style="text-align: left;">xmin 170 µm</td>
+<td style="text-align: left;">1,400–31,000</td>
+<td style="text-align: left;">3,000 [340–9,400]</td>
+<td style="text-align: left;">6.2 × 10⁵ [69,000–2.0 × 10⁶]</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Mughini-Gras et al.&nbsp;2021</td>
+<td style="text-align: left;">Lek canal</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: left;">LDIR</td>
+<td style="text-align: left;">10–500</td>
+<td style="text-align: left;">−3.76 [−3.89, −3.18]</td>
+<td style="text-align: left;">xmin 62 µm</td>
+<td style="text-align: left;">1.0 × 10⁵–3.3 × 10⁵</td>
+<td style="text-align: left;">3,200 [1,000–8,000]</td>
+<td style="text-align: left;">9.4 × 10⁷ [2.1 × 10⁷–2.3 × 10⁸]</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Mughini-Gras et al.&nbsp;2021</td>
+<td style="text-align: left;">Rhine</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: left;">LDIR</td>
+<td style="text-align: left;">10–500</td>
+<td style="text-align: left;">−2.98 [−3.19, −2.80]</td>
+<td style="text-align: left;">xmin 67 µm</td>
+<td style="text-align: left;">1.4 × 10⁵–3.1 × 10⁵</td>
+<td style="text-align: left;">9,000 [4,200–16,000]</td>
+<td style="text-align: left;">2.2 × 10⁷ [9.5 × 10⁶–4.3 × 10⁷]</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">This study</td>
+<td style="text-align: left;">Carmel</td>
+<td style="text-align: right;">14</td>
+<td style="text-align: left;">µFTIR</td>
+<td style="text-align: left;">50–500</td>
+<td style="text-align: left;">−2.49 [−2.55, −2.44]</td>
+<td style="text-align: left;">LOD 150–460 µm</td>
+<td style="text-align: left;">15–1,200</td>
+<td style="text-align: left;">140 [15–1,200]</td>
+<td style="text-align: left;">50,000 [1,100–2.1 × 10⁶]</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">This study</td>
+<td style="text-align: left;">Pajaro</td>
+<td style="text-align: right;">14</td>
+<td style="text-align: left;">µFTIR</td>
+<td style="text-align: left;">50–500</td>
+<td style="text-align: left;">−3.71 [−3.83, −3.59]</td>
+<td style="text-align: left;">LOD 80–195 µm</td>
+<td style="text-align: left;">15–2,300</td>
+<td style="text-align: left;">200 [15–2,300]</td>
+<td style="text-align: left;">8.1 × 10⁶ [1.1 × 10⁵–5.0 × 10⁸]</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">This study</td>
+<td style="text-align: left;">Salinas</td>
+<td style="text-align: right;">15</td>
+<td style="text-align: left;">µFTIR</td>
+<td style="text-align: left;">50–500</td>
+<td style="text-align: left;">−2.68 [−2.86, −2.50]</td>
+<td style="text-align: left;">LOD 145–350 µm</td>
+<td style="text-align: left;">10–1,400</td>
+<td style="text-align: left;">120 [10–1,400]</td>
+<td style="text-align: left;">86,000 [1,400–5.9 × 10⁶]</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">This study</td>
+<td style="text-align: left;">San Lorenzo</td>
+<td style="text-align: right;">14</td>
+<td style="text-align: left;">µFTIR</td>
+<td style="text-align: left;">50–500</td>
+<td style="text-align: left;">−2.89 [−2.99, −2.78]</td>
+<td style="text-align: left;">LOD 150–380 µm</td>
+<td style="text-align: left;">10–3,600</td>
+<td style="text-align: left;">280 [10–3,600]</td>
+<td style="text-align: left;">4.7 × 10⁵ [3,200–3.0 × 10⁷]</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb6"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a>knitr<span class="sc">::</span><span class="fu">kable</span>(rivm_regression, <span class="at">digits =</span> <span class="dv">3</span>, <span class="at">caption =</span> <span class="st">"Prototype regression check (median across samples of per-sample medians, particles m⁻³)"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output-display">
+<table class="caption-top table table-sm table-striped small">
+<caption>Prototype regression check (median across samples of per-sample medians, particles m⁻³)</caption>
+<colgroup>
+<col style="width: 23%">
+<col style="width: 9%">
+<col style="width: 12%">
+<col style="width: 12%">
+<col style="width: 4%">
+<col style="width: 18%">
+<col style="width: 12%">
+<col style="width: 6%">
+</colgroup>
+<thead>
+<tr class="header">
+<th style="text-align: left;">group</th>
+<th style="text-align: left;">window</th>
+<th style="text-align: right;">target</th>
+<th style="text-align: right;">n_target</th>
+<th style="text-align: right;">n</th>
+<th style="text-align: right;">median</th>
+<th style="text-align: right;">rel_diff</th>
+<th style="text-align: left;">pass</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">Meuse (FTIR)</td>
+<td style="text-align: left;">W2</td>
+<td style="text-align: right;">251</td>
+<td style="text-align: right;">11</td>
+<td style="text-align: right;">11</td>
+<td style="text-align: right;">251.113</td>
+<td style="text-align: right;">0.000</td>
+<td style="text-align: left;">TRUE</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Dommel (FTIR)</td>
+<td style="text-align: left;">W2</td>
+<td style="text-align: right;">181</td>
+<td style="text-align: right;">18</td>
+<td style="text-align: right;">18</td>
+<td style="text-align: right;">180.644</td>
+<td style="text-align: right;">-0.002</td>
+<td style="text-align: left;">TRUE</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Rhine (LDIR)</td>
+<td style="text-align: left;">W2</td>
+<td style="text-align: right;">9079</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">9043.611</td>
+<td style="text-align: right;">-0.004</td>
+<td style="text-align: left;">TRUE</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Lek canal (LDIR)</td>
+<td style="text-align: left;">W2</td>
+<td style="text-align: right;">3160</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">3152.576</td>
+<td style="text-align: right;">-0.002</td>
+<td style="text-align: left;">TRUE</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Meuse (FTIR)</td>
+<td style="text-align: left;">W1</td>
+<td style="text-align: right;">38700</td>
+<td style="text-align: right;">11</td>
+<td style="text-align: right;">11</td>
+<td style="text-align: right;">38599.195</td>
+<td style="text-align: right;">-0.003</td>
+<td style="text-align: left;">TRUE</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Dommel (FTIR)</td>
+<td style="text-align: left;">W1</td>
+<td style="text-align: right;">37700</td>
+<td style="text-align: right;">18</td>
+<td style="text-align: right;">18</td>
+<td style="text-align: right;">37703.684</td>
+<td style="text-align: right;">0.000</td>
+<td style="text-align: left;">TRUE</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Rhine (LDIR)</td>
+<td style="text-align: left;">W1</td>
+<td style="text-align: right;">21900000</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">21918301.938</td>
+<td style="text-align: right;">0.001</td>
+<td style="text-align: left;">TRUE</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Lek canal (LDIR)</td>
+<td style="text-align: left;">W1</td>
+<td style="text-align: right;">93700000</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">93993738.310</td>
+<td style="text-align: right;">0.003</td>
+<td style="text-align: left;">TRUE</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb7"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a>knitr<span class="sc">::</span><span class="fu">kable</span>(rivm_pub_check, <span class="at">digits =</span> <span class="dv">3</span>, <span class="at">caption =</span> <span class="st">"RIVM published vs reconstructed W1 medians (particles m⁻³)"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output-display">
+<table class="caption-top table table-sm table-striped small">
+<caption>RIVM published vs reconstructed W1 medians (particles m⁻³)</caption>
+<thead>
+<tr class="header">
+<th style="text-align: left;">group</th>
+<th style="text-align: right;">n</th>
+<th style="text-align: right;">reconstructed</th>
+<th style="text-align: right;">rivm_published</th>
+<th style="text-align: right;">ratio</th>
+<th style="text-align: left;">within_2x</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">Dommel (FTIR)</td>
+<td style="text-align: right;">22</td>
+<td style="text-align: right;">73573.18</td>
+<td style="text-align: right;">73543.97</td>
+<td style="text-align: right;">1.000</td>
+<td style="text-align: left;">TRUE</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Lek canal (LDIR)</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">93993738.31</td>
+<td style="text-align: right;">92461693.24</td>
+<td style="text-align: right;">0.984</td>
+<td style="text-align: left;">TRUE</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Meuse (FTIR)</td>
+<td style="text-align: right;">11</td>
+<td style="text-align: right;">38599.19</td>
+<td style="text-align: right;">38049.88</td>
+<td style="text-align: right;">0.986</td>
+<td style="text-align: left;">TRUE</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Rhine (LDIR)</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">21918301.94</td>
+<td style="text-align: right;">21902355.64</td>
+<td style="text-align: right;">0.999</td>
+<td style="text-align: left;">TRUE</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<p><strong>Results.</strong> Rescaled to the common 50–500 µm window (W2), the Dutch water-body medians were 250 (IQR 160–310; n = 11) (Meuse, FTIR), 350 (IQR 98–1,600; n = 22) (Dommel, FTIR), 9,000 (range 5,500–13,000; n = 2) (Rhine, LDIR) and 3,200 (range 1,500–4,800; n = 2) (Lek canal, LDIR) particles m⁻³. This study’s measured median was 200 (IQR 80–480; n = 57) particles m⁻³. Extrapolated to 1–5000 µm (W1), this study’s median with river-specific slopes is 3.2 × 10⁵ (IQR 70,000–2.0 × 10⁶; n = 57). W1 is secondary to the W2 comparison because it is a long extrapolation.</p>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb8"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a>rivm_fig7 <span class="ot">&lt;-</span> <span class="fu">plot_rivm_fig7</span>(rivm_samples_csv)</span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="fu">save_rivm_figure</span>(rivm_fig7, <span class="st">"rivm_fig7_concentrations"</span>, <span class="at">width =</span> <span class="dv">7</span>, <span class="at">height =</span> <span class="fl">7.5</span>,</span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a>                 <span class="at">data =</span> dplyr<span class="sc">::</span><span class="fu">filter</span>(rivm_samples_csv, .data<span class="sc">$</span>scenario <span class="sc">==</span> <span class="st">"primary"</span>,</span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a>                                      .data<span class="sc">$</span>method_variant <span class="sc">%in%</span> <span class="fu">c</span>(<span class="st">"published"</span>, <span class="st">"published_rivm"</span>, <span class="st">"river"</span>)),</span>
+<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a>                 <span class="at">dir =</span> <span class="fu">file.path</span>(proj_root, <span class="st">"figures"</span>))</span>
+<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a>rivm_fig7</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output-display">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="rivm_benchmark_files/figure-html/rivm-fig7-1.png" class="img-fluid figure-img" width="672"></p>
+<figcaption>Rescaled microplastic concentrations in Dutch rivers and the four Monterey Bay rivers, (a) rescaled to 50–500 µm (W2, primary: interior to every measured range) and (b) extrapolated to 1–5000 µm (W1). Open symbols, per-sample median; thin bars, per-sample 5–95% Monte Carlo interval; thick point ranges, median and interquartile range of the per-sample medians for each water body; symbol shape, analytical technique; colour, dataset. Row labels give the differential slope a used to rescale that row and the number of samples; this study’s W2 rows are measurements, so the river-specific fitted slope is shown there for reference. Value types: Dutch W2 and W1, reconstructed here with the RIVM uncertainty method (triangular α and ±10% size limits); “+”, RIVM’s own published per-sample medians (W1 only); this study W2, measured (50–500 µm sieve fraction, CF = 1); this study W1, reconstructed from each river’s own single slope. Dutch FTIR slopes were fitted above xmin ≈ 170–270 µm but are applied down to 20 µm; W1 differences are dominated by slope and should be read as secondary. Dommel combines Mintenig et al.&nbsp;(2020) and Mintenig et al.&nbsp;(2025). Slope convention: differential PSD slope a (dN/dL ∝ L^a); RIVM’s positive PDF exponent α is converted as a = −α. Fitting methods differ: Dutch slopes are poweRlaw maximum-likelihood fits above an estimated xmin to particles ≤ 5000 µm, aggregated per water body and technique (Quik et al.&nbsp;2026); this study’s slopes are C-PSD fits within the Segur et al.&nbsp;(2026) LOD window. Systems differ: large perennial Dutch rivers and a canal (FTIR, Mintenig et al.&nbsp;2020, 2025; LDIR, Mughini-Gras et al.&nbsp;2021) versus discrete pumped samples from small, episodic Central Coast rivers (µFTIR). Dutch concentrations are study-reported totals (authors’ blank and subsampling corrections), not recomputed from particles.</figcaption>
+</figure>
+</div>
+</div>
+</div>
+<p>Slopes: this study’s river-level slopes have a median of −2.78 (IQR −3.09 to −2.63; n = 4). The Dutch water-based water-body slopes have a median of −2.32 (range −2.35 to −2.29; n = 2) (FTIR) and −3.31 (IQR −3.56 to −2.98; n = 5) (LDIR). LDIR slopes are systematically steeper than FTIR slopes, and the Dutch FTIR slopes were fitted above xmin ≈ 170–270 µm.</p>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb9"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a>rivm_fig8 <span class="ot">&lt;-</span> <span class="fu">plot_rivm_fig8</span>(rivm_slopes_csv)</span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a><span class="fu">save_rivm_figure</span>(rivm_fig8, <span class="st">"rivm_fig8_slopes"</span>, <span class="at">width =</span> <span class="dv">7</span>, <span class="at">height =</span> <span class="fl">6.5</span>, <span class="at">data =</span> rivm_slopes_csv,</span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a>                 <span class="at">dir =</span> <span class="fu">file.path</span>(proj_root, <span class="st">"figures"</span>))</span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a>rivm_fig8</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output-display">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="rivm_benchmark_files/figure-html/rivm-fig8-1.png" class="img-fluid figure-img" width="672"></p>
+<figcaption>Differential particle-length PSD slopes (a) for Dutch water bodies (FTIR and LDIR; RIVM 2026-0069) and this study (by river). Points, estimate; thick bars, 95% CI (Dutch: RIVM bootstrap CI as published; this study: ±1.96 SE); thin bars, 95% interval after adding the structural slope SD (0.25) used in this study’s Monte Carlo. Bracketed text gives each fit window (Dutch: estimated xmin, fit extends to 5000 µm; this study: LOD window). Shaded bands, MPSizeBase morphology means ± SD (Segur et al.&nbsp;2026). Value types: Dutch, published; this study, measured. Slope convention: differential PSD slope a (dN/dL ∝ L^a); RIVM’s positive PDF exponent α is converted as a = −α. Fitting methods differ: Dutch slopes are poweRlaw maximum-likelihood fits above an estimated xmin to particles ≤ 5000 µm, aggregated per water body and technique (Quik et al.&nbsp;2026); this study’s slopes are C-PSD fits within the Segur et al.&nbsp;(2026) LOD window. Systems differ: large perennial Dutch rivers and a canal (FTIR, Mintenig et al.&nbsp;2020, 2025; LDIR, Mughini-Gras et al.&nbsp;2021) versus discrete pumped samples from small, episodic Central Coast rivers (µFTIR). Dutch concentrations are study-reported totals (authors’ blank and subsampling corrections), not recomputed from particles.</figcaption>
+</figure>
+</div>
+</div>
+</div>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb10"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a>rivm_figSA <span class="ot">&lt;-</span> <span class="fu">plot_rivm_ecdf</span>(rivm_samples_csv)</span>
+<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a><span class="fu">save_rivm_figure</span>(rivm_figSA, <span class="st">"rivm_figSA_ecdf"</span>, <span class="at">width =</span> <span class="dv">7</span>, <span class="at">height =</span> <span class="fl">4.5</span>,</span>
+<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a>                 <span class="at">data =</span> dplyr<span class="sc">::</span><span class="fu">filter</span>(rivm_samples_csv, .data<span class="sc">$</span>scenario <span class="sc">==</span> <span class="st">"primary"</span>,</span>
+<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a>                                      .data<span class="sc">$</span>method_variant <span class="sc">%in%</span> <span class="fu">c</span>(<span class="st">"published"</span>, <span class="st">"harmonised"</span>, <span class="st">"river"</span>)),</span>
+<span id="cb10-5"><a href="#cb10-5" aria-hidden="true" tabindex="-1"></a>                 <span class="at">dir =</span> <span class="fu">file.path</span>(proj_root, <span class="st">"figures"</span>))</span>
+<span id="cb10-6"><a href="#cb10-6" aria-hidden="true" tabindex="-1"></a>rivm_figSA</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output-display">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="rivm_benchmark_files/figure-html/rivm-figSA-1.png" class="img-fluid figure-img" width="672"></p>
+<figcaption>Empirical cumulative distributions of per-sample median rescaled concentrations by water body for W2 (50–500 µm) and W1 (1–5000 µm). Dutch: solid, RIVM uncertainty method; dashed, this study’s harmonised method (truncated-normal slope with structural SD, fixed size limits); both reconstructed. This study: river-specific single slopes (W2 measured; W1 reconstructed). Slope convention: differential PSD slope a (dN/dL ∝ L^a); RIVM’s positive PDF exponent α is converted as a = −α. Fitting methods differ: Dutch slopes are poweRlaw maximum-likelihood fits above an estimated xmin to particles ≤ 5000 µm, aggregated per water body and technique (Quik et al.&nbsp;2026); this study’s slopes are C-PSD fits within the Segur et al.&nbsp;(2026) LOD window. Systems differ: large perennial Dutch rivers and a canal (FTIR, Mintenig et al.&nbsp;2020, 2025; LDIR, Mughini-Gras et al.&nbsp;2021) versus discrete pumped samples from small, episodic Central Coast rivers (µFTIR). Dutch concentrations are study-reported totals (authors’ blank and subsampling corrections), not recomputed from particles.</figcaption>
+</figure>
+</div>
+</div>
+</div>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb11"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a>rivm_figSB <span class="ot">&lt;-</span> <span class="fu">plot_rivm_sensitivity</span>(rivm_groups_csv)</span>
+<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a><span class="fu">save_rivm_figure</span>(rivm_figSB, <span class="st">"rivm_figSB_sensitivity"</span>, <span class="at">width =</span> <span class="dv">7</span>, <span class="at">height =</span> <span class="fl">7.5</span>, <span class="at">data =</span> rivm_groups_csv,</span>
+<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a>                 <span class="at">dir =</span> <span class="fu">file.path</span>(proj_root, <span class="st">"figures"</span>))</span>
+<span id="cb11-4"><a href="#cb11-4" aria-hidden="true" tabindex="-1"></a>rivm_figSB</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output-display">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="rivm_benchmark_files/figure-html/rivm-figSB-1.png" class="img-fluid figure-img" width="672"></p>
+<figcaption>Sensitivity of Dutch water-body medians (points) and interquartile ranges (bars) of per-sample medians: (1) totals as reported versus excluding rubber (Mintenig: “Rubbers”; Mughini-Gras: isoprene; Mintenig 2025: EPDM rubber), since this study’s polymer library has no rubber class; (2) LDIR lower size limit 10 µm (sample metadata) versus 20 µm (RIVM report text); (3) RIVM versus harmonised uncertainty method. All Dutch values reconstructed. Slope convention: differential PSD slope a (dN/dL ∝ L^a); RIVM’s positive PDF exponent α is converted as a = −α. Fitting methods differ: Dutch slopes are poweRlaw maximum-likelihood fits above an estimated xmin to particles ≤ 5000 µm, aggregated per water body and technique (Quik et al.&nbsp;2026); this study’s slopes are C-PSD fits within the Segur et al.&nbsp;(2026) LOD window. Systems differ: large perennial Dutch rivers and a canal (FTIR, Mintenig et al.&nbsp;2020, 2025; LDIR, Mughini-Gras et al.&nbsp;2021) versus discrete pumped samples from small, episodic Central Coast rivers (µFTIR). Dutch concentrations are study-reported totals (authors’ blank and subsampling corrections), not recomputed from particles.</figcaption>
+</figure>
+</div>
+</div>
+</div>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb12"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a>rivm_figSC <span class="ot">&lt;-</span> <span class="fu">plot_rivm_cf_alpha</span>(rivm_samples_csv)</span>
+<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a><span class="fu">save_rivm_figure</span>(rivm_figSC, <span class="st">"rivm_figSC_cf_vs_slope"</span>, <span class="at">width =</span> <span class="dv">7</span>, <span class="at">height =</span> <span class="fl">4.5</span>,</span>
+<span id="cb12-3"><a href="#cb12-3" aria-hidden="true" tabindex="-1"></a>                 <span class="at">data =</span> dplyr<span class="sc">::</span><span class="fu">filter</span>(rivm_samples_csv, .data<span class="sc">$</span>window <span class="sc">==</span> <span class="st">"W1"</span>, .data<span class="sc">$</span>scenario <span class="sc">==</span> <span class="st">"primary"</span>,</span>
+<span id="cb12-4"><a href="#cb12-4" aria-hidden="true" tabindex="-1"></a>                                      .data<span class="sc">$</span>method_variant <span class="sc">%in%</span> <span class="fu">c</span>(<span class="st">"published"</span>, <span class="st">"river"</span>)),</span>
+<span id="cb12-5"><a href="#cb12-5" aria-hidden="true" tabindex="-1"></a>                 <span class="at">dir =</span> <span class="fu">file.path</span>(proj_root, <span class="st">"figures"</span>))</span>
+<span id="cb12-6"><a href="#cb12-6" aria-hidden="true" tabindex="-1"></a>rivm_figSC</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output-display">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="rivm_benchmark_files/figure-html/rivm-figSC-1.png" class="img-fluid figure-img" width="672"></p>
+<figcaption>Correction factors to 1–5000 µm (median and 5–95%) versus differential slope. Dutch per-sample factors span 45–430 (RIVM report: 46–440; shaded band); this study’s factors (50–500 µm sieve window) use each river’s own slope and are labelled by river. All values reconstructed. Slope convention: differential PSD slope a (dN/dL ∝ L^a); RIVM’s positive PDF exponent α is converted as a = −α. Fitting methods differ: Dutch slopes are poweRlaw maximum-likelihood fits above an estimated xmin to particles ≤ 5000 µm, aggregated per water body and technique (Quik et al.&nbsp;2026); this study’s slopes are C-PSD fits within the Segur et al.&nbsp;(2026) LOD window. Systems differ: large perennial Dutch rivers and a canal (FTIR, Mintenig et al.&nbsp;2020, 2025; LDIR, Mughini-Gras et al.&nbsp;2021) versus discrete pumped samples from small, episodic Central Coast rivers (µFTIR). Dutch concentrations are study-reported totals (authors’ blank and subsampling corrections), not recomputed from particles.</figcaption>
+</figure>
+</div>
+</div>
+</div>
+<p><strong>Caveats.</strong> (1) Slopes are method-dependent, so W1 differences conflate PSD shape with fitting method. (2) Dutch FTIR slopes were fitted above xmin ≈ 170–270 µm but are applied down to 20 µm. (3) LDIR and FTIR slopes differ systematically (α ≈ 2.4–3.8 versus 2.3–2.4). (4) Dutch concentrations are study-reported totals, not recomputed from particles. (5) This study’s samples are discrete pumped samples from small, episodic rivers; the Dutch samples come from large perennial rivers. (6) W2 is the primary comparison and W1 is secondary.</p>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb13"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> (<span class="sc">!</span><span class="fu">is.null</span>(rivm_rng_state)) <span class="fu">assign</span>(<span class="st">".Random.seed"</span>, rivm_rng_state, <span class="at">envir =</span> <span class="fu">globalenv</span>())</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</div>
+</section>
+
+</main>
+<!-- /main column -->
+<script id="quarto-html-after-body" type="application/javascript">
+  window.document.addEventListener("DOMContentLoaded", function (event) {
+    const icon = "";
+    const anchorJS = new window.AnchorJS();
+    anchorJS.options = {
+      placement: 'right',
+      icon: icon
+    };
+    anchorJS.add('.anchored');
+    const isCodeAnnotation = (el) => {
+      for (const clz of el.classList) {
+        if (clz.startsWith('code-annotation-')) {                     
+          return true;
+        }
+      }
+      return false;
+    }
+    const onCopySuccess = function(e) {
+      // button target
+      const button = e.trigger;
+      // don't keep focus
+      button.blur();
+      // flash "checked"
+      button.classList.add('code-copy-button-checked');
+      var currentTitle = button.getAttribute("title");
+      button.setAttribute("title", "Copied!");
+      let tooltip;
+      if (window.bootstrap) {
+        button.setAttribute("data-bs-toggle", "tooltip");
+        button.setAttribute("data-bs-placement", "left");
+        button.setAttribute("data-bs-title", "Copied!");
+        tooltip = new bootstrap.Tooltip(button, 
+          { trigger: "manual", 
+            customClass: "code-copy-button-tooltip",
+            offset: [0, -8]});
+        tooltip.show();    
+      }
+      setTimeout(function() {
+        if (tooltip) {
+          tooltip.hide();
+          button.removeAttribute("data-bs-title");
+          button.removeAttribute("data-bs-toggle");
+          button.removeAttribute("data-bs-placement");
+        }
+        button.setAttribute("title", currentTitle);
+        button.classList.remove('code-copy-button-checked');
+      }, 1000);
+      // clear code selection
+      e.clearSelection();
+    }
+    const getTextToCopy = function(trigger) {
+      const outerScaffold = trigger.parentElement.cloneNode(true);
+      const codeEl = outerScaffold.querySelector('code');
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+    }
+    const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+      text: getTextToCopy
+    });
+    clipboard.on('success', onCopySuccess);
+    if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+      const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+        text: getTextToCopy,
+        container: window.document.getElementById('quarto-embedded-source-code-modal')
+      });
+      clipboardModal.on('success', onCopySuccess);
+    }
+      var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+      var mailtoRegex = new RegExp(/^mailto:/);
+        var filterRegex = new RegExp('/' + window.location.host + '/');
+      var isInternal = (href) => {
+          return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+      }
+      // Inspect non-navigation links and adorn them if external
+     var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+      for (var i=0; i<links.length; i++) {
+        const link = links[i];
+        if (!isInternal(link.href)) {
+          // undo the damage that might have been done by quarto-nav.js in the case of
+          // links that we want to consider external
+          if (link.dataset.originalHref !== undefined) {
+            link.href = link.dataset.originalHref;
+          }
+        }
+      }
+    function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+      const config = {
+        allowHTML: true,
+        maxWidth: 500,
+        delay: 100,
+        arrow: false,
+        appendTo: function(el) {
+            return el.parentElement;
+        },
+        interactive: true,
+        interactiveBorder: 10,
+        theme: 'quarto',
+        placement: 'bottom-start',
+      };
+      if (contentFn) {
+        config.content = contentFn;
+      }
+      if (onTriggerFn) {
+        config.onTrigger = onTriggerFn;
+      }
+      if (onUntriggerFn) {
+        config.onUntrigger = onUntriggerFn;
+      }
+      window.tippy(el, config); 
+    }
+    const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+    for (var i=0; i<noterefs.length; i++) {
+      const ref = noterefs[i];
+      tippyHover(ref, function() {
+        // use id or data attribute instead here
+        let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+        try { href = new URL(href).hash; } catch {}
+        const id = href.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note) {
+          return note.innerHTML;
+        } else {
+          return "";
+        }
+      });
+    }
+    const xrefs = window.document.querySelectorAll('a.quarto-xref');
+    const processXRef = (id, note) => {
+      // Strip column container classes
+      const stripColumnClz = (el) => {
+        el.classList.remove("page-full", "page-columns");
+        if (el.children) {
+          for (const child of el.children) {
+            stripColumnClz(child);
+          }
+        }
+      }
+      stripColumnClz(note)
+      if (id === null || id.startsWith('sec-')) {
+        // Special case sections, only their first couple elements
+        const container = document.createElement("div");
+        if (note.children && note.children.length > 2) {
+          container.appendChild(note.children[0].cloneNode(true));
+          for (let i = 1; i < note.children.length; i++) {
+            const child = note.children[i];
+            if (child.tagName === "P" && child.innerText === "") {
+              continue;
+            } else {
+              container.appendChild(child.cloneNode(true));
+              break;
+            }
+          }
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(container);
+          }
+          return container.innerHTML
+        } else {
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(note);
+          }
+          return note.innerHTML;
+        }
+      } else {
+        // Remove any anchor links if they are present
+        const anchorLink = note.querySelector('a.anchorjs-link');
+        if (anchorLink) {
+          anchorLink.remove();
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        if (note.classList.contains("callout")) {
+          return note.outerHTML;
+        } else {
+          return note.innerHTML;
+        }
+      }
+    }
+    for (var i=0; i<xrefs.length; i++) {
+      const xref = xrefs[i];
+      tippyHover(xref, undefined, function(instance) {
+        instance.disable();
+        let url = xref.getAttribute('href');
+        let hash = undefined; 
+        if (url.startsWith('#')) {
+          hash = url;
+        } else {
+          try { hash = new URL(url).hash; } catch {}
+        }
+        if (hash) {
+          const id = hash.replace(/^#\/?/, "");
+          const note = window.document.getElementById(id);
+          if (note !== null) {
+            try {
+              const html = processXRef(id, note.cloneNode(true));
+              instance.setContent(html);
+            } finally {
+              instance.enable();
+              instance.show();
+            }
+          } else {
+            // See if we can fetch this
+            fetch(url.split('#')[0])
+            .then(res => res.text())
+            .then(html => {
+              const parser = new DOMParser();
+              const htmlDoc = parser.parseFromString(html, "text/html");
+              const note = htmlDoc.getElementById(id);
+              if (note !== null) {
+                const html = processXRef(id, note);
+                instance.setContent(html);
+              } 
+            }).finally(() => {
+              instance.enable();
+              instance.show();
+            });
+          }
+        } else {
+          // See if we can fetch a full url (with no hash to target)
+          // This is a special case and we should probably do some content thinning / targeting
+          fetch(url)
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.querySelector('main.content');
+            if (note !== null) {
+              // This should only happen for chapter cross references
+              // (since there is no id in the URL)
+              // remove the first header
+              if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+                note.children[0].remove();
+              }
+              const html = processXRef(null, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      }, function(instance) {
+      });
+    }
+        let selectedAnnoteEl;
+        const selectorForAnnotation = ( cell, annotation) => {
+          let cellAttr = 'data-code-cell="' + cell + '"';
+          let lineAttr = 'data-code-annotation="' +  annotation + '"';
+          const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+          return selector;
+        }
+        const selectCodeLines = (annoteEl) => {
+          const doc = window.document;
+          const targetCell = annoteEl.getAttribute("data-target-cell");
+          const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+          const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+          const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+          const lineIds = lines.map((line) => {
+            return targetCell + "-" + line;
+          })
+          let top = null;
+          let height = null;
+          let parent = null;
+          if (lineIds.length > 0) {
+              //compute the position of the single el (top and bottom and make a div)
+              const el = window.document.getElementById(lineIds[0]);
+              top = el.offsetTop;
+              height = el.offsetHeight;
+              parent = el.parentElement.parentElement;
+            if (lineIds.length > 1) {
+              const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+              const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+              height = bottom - top;
+            }
+            if (top !== null && height !== null && parent !== null) {
+              // cook up a div (if necessary) and position it 
+              let div = window.document.getElementById("code-annotation-line-highlight");
+              if (div === null) {
+                div = window.document.createElement("div");
+                div.setAttribute("id", "code-annotation-line-highlight");
+                div.style.position = 'absolute';
+                parent.appendChild(div);
+              }
+              div.style.top = top - 2 + "px";
+              div.style.height = height + 4 + "px";
+              div.style.left = 0;
+              let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+              if (gutterDiv === null) {
+                gutterDiv = window.document.createElement("div");
+                gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+                gutterDiv.style.position = 'absolute';
+                const codeCell = window.document.getElementById(targetCell);
+                const gutter = codeCell.querySelector('.code-annotation-gutter');
+                gutter.appendChild(gutterDiv);
+              }
+              gutterDiv.style.top = top - 2 + "px";
+              gutterDiv.style.height = height + 4 + "px";
+            }
+            selectedAnnoteEl = annoteEl;
+          }
+        };
+        const unselectCodeLines = () => {
+          const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+          elementsIds.forEach((elId) => {
+            const div = window.document.getElementById(elId);
+            if (div) {
+              div.remove();
+            }
+          });
+          selectedAnnoteEl = undefined;
+        };
+          // Handle positioning of the toggle
+      window.addEventListener(
+        "resize",
+        throttle(() => {
+          elRect = undefined;
+          if (selectedAnnoteEl) {
+            selectCodeLines(selectedAnnoteEl);
+          }
+        }, 10)
+      );
+      function throttle(fn, ms) {
+      let throttle = false;
+      let timer;
+        return (...args) => {
+          if(!throttle) { // first call gets through
+              fn.apply(this, args);
+              throttle = true;
+          } else { // all the others get throttled
+              if(timer) clearTimeout(timer); // cancel #2
+              timer = setTimeout(() => {
+                fn.apply(this, args);
+                timer = throttle = false;
+              }, ms);
+          }
+        };
+      }
+        // Attach click handler to the DT
+        const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+        for (const annoteDlNode of annoteDls) {
+          annoteDlNode.addEventListener('click', (event) => {
+            const clickedEl = event.target;
+            if (clickedEl !== selectedAnnoteEl) {
+              unselectCodeLines();
+              const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+              if (activeEl) {
+                activeEl.classList.remove('code-annotation-active');
+              }
+              selectCodeLines(clickedEl);
+              clickedEl.classList.add('code-annotation-active');
+            } else {
+              // Unselect the line
+              unselectCodeLines();
+              clickedEl.classList.remove('code-annotation-active');
+            }
+          });
+        }
+    const findCites = (el) => {
+      const parentEl = el.parentElement;
+      if (parentEl) {
+        const cites = parentEl.dataset.cites;
+        if (cites) {
+          return {
+            el,
+            cites: cites.split(' ')
+          };
+        } else {
+          return findCites(el.parentElement)
+        }
+      } else {
+        return undefined;
+      }
+    };
+    var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+    for (var i=0; i<bibliorefs.length; i++) {
+      const ref = bibliorefs[i];
+      const citeInfo = findCites(ref);
+      if (citeInfo) {
+        tippyHover(citeInfo.el, function() {
+          var popup = window.document.createElement('div');
+          citeInfo.cites.forEach(function(cite) {
+            var citeDiv = window.document.createElement('div');
+            citeDiv.classList.add('hanging-indent');
+            citeDiv.classList.add('csl-entry');
+            var biblioDiv = window.document.getElementById('ref-' + cite);
+            if (biblioDiv) {
+              citeDiv.innerHTML = biblioDiv.innerHTML;
+            }
+            popup.appendChild(citeDiv);
+          });
+          return popup.innerHTML;
+        });
+      }
+    }
+  });
+  </script>
+</div> <!-- /content -->
+
+
+
+
+</body></html>

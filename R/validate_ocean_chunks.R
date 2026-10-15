@@ -29,6 +29,7 @@ raw_particles <- readRDS("data_input/Part_dets_comb.rds") |>
     bad_spectra
   ) |>
   mutate(
+    Client_ID_MSSupdate = sub("_[0-9]+$", "", Client_ID_MSSupdate),
     date_raw = str_extract(Client_ID_MSSupdate, "\\d{8}"),
     date     = ymd(date_raw),
     shape    = case_when(aspect_ratio >= 3 ~ "fiber", TRUE ~ "fragment"),
@@ -87,27 +88,31 @@ cat("Ocean All volume: a_cpsd =", round(cpsd_fit_volume_ocean$a_cpsd,3), "\n")
 
 # ── ocean-monitoring ──────────────────────────────────────────────────────────
 cat("\n== ocean-monitoring chunk ==\n")
-monitoring_ocean <- readRDS("data_input/Part_dets_summ.rds") |>
+monitoring_ocean <- readRDS("data_input/Part_dets_summ_final.rds") |>
   dplyr::filter(sample_type=="ocean water", material_simple=="plastic", sample_or_blank=="sample") |>
   dplyr::mutate(
     date_raw      = stringr::str_extract(Client_ID_MSSupdate, "\\d{8}"),
     date          = lubridate::ymd(date_raw),
     sample_id     = Client_ID_MSSupdate,
-    C_measured_pL = extrap_conc_PPL,
-    Lmin_measured_um = 50,
-    Lmax_measured_um = 500
+    C_reported_pL = extrap_conc_PPL,
+    C_measured_pL = C_reported_pL,
+    Lmin_reported_um = 50,
+    Lmax_reported_um = 500,
+    Lmin_measured_um = Lmin_reported_um,
+    Lmax_measured_um = Lmax_reported_um
+  ) |>
+  collapse_to_sample_totals(sum_cols = c("count", "extrap_count", "C_reported_pL", "C_measured_pL")) |>
+  lod_scope_monitoring_concentrations(
+    raw_particles = raw_particles_ocean,
+    reported_conc_col = "C_reported_pL",
+    output_conc_col = "C_measured_pL",
+    cpsd_fit = cpsd_fit_ocean_all
   )
 cat("Ocean monitoring samples:", nrow(monitoring_ocean), "\n")
 cat("Valid C_measured_pL:", sum(is.finite(monitoring_ocean$C_measured_pL) & monitoring_ocean$C_measured_pL > 0), "\n")
 
-monitoring_ocean <- monitoring_ocean |>
-  dplyr::mutate(
-    Lmin_biascorr_um = pmax(Lmin_measured_um, cpsd_fit_ocean_all$lower_lod_um, na.rm=TRUE),
-    Lmax_biascorr_um = pmin(Lmax_measured_um, cpsd_fit_ocean_all$upper_lod_um,  na.rm=TRUE)
-  )
-
-L_meas_min_ocean <- median(monitoring_ocean$Lmin_biascorr_um, na.rm=TRUE)
-L_meas_max_ocean <- median(monitoring_ocean$Lmax_biascorr_um, na.rm=TRUE)
+L_meas_min_ocean <- median(monitoring_ocean$Lmin_measured_um, na.rm=TRUE)
+L_meas_max_ocean <- median(monitoring_ocean$Lmax_measured_um, na.rm=TRUE)
 cat("LOD window for ocean CF:", L_meas_min_ocean, "-", L_meas_max_ocean, "µm\n")
 
 cf_rescale_ocean  <- correction_factor(a=alpha_ocean, L_meas_min=L_meas_min_ocean,

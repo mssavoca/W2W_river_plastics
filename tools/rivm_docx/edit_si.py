@@ -162,22 +162,26 @@ trk.comment_markers(ia, ia, 812)
 # ── PSD numbers and regenerated pipeline figures (psd_rescaling_params.json) ──
 P = vals.PARAMS
 assert P is not None, "run the pipeline first (psd_rescaling_params.json)"
-pooled = P["pooled"]; sw = P["sieve_window"]
+pooled = P["pooled"]; rs = P["rescaling"]
 p56 = find_p("The microplastic concentration associated with the operational 50-500")
 trk.tracked_replace(p56, "-1.920 ± 0.035 SE", [f"{pooled['a_cum']:.3f} ± {pooled['a_cum_SE']:.3f} SE"])
 trk.tracked_replace(p56, "a = -2.92,", [f"a = {pooled['a_diff']:.2f},"])
 trk.tracked_replace(p56, "", [
-    " In the final analysis, each river’s samples were rescaled with that river’s own fitted slope (primary), with slope uncertainty propagated by Monte Carlo "
+    " In the final analysis, each sample’s reported 50-500 µm concentration was first restricted to its river’s C-PSD window (multiplied by the fraction of its QC-passing particles inside that window; zero if none, retained as a non-detect), "
+    "so that concentration and correction factor share the same size interval. Each river’s samples were then rescaled with that river’s own fitted slope (primary), with slope uncertainty propagated by Monte Carlo "
     "(fit standard error plus a structural standard deviation of " + str(P["meta"]["slope_structural_sd"]) + "); the pooled slope above is retained for comparison. "
     "River-specific slopes and rescaled concentrations are given in Table S-A."])
 # Held sentence (G1/G2): annotate rather than change.
 p66 = find_p("The piecewise model produced a substantially smaller correction factor")
-r66 = [r for r in p66.iter(qn("w:r")) if r.find(qn("w:t")) is not None and "22,465" in (r.find(qn("w:t")).text or "")]
+cf_single, cf_two = rs["CF_pooled"][1], rs["CF_two"]
+trk.tracked_replace(p66, "22,465 under the single-slope model to 2,403 under the piecewise model, a 9.3-fold reduction (piecewise/single-slope ratio = 0.107)",
+                    [f"{vals.sig(cf_single, 3)} under the single-slope model to {vals.sig(cf_two, 3)} under the piecewise model, "
+                     f"a {cf_single / cf_two:.1f}-fold reduction (piecewise/single-slope ratio = {cf_two / cf_single:.3f}; pooled C-PSD window, median of the single-slope Monte Carlo)"])
+r66 = [r for r in p66.iter(qn("w:r")) if r.find(qn("w:t")) is not None and "fold reduction" in (r.find(qn("w:t")).text or "")]
 if r66:
     trk.comment_markers(r66[0], r66[0], 813)
-SI_CF_NOTE = ("These are LOD-window (165-385 um) factors from the risk pipeline; the measured-window decision (G1/G2) is on hold. "
-              "On the 50-500 um sieve window used in the main text: single pooled slope CF = %s, two-segment CF = %s."
-              % (vals.sig(sw["CF_single_pooled"], 3), vals.sig(sw["CF_two"], 3)))
+SI_CF_NOTE = ("Updated to the resolved concentration basis: concentrations restricted to the C-PSD window and rescaled from that same window (pooled-window values shown here; "
+              "the main text uses river-specific slopes and windows).")
 
 from PIL import Image
 def swap_image(caption_start, fig_path, cid):
