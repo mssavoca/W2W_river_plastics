@@ -8,11 +8,11 @@ from vals import f, headline, group, sample_medians, CAPS, FIG, fix_citations, P
 src, dst = sys.argv[1], sys.argv[2]
 doc = docx.Document(src)
 body = doc.element.body
-P = [el for el in body if el.tag == qn("w:p")]
+PARAS = [el for el in body if el.tag == qn("w:p")]
 
 
 def find_p(start_text, nth=0):
-    hits = [p for p in P if trk.ptext(p).startswith(start_text)]
+    hits = [p for p in PARAS if trk.ptext(p).startswith(start_text)]
     if len(hits) <= nth:
         raise ValueError("paragraph not found: " + start_text)
     return hits[nth]
@@ -65,7 +65,7 @@ methods_text = [
     "To place our results in context, we compared them with water-based (per-volume) concentrations from Dutch rivers compiled for RIVM report 2026-0069", ("51", SUP),
     ": the Meuse and Dommel, measured by FTIR over 20–5000 µm", ("52,54", SUP),
     ", and the Rhine and Lek canal, measured by LDIR over 10–500 µm", ("53", SUP),
-    ". We used RIVM’s published power-law exponents without refitting, converting each positive exponent α to our differential slope (", ("a", IT), " = −α); these were fitted by maximum likelihood above an estimated lower size limit, a different method from our C-PSD fits. "
+    ". We used RIVM’s published power-law exponents without refitting, converting each positive exponent α to our differential slope (", ("a", IT), " = −α); these were fitted by maximum likelihood above an estimated lower size limit, a different method from our fixed-window fits. "
     "Study-reported total concentrations were rescaled with the correction factor described above, both to our 50–500 µm sieve window (W2), which lies inside every measured range, and to 1–5000 µm (W1). "
     "Uncertainty followed RIVM (triangular α and ±10% size limits), with our own Monte Carlo method as a sensitivity. "
     "Rubber, which our polymer library lacks, was retained as reported and excluded in a sensitivity analysis.",
@@ -89,7 +89,7 @@ new = [
     "Across the four rivers, our differential slopes had a median of ", f("slope_ours_rivers"),
     ", compared with medians of ", f("slope_dutch_FTIR_waterbodies"), " for FTIR and ",
     f("slope_dutch_LDIR_waterbodies"), " for LDIR fits to Dutch river water", ("51", SUP),
-    " (Fig. 8). Because the Dutch slopes were fitted by maximum likelihood above an estimated lower size limit rather than by C-PSD, this comparison is indicative only. "
+    " (Fig. 8). The Dutch slopes were fitted by maximum likelihood above an estimated lower size limit, with no upper bound; in our data that estimator was steepened by the shortage of large particles described above, so this comparison is indicative only. "
     "These water-column data differ from particle-resolved µFTIR measurements of Dutch river suspended solids (per mass of sediment), whose site-mean slopes ranged from −3.89 to −3.19; our fragment slope (",
     ("a", IT), " = " + frag_txt + ") " + frag_rel,
 ]
@@ -100,12 +100,11 @@ conc = [
     "Rescaled to our 50–500 µm sieve window, which requires only interior rescaling for every dataset, Dutch river water measured over 20–5000 µm (FTIR) or 10–500 µm (LDIR) had medians of ",
     f("dutch_Meuse_published_W2"), " (Meuse), ", f("dutch_Dommel_published_W2"), " (Dommel), ",
     f("dutch_Rhine_published_W2"), " (Rhine) and ", f("dutch_Lekcanal_published_W2"),
-    " (Lek canal) particles m⁻³, versus ", f("ours_allrivers_river_W2"), " particles m⁻³ measured here (Fig. 7a). "
+    " (Lek canal) particles m⁻³, versus ", f("ours_allrivers_river_W2"), " particles m⁻³ measured here (Fig. 7a). ",
     w2_phrase + "with two LDIR samples per water body and different analytical techniques, these differences should not be generalized. "
     "Extrapolated to 1–5000 µm, Dutch medians ranged from ", headline("dutch_%s_published_W1" % key_of[w1_min_g]), " (", name_of[w1_min_g], ") to ",
     headline("dutch_%s_published_W1" % key_of[w1_max_g]), " (", name_of[w1_max_g], ") particles m⁻³, versus ",
-    headline("ours_allrivers_river_W1"), " with each river’s own single slope (", headline("ours_allrivers_pooled_W1"), " with one pooled slope) and ", headline("ours_allrivers_piecewise_W1"),
-    " under the two-segment model (Fig. 7b). These W1 differences are dominated by the fitted slopes, which were estimated with different methods and fitting windows, "
+    headline("ours_allrivers_river_W1"), " with each river’s own fixed-window slope (Fig. 7b). These W1 differences are dominated by the fitted slopes, which were estimated with different methods and fitting windows, "
     "and by differences between large perennial and small episodic rivers; they should therefore be read as model-based contrasts rather than differences in true abundance "
     "(Supporting Information, Table S-A and Figs. S-A to S-C).",
 ]
@@ -167,6 +166,14 @@ refs = [
      ("Water Research", IT), " ", ("2021", {"bold": True}), ", ", ("192", IT), ", 116852. https://doi.org/10.1016/j.watres.2021.116852."],
     ["(54)\t", "Mintenig, S. M.; Hunnestad, A.; Koelmans, A. A. ", ("Microplastics in het oppervlaktewater van de Dommel", IT),
      "; Wageningen University & Research, 2025."],
+    ["(55)\t", "Aban, I. B.; Meerschaert, M. M.; Panorska, A. K. Parameter Estimation for the Truncated Pareto Distribution. ",
+     ("Journal of the American Statistical Association", IT), " ", ("2006", {"bold": True}), ", ", ("101", IT), " (473), 270–277. https://doi.org/10.1198/016214505000000411."],
+    ["(56)\t", "Deluca, A.; Corral, Á. Fitting and Goodness-of-Fit Test of Non-Truncated and Truncated Power-Law Distributions. ",
+     ("Acta Geophysica", IT), " ", ("2013", {"bold": True}), ", ", ("61", IT), " (6), 1351–1394. https://doi.org/10.2478/s11600-013-0154-9."],
+    ["(57)\t", "Clauset, A.; Shalizi, C. R.; Newman, M. E. J. Power-Law Distributions in Empirical Data. ",
+     ("SIAM Review", IT), " ", ("2009", {"bold": True}), ", ", ("51", IT), " (4), 661–703. https://doi.org/10.1137/070710111."],
+    ["(58)\t", "Edwards, A. M.; Robinson, J. P. W.; Plank, M. J.; Baum, J. K.; Blanchard, J. L. Testing and Recommending Methods for Fitting Size Spectra to Data. ",
+     ("Methods in Ecology and Evolution", IT), " ", ("2017", {"bold": True}), ", ", ("8", IT), " (1), 57–67. https://doi.org/10.1111/2041-210X.12641."],
 ]
 anchor = p_fld_end
 first_ref = None
@@ -205,36 +212,62 @@ r01 = [r for r in p_abs.iter(qn("w:r")) if (r.find(qn("w:t")) is not None and "0
 if r01:
     trk.comment_markers(r01[0], r01[0], 801)
 
-# Methods: river-specific rescaling, MC uncertainty, pooled LOD window
+# Methods: slope estimator (fixed-window truncated maximum likelihood; C-PSD as comparison)
+win_lo, win_hi = P["meta"]["headline_length_window_um"]
+assert P["meta"]["slope_estimator"] == "tpl_mle", "headline estimator changed; update the Methods wording"
+p_psd = find_p("Microplastic PSDs were characterized using a power-law framework")
+trk.tracked_replace(p_psd,
+    "Length-based cumulative particle-size distributions (C-PSDs) were constructed following Segur et al. (2026) by fitting the cumulative number of particles greater than or equal to a given particle length [N(≥L)] as a function of particle length (L) in log-log space using binned count data. "
+    "This approach reduces the bin-width bias associated with conventional bin-normalized PSD fitting. "
+    "Lower and upper size limits for fitting were determined using the C-PSD limit-of-detection procedure of ref.25, which identifies the approximately linear portion of each distribution while excluding size ranges affected by incomplete detection of small particles or insufficient sampling of rare large particles.",
+    [f"The differential power-law slope (", ("a", IT), f") was estimated by maximum likelihood from the individual particle lengths, for a power law truncated at both ends of a fixed {win_lo:.0f}–{win_hi:.0f} µm window",
+     ("55,56", SUP), ". Maximum likelihood on individual measurements is the most accurate and precise estimator of a power-law exponent, whereas least-squares fits to binned counts are biased",
+     ("57,58", SUP), ". The window was set from detection rather than fitted: particles of at least 100 µm are reliably detected by our µFTIR system, and 500 µm is the sieve boundary above which large particles were undercounted in three rivers (Results). "
+     "Cumulative particle-size distributions (C-PSDs) were also fitted following ref.25, using its limit-of-detection procedure, for comparison with published slopes. "
+     "In three rivers the C-PSD slopes were steeper because each cumulative point also counts the undercounted particles above the window; in simulations with a known slope, the fixed-window maximum-likelihood estimator was unbiased with large or small particles undercounted, whereas the C-PSD fit became too steep (Supporting Information)."])
+
+# Methods: river-specific rescaling, MC uncertainty, fixed fit window
 p_cf = find_p("To estimate microplastic concentrations across the full 1-5000")
-trk.tracked_replace(p_cf, "and empirically measured (50-500 µm) size ranges", ["and the C-PSD fitting (LOD) window of each river"])
+trk.tracked_replace(p_cf, "and empirically measured (50-500 µm) size ranges", [f"and the {win_lo:.0f}–{win_hi:.0f} µm fitting window"])
 trk.tracked_replace(p_cf, "multiplied by the empirical 50-500 µm concentration.",
-                    ["multiplied by the concentration within that window. That concentration was obtained by multiplying each sample’s reported 50-500 µm concentration by the fraction of its QC-passing particles lying inside the window, "
+                    ["multiplied by the concentration within that window. That concentration was rebuilt from each sample’s quality-controlled particles lying inside the window (see Spectral quality control and particle accounting), "
                      "so that the concentration and the correction factor refer to the same size interval; samples with no particle inside the window were retained as non-detects (zero)."])
 trk.tracked_replace(p_cf, "Uncertainty in the extrapolated concentration was estimated by propagating the 95% confidence interval of the fitted differential PSD slope through the same integration.",
                     ["Because slopes differed significantly among rivers (Results), each river’s samples were rescaled with that river’s own fitted slope; the pooled slope and a two-segment model are reported for comparison. "
                      "Slope uncertainty was propagated by Monte Carlo sampling of each fitted slope (fit standard error plus a structural standard deviation of " + str(P["meta"]["slope_structural_sd"]) + ")."])
 lo, hi = pooled["window_LOD_um"]
 trk.tracked_replace(p_cf, "The 165-385 µm limit-of-detection (LOD) window was used to estimate the power-law slope and does not represent the empirical concentration interval; the latter was defined operationally by the 50- and 500-µm sampling sieves.",
-                    [f"The 50- and 500-µm sampling sieves define the reported concentration, whereas the C-PSD window ({lo:.0f}-{hi:.0f} µm for the pooled fit; river-specific windows in the Supporting Information) defines the size interval over which both the concentration and the power-law slope are empirically supported."])
+                    [f"The 50- and 500-µm sampling sieves define the reported concentration, whereas the fixed {lo:.0f}-{hi:.0f} µm fitting window defines the size interval over which both the concentration and the power-law slope are empirically supported."])
 
-# Results: pooled / shape slopes
+# Results: pooled / shape slopes (differential slopes a from the fixed-window MLE; a′ = a + 1 in the original cumulative convention)
 p71 = find_p("As in numerous other studies, our microplastic abundance")
 fr, fi = P["fragment"], P["fiber"]
-for old, new in [("-1.920 ± 0.035 SE, R² = 0.988", f"{d3(pooled['a_cum'])} ± {d3(pooled['a_cum_SE'])} SE, R² = {d3(pooled['R2'])}"),
-                 ("-2.739 ± 0.038, R² = 0.993", f"{d3(fr['a_cum'])} ± {d3(fr['a_cum_SE'])}, R² = {d3(fr['R2'])}"),
-                 ("-1.671 ± 0.046, R² = 0.970", f"{d3(fi['a_cum'])} ± {d3(fi['a_cum_SE'])}, R² = {d3(fi['R2'])}"),
+nw = lambda x: f"n = {int(x['n_window']):,} particles in the window"
+trk.tracked_replace(p71, "pooled river-water C-PSDs were well described by power-law relationships", ["pooled river-water particle-size distributions were well described by power-law relationships"])
+for old, new in [("-1.920 ± 0.035 SE, R² = 0.988", f"{d3(pooled['a_cum'])} ± {d3(pooled['a_cum_SE'])} SE, {nw(pooled)}"),
+                 ("-2.739 ± 0.038, R² = 0.993", f"{d3(fr['a_cum'])} ± {d3(fr['a_cum_SE'])}, {nw(fr)}"),
+                 ("-1.671 ± 0.046, R² = 0.970", f"{d3(fi['a_cum'])} ± {d3(fi['a_cum_SE'])}, {nw(fi)}"),
                  ("(a = -3.74)", f"(a = {fr['a_diff']:.2f})"), ("(a = -2.67)", f"(a = {fi['a_diff']:.2f})")]:
     if old.replace(" ", "") != new.replace(" ", ""):
         trk.tracked_replace(p71, old, [new])
+trk.tracked_replace(p71, "fragments exhibited a substantially steeper C-PSD slope", ["fragments exhibited a substantially steeper slope"])
 
 # Results: river slopes and heterogeneity
 rv = sorted(br.items(), key=lambda kv: -kv[1]["a_cum"])     # shallowest first
 fmt_r = lambda kv: f"{d3(kv[1]['a_cum'])} ± {d3(kv[1]['a_cum_SE'])} in the {kv[0]} River"
+trk.tracked_replace(p72, "River-specific C-PSD slopes ranged from", ["River-specific slopes ranged from"])
 trk.tracked_replace(p72, "-1.493 ± 0.068 in the Salinas River and -1.503 ± 0.074 in the Carmel River to -1.975 ± 0.050 in the San Lorenzo River and -2.711 ± 0.063 in the Pajaro River",
                     [f"{fmt_r(rv[0])} and {fmt_r(rv[1])} to {fmt_r(rv[2])} and {fmt_r(rv[3])}"])
 trk.tracked_replace(p72, " = 227.4, ", [f" = {het['Q']:.1f}, "])
 trk.tracked_replace(p72, " = 98.7%)", [f" = {het['i2']:.1f}%)"])
+# Estimator comparison (C-PSD vs fixed-window MLE), numbers from the Section 13.7 export
+smr = {r["river"]: r for r in P["slope_methods"]["per_river"]}
+deficit = sorted([r for r, v in smr.items() if v["tail_ratio"] < 0.8])
+trk.tracked_replace(p72, "indicating pronounced differences among watersheds in the relative abundance of small versus large microplastics.",
+    ["indicating pronounced differences among watersheds in the relative abundance of small versus large microplastics. "
+     "C-PSD fits gave steeper slopes for " + ", ".join(f"{r} ({smr[r]['cpsd_segur'] + 1:.2f})" for r in deficit[:-1]) + f" and {deficit[-1]} ({smr[deficit[-1]]['cpsd_segur'] + 1:.2f}), "
+     f"because these rivers held only {100 * min(smr[r]['tail_ratio'] for r in deficit):.0f}–{100 * max(smr[r]['tail_ratio'] for r in deficit):.0f}% of the particles above 500 µm expected from the power law, "
+     "and every cumulative point also counts those particles; subtracting field-blank particles did not remove the difference (Supporting Information)."])
 
 # Results: extrapolation paragraph
 p73 = find_p("The steep river-water PSD indicates")
@@ -242,13 +275,13 @@ cf_r = {r: cfm(v) for r, v in rs["CF_by_river"].items()}
 trk.tracked_replace(p73,
     "Using the pooled differential PSD slope (a = -2.920 ± 0.035 SE), integration of the fitted power law yielded a correction factor of approximately 1,850 from the 50-500 µm fraction to the full 1-5000 µm range. "
     "Applying this correction to the empirically measured mean concentration of 0.33 particles L⁻¹ yielded a model-derived estimate of approximately 600 microplastics L⁻¹ (slope-derived 95% CI: 460–790 microplastics L⁻¹) across 1-5000 µm.",
-    ["Because slopes differed among rivers, each river’s C-PSD-window concentrations (median " + f"{Wlod['median_L']:.2f}" + " particles L⁻¹; " + str(rs["n_nondetect_river_window"]) + " non-detects) were rescaled with that river’s own fitted differential slope, giving median correction factors from the C-PSD window to the full 1-5000 µm range of "
+    [f"Because slopes differed among rivers, each river’s {win_lo:.0f}–{win_hi:.0f} µm concentrations (median " + f"{Wlod['median_L']:.2f}" + " particles L⁻¹; " + str(rs["n_nondetect_river_window"]) + " non-detects) were rescaled with that river’s own fitted differential slope, giving median correction factors from the fitting window to the full 1-5000 µm range of "
      + ", ".join(f"{cf3(cf_r[r])} ({r})" for r in sorted(cf_r))
-     + f"; the pooled slope (a = {pooled['a_diff']:.3f} ± {pooled['a_diff_SE']:.3f} SE) over the pooled window gives {cf3(cfm(rs['CF_pooled']))}. "
+     + f"; the pooled slope (a = {pooled['a_diff']:.3f} ± {pooled['a_diff_SE']:.3f} SE) gives {cf3(cfm(rs['CF_pooled']))}. "
      f"Applied to the per-sample concentrations, this yielded a model-derived median of approximately {sigL(W1r['median_L'])} microplastics L⁻¹ "
      f"(IQR {sigL(W1r['q25_L'])}–{sigL(W1r['q75_L'])}; n = {W1r['n']}) across 1-5000 µm, compared with {sigL(W1p['median_L'])} microplastics L⁻¹ using the pooled slope."])
 trk.tracked_replace(p73, "The fitted slope was estimated over the empirically supported 165-385 µm C-PSD window",
-                    [f"The fitted slopes and concentrations were both restricted to each river’s empirically supported C-PSD window ({lo:.0f}-{hi:.0f} µm for the pooled fit)"])
+                    [f"The fitted slopes and concentrations were both restricted to the empirically supported {lo:.0f}-{hi:.0f} µm window"])
 trk.tracked_replace(p73, "(ΔAIC = -44.0)",
                     [f"(ΔAIC = {two['dAIC']:.1f}; breakpoint {two['breakpoint_um']:.0f} µm; differential slopes {two['a_fine_diff']:.2f} below and {two['a_coarse_diff']:.2f} above), "
                      f"giving a correction factor of {cf3(rs['CF_two'])} and a median of {sigL(W1t['median_L'])} microplastics L⁻¹ ({rs['ratio_W1_pooled_over_two']:.1f}-fold lower than with the pooled single slope on the same window)"])
@@ -280,6 +313,10 @@ def swap_image(caption_start, fig_path, cid):
     runs = [r for r in pcap.iter(qn("w:r")) if r.find(qn("w:t")) is not None]
     trk.comment_markers(runs[0], runs[0], cid)
 swap_image("Fig. 6. C-PSD particle length fits", os.path.join(FIG, "cpsd_river_length_facet_plot.png"), 804)
+p_fig6c = find_p("Fig. 6. C-PSD particle length fits")
+trk.tracked_replace(p_fig6c, "Data within valid LOD windows have darker opacity than points outside the windows. Regression lines drawn only within valid LOD ranges.",
+                    [f"Points are cumulative counts; points inside the {win_lo:.0f}–{win_hi:.0f} µm fitting window are darker. Lines are power laws fitted by maximum likelihood within that window, with 95% confidence bands."])
+trk.tracked_replace(p_fig6c, "C-PSD particle length fits", ["Power-law particle length fits"])
 
 doc.save(dst)
 print("methods words:", n_words)

@@ -116,12 +116,16 @@ mpsb_params$D3 <- list(stage_counts = mpsb_stage_counts)
 ### D4. Tier 1: slopes by shape
 
 ```{r mpsb-d4, fig.width=10, fig.height=5}
+# MPsizeBase slopes are C-PSD fits, so the like-for-like comparison uses this
+# study's C-PSD fits; the headline fixed-window MLE slopes are shown alongside.
 our_ocean_slopes <- tibble::tibble(
   shape = c("all", "fragment", "fiber"),
-  fit = list(cpsd_fit_ocean_all, cpsd_fit_ocean_frag, cpsd_fit_ocean_fiber)) |>
+  fit = list(cpsd_fit_ocean_all_cpsd, cpsd_fit_ocean_frag_cpsd, cpsd_fit_ocean_fiber_cpsd)) |>
   dplyr::mutate(a_psd = vapply(fit, `[[`, numeric(1), "a_psd"), se = vapply(fit, `[[`, numeric(1), "se_a_psd"),
                 window = vapply(fit, function(f) sprintf("%.0f–%.0f µm", f$lower_lod_um, f$upper_lod_um), character(1))) |>
-  dplyr::select(-fit)
+  dplyr::select(-fit) |>
+  dplyr::mutate(a_psd_mle = c(cpsd_fit_ocean_all$a_psd, cpsd_fit_ocean_frag$a_psd, cpsd_fit_ocean_fiber$a_psd),
+                se_mle = c(cpsd_fit_ocean_all$se_a_psd, cpsd_fit_ocean_frag$se_a_psd, cpsd_fit_ocean_fiber$se_a_psd))
 boot_ci <- function(x, seed) { if (length(x) < 3) return(c(NA, NA))
   b <- withr::with_seed(seed, replicate(2000, stats::median(sample(x, replace = TRUE)))); stats::quantile(b, c(.025, .975), names = FALSE) }
 mpsb_slope_tbl <- dplyr::bind_rows(lapply(c("fragment", "fiber"), function(sh) {
@@ -136,10 +140,11 @@ mpsb_slope_tbl <- dplyr::bind_rows(lapply(c("fragment", "fiber"), function(sh) {
                    boot_ci_lo = ci[1], boot_ci_hi = ci[2],
                    ours = our_ocean_slopes$a_psd[our_ocean_slopes$shape == sh],
                    ours_window = our_ocean_slopes$window[our_ocean_slopes$shape == sh],
+                   ours_headline_mle = our_ocean_slopes$a_psd_mle[our_ocean_slopes$shape == sh],
                    mann_whitney_p_descriptive = if (length(x) >= 3) stats::wilcox.test(x, mu = our_ocean_slopes$a_psd[our_ocean_slopes$shape == sh], exact = FALSE)$p.value else NA_real_)
   }))
 }))
-knitr::kable(mpsb_slope_tbl, digits = 3, caption = "D4: MPsizeBase ocean a_psd by shape vs this study's ocean fit (one-sample Wilcoxon p is descriptive only). MPsizeBase windows vary by PSD; the cleanest subset is LOD covers 165-385 µm.")
+knitr::kable(mpsb_slope_tbl, digits = 3, caption = "D4: MPsizeBase ocean a_psd by shape vs this study's ocean C-PSD fit (like-for-like) and headline fixed-window MLE slope (one-sample Wilcoxon p, against the C-PSD value, is descriptive only). MPsizeBase windows vary by PSD; the cleanest subset is LOD covers 165-385 µm.")
 
 mpsb_fig1 <- ggplot2::ggplot(dplyr::filter(mpsb_inclusion, included_slope), ggplot2::aes(x = shape, y = a_psd)) +
   ggplot2::geom_boxplot(outlier.shape = NA, fill = "#009E73", alpha = 0.15, color = "#009E73") +
@@ -150,10 +155,12 @@ mpsb_fig1 <- ggplot2::ggplot(dplyr::filter(mpsb_inclusion, included_slope), ggpl
                          ggplot2::aes(x = shape, ymin = a_psd - 1.96 * se, ymax = a_psd + 1.96 * se), inherit.aes = FALSE, width = 0.1) +
   ggplot2::geom_text(data = dplyr::filter(our_ocean_slopes, shape != "all"), ggplot2::aes(x = shape, y = a_psd, label = window),
                      inherit.aes = FALSE, nudge_x = 0.32, size = 3.2) +
+  ggplot2::geom_point(data = dplyr::filter(our_ocean_slopes, shape != "all"), ggplot2::aes(x = shape, y = a_psd_mle),
+                      inherit.aes = FALSE, color = "#D55E00", size = 3.5, shape = 4, stroke = 1.4) +
   ggplot2::scale_shape_manual(values = c(`TRUE` = 16, `FALSE` = 1), name = "LOD covers 165-385 µm") +
   ggplot2::labs(x = NULL, y = expression(italic(a)[psd]),
                 title = "Ocean-water C-PSD slopes by shape: MPsizeBase vs this study",
-                subtitle = stringr::str_wrap("Green = MPsizeBase PSDs passing D3 filters (filled = LOD covers 165-385 µm); black diamond = this study's ocean fit (95% CI), labelled with its fit window", 90)) +
+                subtitle = stringr::str_wrap("Green = MPsizeBase PSDs passing D3 filters (filled = LOD covers 165-385 µm); black diamond = this study's ocean C-PSD fit (like-for-like with MPsizeBase; 95% CI, labelled with its fit window); orange cross = this study's headline fixed-window MLE slope (100-500 µm)", 100)) +
   ggplot2::theme_minimal(base_size = 14) + ggplot2::theme(legend.position = "bottom")
 ggplot2::ggsave(mpsb_fig1, filename = "figures/mpsizebase_fig1_slopes_by_shape.png", width = 10, height = 5, dpi = 300)
 mpsb_fig1

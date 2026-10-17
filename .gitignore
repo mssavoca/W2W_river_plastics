@@ -17,3 +17,6 @@
 # data_input/external/rivm/derived/ are committed. See
 # data_input/external/rivm/PROVENANCE.md for how to re-fetch.
 data_input/external/rivm/MicroplasticsERA_water/
+
+# render logs
+data_output/render_*.log

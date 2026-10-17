@@ -8,7 +8,7 @@ End-to-end, fully probabilistic environmental risk assessment (ERA) workflow for
 
 This repository implements a five-step probabilistic workflow:
 
-1. **C-PSD fitting** — fit cumulative particle size distributions (C-PSD) to individual particle measurements using the Segur et al. (2026) two-step LOD detection algorithm (Python, called via `reticulate`).
+1. **Power-law slope estimation** — estimate each matrix's particle-size slope by maximum likelihood on the individual particle lengths, using a power law truncated to a fixed 100–500 µm window (`tpl_mle()`, `as_headline_fit()`). The window runs from the reliable µFTIR detection limit to the 500 µm size-fraction boundary, above which three rivers have too few large particles. The cumulative-PSD (C-PSD) fit of Segur et al. (2026), with its two-step LOD algorithm (Python, called via `reticulate`), is kept for literature/MPsizeBase comparison and as a full exposure-and-risk sensitivity. Report Section 13.7 explains the choice with a literature review, per-river estimator table, simulation and figures (`setup`: `slope_estimator`, `headline_length_window`).
 2. **Concentration rescaling** — use the fitted power-law slope (α) to rescale monitoring concentrations from a sampled size range to a target range, propagating slope uncertainty via Monte Carlo ([Coffin et al. 2022](https://doi.org/10.1016/j.scitotenv.2022.155859)).
 3. **Environmental Exposure Distribution (EED)** — nonparametric bootstrap of corrected site-level concentrations.
 4. **Hazard threshold distribution** — probabilistic species sensitivity distributions (pSSD++) via the [PSSDplusplus R package](https://github.com/ScottCoffin/ToMEx2.0_EcoToxRisk/tree/main/package) using the [ToMEx 2.0 toxicity database](https://github.com/ScottCoffin/ToMEx2.0_EcoToxRisk).
@@ -76,7 +76,11 @@ install.packages(c(
   "sensitivity", "rmarkdown", "reticulate", "knitr"
 ))
 
-# PSSDplusplus (GitHub)
+# PSSDplusplus (GitHub). Version 0.3.5 or later is required: earlier versions ignore the
+# x1D_set/x2D_set size bounds in MC_sim_align_parallel() (ToMEx2.0_EcoToxRisk#5), which the
+# floor sensitivity, the M2 decomposition and the upper-size sensitivity depend on.
+# If install_github() fails to download the tarball, sparse-clone the repo and run
+# R CMD INSTALL on its package/ folder.
 devtools::install_github(
   "ScottCoffin/ToMEx2.0_EcoToxRisk",
   subdir = "package",
@@ -183,7 +187,10 @@ All functions carry roxygen2-style documentation for future integration into PSS
 
 | Function | Purpose |
 |---|---|
-| `fit_cpsd_segur_r(x_um, bin_um, fit_range_um)` | Bin particles, call Python LOD algorithm, return power-law fit |
+| `fit_cpsd_segur_r(x_um, bin_um, fit_range_um)` | Bin particles, call Python LOD algorithm, return C-PSD power-law fit |
+| `tpl_mle(x, lo, hi)` | Maximum-likelihood slope of a power law truncated to [lo, hi), with SE from the observed information |
+| `as_headline_fit(fit, x, window)` | Replace a C-PSD fit's slope and window with the fixed-window MLE (C-PSD values kept in `$cpsd`) |
+| `fit_curve_logN(fit, L)` | Fitted N(≥L) curve and 95% band for plotting either estimator |
 | `volume_particle(shape, length_um, width_um, height_um)` | Vectorized particle volume (fragment = ellipsoid, fiber = cylinder) |
 | `bootstrap_aspect_ratio(aspect_ratio_vec, n_boot)` | Bootstrap median 1/AR for width estimation |
 | `alpha_dist(mu, sd, n, lower, upper)` | Truncated normal draws of power-law slope |

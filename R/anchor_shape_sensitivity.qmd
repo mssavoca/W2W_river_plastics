@@ -13,7 +13,7 @@ share_below_10 <- function(a) (1 - 10^(a + 1)) / (1 - 5000^(a + 1))
 
 ### S-A. Dual anchor: LOD-anchored (production) vs sieve-anchored
 
-Arm A is the production monitoring table: the C-PSD-window concentration with each river's own LOD window. Arm B anchors the same samples at the nominal 50–500 µm sieve window with the reported concentration. Both arms use the identical river-specific slope draws (`alpha_by_river`). The diagnostic compares the in-window fraction the river's power law predicts, (L₂^(a+1) − L₁^(a+1)) / (500^(a+1) − 50^(a+1)), with the observed `lod_particle_fraction`.
+Arm A is the production monitoring table: the concentration within the headline fit window (100–500 µm). Arm B anchors the same samples at the nominal 50–500 µm sieve window with the reported concentration. Both arms use the identical river-specific slope draws (`alpha_by_river`). The diagnostic compares the in-window fraction the river's power law predicts, (L₂^(a+1) − L₁^(a+1)) / (500^(a+1) − 50^(a+1)), with the observed `lod_particle_fraction`.
 
 ```{r anchor-sa}
 anchor_B_mon <- monitoring |>
@@ -87,10 +87,10 @@ anchor_params$S_B <- list(table = anchor_sb_tbl, pooled_fraction = anchor_pooled
 
 ### S-C. Shape-stratified rescaling (sensitivity bracket, not a competing estimate)
 
-Each shape's in-window concentration is that shape's QC-passing particle count inside the shape's own LOD window, times the sample's per-particle concentration (`C_reported_pL / count`). So the shapes sum to an all-shape total on the same basis as production. Shape slopes and LOD windows come from the pooled river fragment and fiber fits (`cpsd_fits_river_length`). Per-river × shape fits are reported for validity only. Slopes are drawn independently per shape with `slope_structural_sd`, and also in a fully correlated case (shared quantiles). Shapes are summed per sample before `bootstrap_eed()`. Following Segur et al. (2026), the power law is assumed to hold down to 1 µm; they note that log-normal behaviour below ~20 µm may need revisiting as better 1–20 µm data become available.
+Each shape's in-window concentration is that shape's QC-passing particle count inside the shape's own LOD window, times the sample's per-particle concentration (`C_reported_pL / count`). So the shapes sum to an all-shape total on the same basis as production. Shape slopes come from the pooled river fragment and fiber fits (headline fixed-window MLE, both on the same length window). Per-river × shape fits are reported for validity only. Slopes are drawn independently per shape with `slope_structural_sd`, and also in a fully correlated case (shared quantiles). Shapes are summed per sample before `bootstrap_eed()`. Following Segur et al. (2026), the power law is assumed to hold down to 1 µm; they note that log-normal behaviour below ~20 µm may need revisiting as better 1–20 µm data become available.
 
 ```{r anchor-sc}
-shape_fits <- list(fragment = cpsd_fits_river_length$fragment, fiber = cpsd_fits_river_length$fiber)
+shape_fits <- list(fragment = cpsd_fit_frag, fiber = cpsd_fit_fiber)   # headline fixed-window MLE fits
 shape_valid <- dplyr::bind_rows(lapply(names(cpsd_loc_shape_length), function(r) dplyr::bind_rows(lapply(c("fragment", "fiber"), function(sh) {
   f <- cpsd_loc_shape_length[[r]][[sh]]
   tibble::tibble(river = r, shape = sh, valid = isTRUE(f$valid),
@@ -159,13 +159,13 @@ The fragment slope is much steeper than the fiber slope, so the fragment CF domi
 ```{r anchor-sd}
 anchor_sd_tbl <- tibble::tribble(
   ~quantity, ~anchor, ~slope_source, ~window_um, ~CF_median, ~W1_median_L,
-  "Production W1 (headline)", "LOD window, particle-rebuilt concentration", "each river's own C-PSD slope", "river-specific LOD windows",
+  "Production W1 (headline)", "LOD window, particle-rebuilt concentration", "each river's own headline slope (fixed-window MLE)", "100–500 (fixed)",
     stats::median(combined_cf), stats::median(C_sample_median$C_corr_med),
   "Pooled-slope W1 (sensitivity)", "pooled LOD window, particle-rebuilt", "pooled river slope", sprintf("%.0f–%.0f", L_meas_min_use, L_meas_max_use),
     stats::median(combined_cf_pooled), stats::median(C_sample_median_pooled$C_corr_med),
   "Two-segment W1 (sensitivity)", "pooled LOD window, particle-rebuilt", "pooled two-segment fit", sprintf("%.0f–%.0f", L_meas_min_use, L_meas_max_use),
     pw_river$cf_piecewise, stats::median(monitoring_pooled_scope$C_measured_pL * pw_river$cf_piecewise),
-  "Sieve-anchored W1 (S-A arm B)", "50–500 µm sieve, reported concentration", "each river's own C-PSD slope", "50–500",
+  "Sieve-anchored W1 (S-A arm B)", "50–500 µm sieve, reported concentration", "each river's own headline slope (fixed-window MLE)", "50–500",
     stats::median(anchor_B$combined_cf), stats::median(anchor_B$C_sample_median$C_corr_med),
   "Nominal diagnostic CF (Section 10.2)", "50–500 µm nominal", "pooled river slope", "50–500",
     stats::median(correction_factor(alpha, 50, 500, 1, 5000, slope_convention = "differential")), NA_real_,
@@ -178,16 +178,16 @@ anchor_params$S_D <- anchor_sd_tbl
 
 ### Part C. Slope-SE realism: particle-level bootstrap per river
 
-OLS standard errors on cumulative counts are probably too small, because adjacent cumulative bins are not independent. Each river's particles are resampled and the full Segur LOD algorithm is refit (`r if (is_production_budget) 1000 else 100` replicates; 1,000 at the production budget). Cochran's Q and I² are recomputed with the bootstrap SEs.
+The headline slope SEs come from the observed Fisher information of the truncated power-law likelihood. As a check, each river's particles are resampled and the fixed-window MLE is refit (`r if (is_production_budget) 1000 else 100` replicates; 1,000 at the production budget). Cochran's Q and I² are recomputed with the bootstrap SEs.
 
 ```{r slope-bootstrap-se, cache=TRUE, cache.extra=list(n_boot, raw_data_cache_key)}
 slope_boot_reps <- if (is_production_budget) 1000 else 100
 slope_boot <- dplyr::bind_rows(lapply(names(cpsd_fits_by_loc), function(r) {
   x <- raw_particles_river$length_um[raw_particles_river$sample_location == r]
   a <- withr::with_seed(13700 + match(r, names(cpsd_fits_by_loc)), vapply(seq_len(slope_boot_reps), function(i) {
-    tryCatch(fit_cpsd_segur_r(sample(x, replace = TRUE), bin_um = 5)$a_cpsd, error = function(e) NA_real_)
+    tryCatch(tpl_mle(sample(x, replace = TRUE), cpsd_fits_by_loc[[r]]$lower_lod_um, cpsd_fits_by_loc[[r]]$upper_lod_um)[["a_psd"]] + 1, error = function(e) NA_real_)
   }, numeric(1)))
-  tibble::tibble(river = r, a_cpsd = cpsd_fits_by_loc[[r]]$a_cpsd, se_ols = cpsd_fits_by_loc[[r]]$se_a_cpsd,
+  tibble::tibble(river = r, a_cpsd = cpsd_fits_by_loc[[r]]$a_cpsd, se_info = cpsd_fits_by_loc[[r]]$se_a_cpsd,
                  se_boot = stats::sd(a, na.rm = TRUE), boot_ci_lo = stats::quantile(a, 0.025, na.rm = TRUE),
                  boot_ci_hi = stats::quantile(a, 0.975, na.rm = TRUE), n_failed = sum(is.na(a)), reps = slope_boot_reps)
 }))
@@ -195,9 +195,9 @@ slope_boot <- dplyr::bind_rows(lapply(names(cpsd_fits_by_loc), function(r) {
 
 ```{r slope-bootstrap-se-table}
 slope_het_boot <- slope_heterogeneity_test(slope_boot$a_cpsd, slope_boot$se_boot, slope_boot$river)
-knitr::kable(dplyr::mutate(slope_boot, se_ratio_boot_over_ols = se_boot / se_ols), digits = 3,
-  caption = "Per-river C-PSD slope: OLS SE vs particle-level bootstrap SE (full LOD algorithm refit per replicate)")
-cat(sprintf("Cochran's Q with OLS SEs: Q(%d) = %.2f, p = %.3g, I2 = %.1f%%\nCochran's Q with bootstrap SEs: Q(%d) = %.2f, p = %.3g, I2 = %.1f%%\n",
+knitr::kable(dplyr::mutate(slope_boot, se_ratio_boot_over_info = se_boot / se_info), digits = 3,
+  caption = "Per-river headline slope: SE from the observed information vs particle-level bootstrap SE (fixed-window MLE refit per replicate)")
+cat(sprintf("Cochran's Q with information-matrix SEs: Q(%d) = %.2f, p = %.3g, I2 = %.1f%%\nCochran's Q with bootstrap SEs: Q(%d) = %.2f, p = %.3g, I2 = %.1f%%\n",
             river_slope_heterogeneity$df, river_slope_heterogeneity$Q, river_slope_heterogeneity$p_value, river_slope_heterogeneity$i2,
             slope_het_boot$df, slope_het_boot$Q, slope_het_boot$p_value, slope_het_boot$i2))
 anchor_params$slope_bootstrap <- list(table = slope_boot,

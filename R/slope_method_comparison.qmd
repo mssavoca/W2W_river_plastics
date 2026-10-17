@@ -1,6 +1,6 @@
 ## 13.7 Power-law slope estimation: method robustness and a per-river comparison
 
-The rescaled 1–5000 µm concentrations, and therefore the risk quotients, depend steeply on the fitted power-law slope. For the steepest rivers, more than 99% of the rescaled count comes from extrapolation below 10 µm. This section asks which slope estimator the literature considers most reliable, and compares the estimators on each river's particle data. It also checks whether the steep slopes found for Pajaro and Salinas reflect the rivers or the estimator. Production results are unchanged; the alternative-slope run at the end is a labelled sensitivity. This child saves and restores the global RNG state.
+The rescaled 1–5000 µm concentrations, and therefore the risk quotients, depend steeply on the fitted power-law slope. For the steepest rivers, more than 99% of the rescaled count comes from extrapolation below 10 µm. This section asks which slope estimator the literature considers most reliable, and compares the estimators on each river's particle data. It also checks whether the steep slopes found for Pajaro and Salinas reflect the rivers or the estimator. Since 2026-10-15 the fixed-window MLE recommended here is the production (headline) estimator for all matrices (Section 4.2.1.0). This section documents why, and reruns the former C-PSD production as a sensitivity. This child saves and restores the global RNG state.
 
 ### What the literature recommends
 
@@ -11,7 +11,7 @@ The rescaled 1–5000 µm concentrations, and therefore the risk quotients, depe
 - **Upper truncation needs an explicitly bounded model.** The standard Clauset et al. (2009) procedure estimates only a lower bound (xmin) and can fail when the distribution is truncated at the top ([Deluca & Corral 2013](https://doi.org/10.2478/s11600-013-0154-9)). For data inside a known window, the appropriate model is the doubly truncated power law (truncated Pareto). Its parameters have consistent maximum likelihood estimators ([Aban et al. 2006](https://doi.org/10.1198/016214505000000411)), and Edwards et al. (2017) recommend MLE for this bounded power law.
 - **The window must be set independently of the slope being estimated.** The truncated MLE is unbiased only for a window chosen in advance. Reusing a window that an algorithm selected because the data look straight there (as the Segur positive-residual step does) introduces selection bias. The simulation below shows this directly.
 
-**Implication for this study.** We have the individual particle measurements, so the literature's reference method applies directly: MLE on unbinned data, bounded at both ends because the upper tail is incomplete. We set the window from detection considerations, not from the data. The lower bound is 100 µm, where µFTIR detection at 25 µm pixels becomes reliable (four pixels across; Section 10.2). The upper bound is 500 µm, the sieve boundary above which large particles are undercounted (below). The **doubly truncated power-law MLE on 100–500 µm** is the most defensible estimator for these data. The C-PSD fit remains the production default for continuity with Segur et al. (2026) and MPsizeBase. The table below shows where the two diverge, and the sensitivity run shows what the divergence means for risk.
+**Implication for this study.** We have the individual particle measurements, so the literature's reference method applies directly: MLE on unbinned data, bounded at both ends because the upper tail is incomplete. We set the window from detection considerations, not from the data. The lower bound is 100 µm, where µFTIR detection at 25 µm pixels becomes reliable (four pixels across; Section 10.2). The upper bound is 500 µm, the sieve boundary above which large particles are undercounted (below). The **doubly truncated power-law MLE on 100–500 µm** is the most defensible estimator for these data, and it is the headline estimator for river, ocean and sand. Length slopes use the 100–500 µm window; area and volume slopes, used for hazard alignment, use the windows implied by it. The C-PSD fits are kept for comparison with Segur et al. (2026) and MPsizeBase (Appendix B; SI Tables S7–S8). The table below shows where the two estimators diverge, and the sensitivity run shows what the divergence means for risk.
 
 ### Per-river comparison of estimators
 
@@ -20,15 +20,7 @@ slope_rng_state <- if (exists(".Random.seed", envir = globalenv())) get(".Random
 slope_method_params <- list()
 mle_window <- c(100, 500)   # detection-based fixed window (Section 10.2; 500 um sieve boundary)
 
-# Doubly truncated power-law MLE on [lo, hi): pdf ~ x^(-alpha), alpha > 1; returns
-# the differential slope a_psd = -alpha and its SE from the observed information.
-tpl_mle <- function(x, lo, hi) {
-  x <- x[x >= lo & x < hi]
-  nll <- function(al) { k <- (1 - al) / (hi^(1 - al) - lo^(1 - al)); -sum(log(k) - al * log(x)) }
-  al <- stats::optimize(nll, c(1.01, 8))$minimum
-  h <- (nll(al + 1e-4) - 2 * nll(al) + nll(al - 1e-4)) / 1e-8
-  c(a_psd = -al, se = sqrt(1 / h), n = length(x))
-}
+# tpl_mle() (doubly truncated power-law MLE) is in R/mp_risk_utils.R.
 # Bin-normalised (BN-PSD) regression inside the window, 5 um bins.
 bn_psd_slope <- function(x, lo, hi, bw = 5) {
   b <- seq(floor(lo / bw) * bw, ceiling(hi / bw) * bw, by = bw)
@@ -47,8 +39,9 @@ n_field_blanks <- dplyr::n_distinct(blank_qc_len$Client_ID_MSSupdate)
 slope_method_tbl <- dplyr::bind_rows(lapply(names(cpsd_fits_by_loc), function(rr) {
   sub <- raw_particles_river[raw_particles_river$sample_location == rr, ]
   x <- sub$length_um
-  f <- cpsd_fits_by_loc[[rr]]; lo <- f$lower_lod_um; hi <- f$upper_lod_um
+  f <- cpsd_fits_by_loc_cpsd[[rr]]; lo <- f$lower_lod_um; hi <- f$upper_lod_um   # C-PSD fit and its Segur LOD window
   tf <- tpl_mle(x, mle_window[1], mle_window[2]); tw <- tpl_mle(x, lo, hi)
+  stopifnot(abs(tf[["a_psd"]] - cpsd_fits_by_loc[[rr]]$a_psd) < 1e-8)   # equals the headline fit
   pl <- poweRlaw::conpl$new(x[x <= 5000]); est <- poweRlaw::estimate_xmin(pl); pl$setXmin(est)
   # Blank subtraction on the 5 um grid: remove the expected field-blank particles
   # (mean blank histogram x number of samples), then redo the C-PSD regression in the same window.
@@ -80,7 +73,7 @@ knitr::kable(
   slope_method_tbl |> dplyr::select(river, n_particles, window_um, cpsd_segur, tpl_mle_fixed, tpl_mle_fixed_se, tpl_mle_segur_window,
                                     bn_psd_window, mle_xmin_poweRlaw, mle_xmin_um, cpsd_blank_subtracted, tail_ratio),
   digits = 2,
-  col.names = c("River", "n", "Segur LOD window (µm)", "C-PSD (Segur, production)", "Truncated MLE, 100–500 µm (recommended)", "± SE",
+  col.names = c("River", "n", "Segur LOD window (µm)", "C-PSD (Segur; former production)", "Truncated MLE, 100–500 µm (headline)", "± SE",
                 "Truncated MLE, Segur window", "BN-PSD, Segur window", "MLE above xmin (poweRlaw)", "xmin (µm)",
                 "C-PSD, blank-subtracted", "Particles above window: observed / expected"),
   caption = "Differential slope a_psd by estimator for each river. Tail ratio < 1 means fewer particles above the C-PSD window than the 100-500 µm power law predicts.")
@@ -93,7 +86,7 @@ deficit_rivers <- slope_method_tbl$river[slope_method_tbl$tail_ratio < 0.8]
 The table answers three questions.
 
 - **Do estimators agree?** For San Lorenzo, whose C-PSD window ends at `r slope_method_tbl$window_um[slope_method_tbl$river == "San Lorenzo"]` µm, the C-PSD and recommended MLE slopes differ by `r sprintf("%.2f", abs(cpsd_minus_mle[["San Lorenzo"]]))`. For `r paste(deficit_rivers, collapse = ", ")`, the C-PSD slope is `r sprintf("%.2f", abs(max(cpsd_minus_mle[deficit_rivers])))` to `r sprintf("%.2f", abs(min(cpsd_minus_mle[deficit_rivers])))` steeper than the truncated MLE on 100–500 µm.
-- **Why do they disagree?** Above each of those C-PSD windows, which end near the 500 µm sieve boundary, there are only `r round(min(slope_method_tbl$tail_ratio[slope_method_tbl$river %in% deficit_rivers]), 2)`–`r round(max(slope_method_tbl$tail_ratio[slope_method_tbl$river %in% deficit_rivers]), 2)` times as many particles as the 100–500 µm power law predicts. This is the right-tail slump described by Segur et al. (2026): the cumulative counts inside the window inherit the deficit, and the fitted slope steepens. The xmin-only MLE (poweRlaw, the method behind the Kooi et al. 2021 and RIVM slopes) fits the same deficient tail above xmin and is steep for the same reason.
+- **Why do they disagree?** Above each of those C-PSD windows, which end near the 500 µm sieve boundary, there are only `r round(min(slope_method_tbl$tail_ratio[slope_method_tbl$river %in% deficit_rivers]), 2)`–`r round(max(slope_method_tbl$tail_ratio[slope_method_tbl$river %in% deficit_rivers]), 2)` times as many particles as the 100–500 µm power law predicts. This is the right-tail slump described by Segur et al. (2026): the cumulative counts inside the window inherit the deficit, and the fitted slope steepens (see the observed-vs-fitted tail figure after the sensitivity table, `figures/slope_tail_deficit.png`). The xmin-only MLE (poweRlaw, the method behind the Kooi et al. 2021 and RIVM slopes) fits the same deficient tail above xmin and is steep for the same reason.
 - **Is contamination the cause?** No. Subtracting the expected field-blank particles from each river's size bins moves the C-PSD slope by `r sprintf("%+.2f", min(slope_method_tbl$cpsd_blank_subtracted - slope_method_tbl$cpsd_segur))` to `r sprintf("%+.2f", max(slope_method_tbl$cpsd_blank_subtracted - slope_method_tbl$cpsd_segur))`, a small shallowing. Blank particles are not smaller than river particles. Contamination inflates the concentrations (Section 4.2.2.1) but does not explain the steep slopes.
 
 ### Simulation: estimator behaviour under incomplete detection
@@ -139,71 +132,67 @@ Results:
 - **The C-PSD fit becomes too steep when large particles are undercounted** (bias `r sprintf("%+.2f", sim_bias(sim_cases[2], "C-PSD (Segur)"))`). The xmin-only MLE is also pulled steeper (`r sprintf("%+.2f", sim_bias(sim_cases[2], "MLE above xmin (poweRlaw)"))`).
 - **The truncated MLE on the window chosen by the Segur algorithm is biased shallow even with complete detection** (`r sprintf("%+.2f", sim_bias(sim_cases[1], "Truncated MLE, Segur window"))`). That window is selected from the data, often at sparse large sizes. This is why the recommended estimator uses a window set in advance.
 
-### Sensitivity: exposure and risk with the fixed-window MLE slopes
+### Sensitivity: exposure and risk with the former C-PSD slopes
 
-The production run is repeated with each river's 100–500 µm truncated-MLE slope. The concentration anchor uses the same 100–500 µm window, so the concentration and the correction factor describe the same particles. Monitoring concentrations are re-scoped to that window with the production concentration basis. The structural slope uncertainty (`slope_structural_sd`) and Monte Carlo budget are unchanged. Under the ALIGNMENT RULE, each river's hazard is re-derived with the same slope draws that rescale its exposure; area and volume slopes are unchanged. This is a sensitivity, not the headline.
+Since 2026-10-15 the headline uses the fixed-window MLE slopes. Here the river assessment is rerun with the former production setup. Each river's C-PSD slope is used with its own Segur LOD window, monitoring concentrations are re-scoped to those windows, and the C-PSD area and volume slopes are used for hazard alignment. Under the ALIGNMENT RULE, each river's hazard is re-derived with the same C-PSD slope draws that rescale its exposure. The structural slope uncertainty (`slope_structural_sd`), concentration basis and Monte Carlo budget are unchanged.
 
 ```{r slope-methods-sensitivity, cache=TRUE, cache.extra=list(n_boot, n_mc, slope_structural_sd, raw_data_cache_key)}
-mle_fits_by_loc <- lapply(stats::setNames(names(cpsd_fits_by_loc), names(cpsd_fits_by_loc)), function(rr) {
-  row <- slope_method_tbl[slope_method_tbl$river == rr, ]
-  list(a_psd = row$tpl_mle_fixed, se_a_psd = row$tpl_mle_fixed_se, lower_lod_um = mle_window[1], upper_lod_um = mle_window[2])
-})
-mle_pooled_fit <- list(lower_lod_um = mle_window[1], upper_lod_um = mle_window[2])
-monitoring_mle <- lod_scope_monitoring_concentrations(
+monitoring_cpsd_alt <- lod_scope_monitoring_concentrations(
   monitoring = dplyr::select(monitoring, -dplyr::any_of(lod_scope_added_cols)),
   raw_particles = raw_particles_river, reported_conc_col = "C_reported_pL", output_conc_col = "C_measured_pL",
-  cpsd_fit = mle_pooled_fit, group_col = "river", cpsd_fit_by_group = mle_fits_by_loc,
+  cpsd_fit = cpsd_fit_all_cpsd, group_col = "river", cpsd_fit_by_group = cpsd_fits_by_loc_cpsd,
   concentration_basis = concentration_basis)
-alpha_by_river_mle <- alpha_draws_by_group(mle_fits_by_loc, n = n_mc, structural_sd = slope_structural_sd, seed = 8101)
-mle_corr <- withr::with_seed(9101, correct_and_bootstrap_eed(
-  monitoring = monitoring_mle, conc_col = "C_measured_pL", cpsd_fit = mle_pooled_fit, alpha_draws = alpha,
+alpha_by_river_cpsd <- alpha_draws_by_group(cpsd_fits_by_loc_cpsd, n = n_mc, structural_sd = slope_structural_sd, seed = 8101)
+cpsd_alt_corr <- withr::with_seed(9101, correct_and_bootstrap_eed(
+  monitoring = monitoring_cpsd_alt, conc_col = "C_measured_pL", cpsd_fit = cpsd_fit_all_cpsd, alpha_draws = alpha,
   L_tar_min = 1, L_tar_max = 5000, n_draws = 3000, n_boot = n_boot, probs = c(0.5, 0.95),
-  slope_convention = "differential", group_col = "river", cpsd_fit_by_group = mle_fits_by_loc,
-  alpha_draws_by_group = alpha_by_river_mle))
-mle_csm <- mle_corr$C_sample_median |> dplyr::left_join(dplyr::distinct(monitoring_mle, sample_id, river), by = "sample_id")
-mle_hazards <- stats::setNames(lapply(seq_along(river_names), function(i) {
+  slope_convention = "differential", group_col = "river", cpsd_fit_by_group = cpsd_fits_by_loc_cpsd,
+  alpha_draws_by_group = alpha_by_river_cpsd))
+cpsd_alt_csm <- cpsd_alt_corr$C_sample_median |> dplyr::left_join(dplyr::distinct(monitoring_cpsd_alt, sample_id, river), by = "sample_id")
+cpsd_alt_hazards <- stats::setNames(lapply(seq_along(river_names), function(i) {
   r <- river_names[i]
   aligned_freshwater_hazard(
-    tox_data = tox_data, alpha_draws = alpha_by_river_mle[[r]],
+    tox_data = tox_data, alpha_draws = alpha_by_river_cpsd[[r]],
     aspect_ratio_vec = raw_particles_river$aspect_ratio[raw_particles_river$sample_location == r],
-    fit_volume = cpsd_loc_shape_vol[[r]]$all, fit_area = cpsd_loc_shape_area[[r]]$all,
-    n = n_boot, seed = 5100 + 10 * i, psd_key = paste0("river:mle:", r))$haz
+    fit_volume = cpsd_loc_shape_vol_cpsd[[r]]$all, fit_area = cpsd_loc_shape_area_cpsd[[r]]$all,
+    n = n_boot, seed = 5100 + 10 * i, psd_key = paste0("river:cpsd:", r))$haz
 }), river_names)
-mle_eed_by_river <- stats::setNames(lapply(river_names, function(r) withr::with_seed(9121 + match(r, river_names),
-  bootstrap_eed(mle_csm$C_corr_med[mle_csm$river == r], n_boot = n_boot, probs = c(0.5, 0.95)))), river_names)
-mle_risk_draws <- draw_rq_aligned(mle_hazards,
-  stats::setNames(lapply(river_names, function(r) with_psd_key(mle_eed_by_river[[r]]$q50, paste0("river:mle:", r))), river_names),
+cpsd_alt_eed_by_river <- stats::setNames(lapply(river_names, function(r) withr::with_seed(9121 + match(r, river_names),
+  bootstrap_eed(cpsd_alt_csm$C_corr_med[cpsd_alt_csm$river == r], n_boot = n_boot, probs = c(0.5, 0.95)))), river_names)
+cpsd_alt_risk_draws <- draw_rq_aligned(cpsd_alt_hazards,
+  stats::setNames(lapply(river_names, function(r) with_psd_key(cpsd_alt_eed_by_river[[r]]$q50, paste0("river:cpsd:", r))), river_names),
   n_risk = n_risk, seed = 9300)
 ```
 
 ```{r slope-methods-sensitivity-table}
-mle_cf_tbl <- tibble::tibble(
+estimator_cf_tbl <- tibble::tibble(
   river = river_names,
-  a_psd_cpsd = vapply(river_names, function(r) cpsd_fits_by_loc[[r]]$a_psd, 1),
-  a_psd_mle_100_500 = vapply(river_names, function(r) mle_fits_by_loc[[r]]$a_psd, 1),
-  CF_cpsd = vapply(river_names, function(r) stats::median(combined_cf_by_river[[r]]), 1),
-  CF_mle = vapply(river_names, function(r) stats::median(mle_corr$combined_cf_by_group[[r]]), 1),
-  W1_cpsd = vapply(river_names, function(r) stats::median(C_sample_median$C_corr_med[C_sample_median$river == r]), 1),
-  W1_mle = vapply(river_names, function(r) stats::median(mle_csm$C_corr_med[mle_csm$river == r]), 1))
-knitr::kable(mle_cf_tbl, digits = 2,
-  col.names = c("River", "a_psd, C-PSD", "a_psd, MLE 100–500 µm", "CF, C-PSD (LOD window -> 1–5000 µm)", "CF, MLE (100–500 µm -> 1–5000 µm)",
-                "W1 median, C-PSD (particles/L)", "W1 median, MLE (particles/L)"),
-  caption = "Slope, correction factor (median) and W1 sample median per river: production C-PSD vs fixed-window truncated MLE")
-mle_risk_summary <- summarize_rq(mle_risk_draws)
-mle_risk_compare <- dplyr::bind_rows(
-  dplyr::mutate(risk_summary, slopes = "C-PSD (production)"),
-  dplyr::mutate(mle_risk_summary, slopes = "Truncated MLE, 100–500 µm (sensitivity)")) |>
+  a_psd_mle = vapply(river_names, function(r) cpsd_fits_by_loc[[r]]$a_psd, 1),
+  a_psd_cpsd = vapply(river_names, function(r) cpsd_fits_by_loc_cpsd[[r]]$a_psd, 1),
+  CF_mle = vapply(river_names, function(r) stats::median(combined_cf_by_river[[r]]), 1),
+  CF_cpsd = vapply(river_names, function(r) stats::median(cpsd_alt_corr$combined_cf_by_group[[r]]), 1),
+  W1_mle = vapply(river_names, function(r) stats::median(C_sample_median$C_corr_med[C_sample_median$river == r]), 1),
+  W1_cpsd = vapply(river_names, function(r) stats::median(cpsd_alt_csm$C_corr_med[cpsd_alt_csm$river == r]), 1))
+knitr::kable(estimator_cf_tbl, digits = 2,
+  col.names = c("River", "a_psd, MLE 100–500 µm (headline)", "a_psd, C-PSD", "CF, MLE (100–500 µm -> 1–5000 µm)",
+                "CF, C-PSD (LOD window -> 1–5000 µm)", "W1 median, MLE (particles/L)", "W1 median, C-PSD (particles/L)"),
+  caption = "Slope, correction factor (median) and W1 sample median per river: headline fixed-window MLE vs former C-PSD production")
+cpsd_alt_risk_summary <- summarize_rq(cpsd_alt_risk_draws)
+estimator_risk_compare <- dplyr::bind_rows(
+  dplyr::mutate(risk_summary, slopes = "Fixed-window MLE (headline)"),
+  dplyr::mutate(cpsd_alt_risk_summary, slopes = "C-PSD (former production, sensitivity)")) |>
   dplyr::filter(HCx == 5) |> dplyr::select(slopes, ERM, RQ_p50, RQ_p95, P_exceed)
-knitr::kable(mle_risk_compare, digits = 3,
+knitr::kable(estimator_risk_compare, digits = 3,
   caption = "River HC5 risk quotients (1D, rivers equally weighted, each river's exposure vs its own aligned hazard) under each slope estimator")
-slope_method_params$sensitivity <- list(cf_w1 = mle_cf_tbl, risk = mle_risk_compare,
-  W1_median_all = c(cpsd = stats::median(C_sample_median$C_corr_med), mle = stats::median(mle_csm$C_corr_med)))
-rq_fd <- function(lbl) mle_risk_compare$RQ_p50[mle_risk_compare$slopes == lbl & mle_risk_compare$ERM == "Food Dilution"]
+slope_method_params$sensitivity <- list(cf_w1 = estimator_cf_tbl, risk = estimator_risk_compare,
+  W1_median_all = list(mle = stats::median(C_sample_median$C_corr_med), cpsd = stats::median(cpsd_alt_csm$C_corr_med)))
+rq_fd <- function(lbl) estimator_risk_compare$RQ_p50[estimator_risk_compare$slopes == lbl & estimator_risk_compare$ERM == "Food Dilution"]
 ```
+
 
 ```{r slope-methods-plot, fig.width=10, fig.height=5}
 slope_method_long <- slope_method_tbl |>
-  dplyr::select(river, `C-PSD (Segur, production)` = cpsd_segur, `Truncated MLE, 100–500 µm (recommended)` = tpl_mle_fixed,
+  dplyr::select(river, `C-PSD (Segur; former production)` = cpsd_segur, `Truncated MLE, 100–500 µm (headline)` = tpl_mle_fixed,
                 `Truncated MLE, Segur window` = tpl_mle_segur_window, `BN-PSD, Segur window` = bn_psd_window,
                 `MLE above xmin (poweRlaw)` = mle_xmin_poweRlaw, `C-PSD, blank-subtracted` = cpsd_blank_subtracted) |>
   tidyr::pivot_longer(-river, names_to = "estimator", values_to = "a_psd")
@@ -222,11 +211,107 @@ ggplot2::ggsave(slope_method_plot, filename = "figures/slope_method_comparison.p
 slope_method_plot
 ```
 
+```{r slope-methods-tail-plot, fig.width=13, fig.height=5}
+# Observed N(>= L) vs the power law fitted by the headline estimator, extended
+# above the window: the shortfall above ~500 um is what steepens the C-PSD fit.
+tail_plot_df <- dplyr::bind_rows(lapply(names(cpsd_fits_by_loc), function(rr) {
+  x <- raw_particles_river$length_um[raw_particles_river$sample_location == rr]
+  fc <- cpsd_fits_by_loc_cpsd[[rr]]; lo <- fc$lower_lod_um; hi <- fc$upper_lod_um
+  al <- -cpsd_fits_by_loc[[rr]]$a_psd; n_win <- sum(x >= lo & x < hi)
+  k <- n_win / ((lo^(1 - al) - hi^(1 - al)) / (al - 1))
+  L <- exp(seq(log(50), log(3000), length.out = 120))
+  ratio <- slope_method_tbl$tail_ratio[slope_method_tbl$river == rr]
+  lab <- sprintf("%s\nC-PSD a = %.2f; headline MLE a = %.2f\nabove C-PSD window: %.0f%% of expected", rr, fc$a_psd, -al, 100 * ratio)
+  dplyr::bind_rows(
+    tibble::tibble(river = lab, L = L, N = vapply(L, function(l) sum(x >= l), 1), what = "Observed N(>= L)", lo = lo, hi = hi),
+    tibble::tibble(river = lab, L = L[L >= lo], N = k * (L[L >= lo]^(1 - al) - 5000^(1 - al)) / (al - 1),
+                   what = "Power law with the headline slope", lo = lo, hi = hi))
+}))
+tail_plot_df <- dplyr::filter(tail_plot_df, N > 0)
+slope_tail_plot <- ggplot2::ggplot(tail_plot_df, ggplot2::aes(L, N, color = what, linetype = what)) +
+  ggplot2::geom_rect(data = dplyr::distinct(tail_plot_df, river, lo, hi), ggplot2::aes(xmin = lo, xmax = hi, ymin = 0, ymax = Inf),
+                     inherit.aes = FALSE, fill = "#009E73", alpha = 0.07) +
+  ggplot2::geom_line(linewidth = 0.9) +
+  ggplot2::geom_vline(xintercept = 500, linetype = "dotted", color = "gray40") +
+  ggplot2::facet_wrap(~ river, nrow = 1) +
+  ggplot2::scale_x_log10() + ggplot2::scale_y_log10() +
+  ggplot2::scale_color_manual(values = c("Observed N(>= L)" = "#0072B2", "Power law with the headline slope" = "#D55E00"), name = NULL) +
+  ggplot2::scale_linetype_manual(values = c("Observed N(>= L)" = "solid", "Power law with the headline slope" = "dashed"), name = NULL) +
+  ggplot2::labs(x = "Particle length L (µm, log)", y = "Particles at or above L (log)",
+                title = "Large particles are undercounted above the 500 µm sieve boundary in three rivers",
+                subtitle = "Shaded = Segur C-PSD window; dotted = 500 µm. The shortfall bends the cumulative (C-PSD) fit steeper; the fixed-window MLE is unaffected.") +
+  ggplot2::theme_minimal(base_size = 12) + ggplot2::theme(legend.position = "bottom", strip.text = ggplot2::element_text(size = 9))
+ggplot2::ggsave(slope_tail_plot, filename = "figures/slope_tail_deficit.png", width = 13, height = 5, dpi = 300)
+slope_tail_plot
+```
+
+### Sensitivity: upper size limit of 500 µm instead of 5000 µm
+
+Food dilution is aligned on particle volume, but only over the particles each test species can ingest. In PSSDplusplus the volume term for each toxicity record is integrated from the lower size limit up to the smaller of the species' maximum ingestible size and the upper size limit (`x2M_ingest = min(max.size.ingest.um, x2D_set)`). The upper limit enters a second time through the conversion of the threshold to a particle count over the full size range. So particles larger than 500 µm affect the Food Dilution threshold only for species that can ingest them. In the freshwater toxicity data used here, about half of the records (48%) have a maximum ingestible size above 500 µm, and records without one default to the upper limit. The slope matters through the mean volume of ingestible particles. A shallower slope gives a larger mean volume, which lowers the threshold in particles per litre. This is why the headline Food Dilution risk quotient is higher with the fixed-window MLE slopes than with the C-PSD slopes.
+
+To show this dependence, the river assessment is rerun with the upper size limit set to 500 µm, the top of the fit window, for both the exposure (correction factor to 1–500 µm) and the hazard (pSSD++ alignment over 1–500 µm). Slopes, slope draws, concentration basis and seeds are unchanged; only the upper limit changes. Under the ALIGNMENT RULE, each river's hazard is re-derived with the same slope draws and the same 1–500 µm range as its exposure (`psd_key = "river:x2D500:<river>"`). Tissue Translocation already truncates particles above 500 µm, so it is expected to change little.
+
+**Package requirement.** This sensitivity needs PSSDplusplus 0.3.5 or later (installed: `r as.character(packageVersion("PSSDplusplus"))`). Earlier versions did not pass `x1D_set`/`x2D_set` from `MC_sim_align_parallel()` to `align_data()`, so the hazard was always aligned over 1–5000 µm and this run returned the headline hazards unchanged ([ToMEx2.0_EcoToxRisk#5](https://github.com/ScottCoffin/ToMEx2.0_EcoToxRisk/issues/5), fixed 2026-10-16). The same fix applies the hazard-alignment floor in the M1.2 floor sensitivity and the M2 decomposition.
+
+```{r slope-methods-upper-500, cache=TRUE, cache.extra=list(n_boot, n_mc, slope_structural_sd, raw_data_cache_key, rlang::hash(deparse(run_pssd_pipeline)), as.character(packageVersion("PSSDplusplus")))}
+invisible(gc())   # long production sessions run close to the memory limit
+upper_alt_um <- 500
+up500_corr <- withr::with_seed(9101, correct_and_bootstrap_eed(
+  monitoring = monitoring, conc_col = "C_measured_pL", cpsd_fit = cpsd_fit_all, alpha_draws = alpha,
+  L_tar_min = 1, L_tar_max = upper_alt_um, n_draws = 3000, n_boot = n_boot, probs = c(0.5, 0.95),
+  slope_convention = "differential", group_col = "river", cpsd_fit_by_group = cpsd_fits_by_loc,
+  alpha_draws_by_group = alpha_by_river))
+up500_csm <- up500_corr$C_sample_median |> dplyr::left_join(dplyr::distinct(monitoring, sample_id, river), by = "sample_id")
+up500_hazards <- stats::setNames(lapply(seq_along(river_names), function(i) {
+  r <- river_names[i]
+  aligned_freshwater_hazard(
+    tox_data = tox_data, alpha_draws = alpha_by_river[[r]],
+    aspect_ratio_vec = raw_particles_river$aspect_ratio[raw_particles_river$sample_location == r],
+    fit_volume = cpsd_loc_shape_vol[[r]]$all, fit_area = cpsd_loc_shape_area[[r]]$all,
+    n = n_boot, seed = 5100 + 10 * i, psd_key = paste0("river:x2D500:", r), x2D_set = upper_alt_um)$haz
+}), river_names)
+up500_eed_by_river <- stats::setNames(lapply(river_names, function(r) withr::with_seed(9121 + match(r, river_names),
+  bootstrap_eed(up500_csm$C_corr_med[up500_csm$river == r], n_boot = n_boot, probs = c(0.5, 0.95)))), river_names)
+up500_risk_draws <- draw_rq_aligned(up500_hazards,
+  stats::setNames(lapply(river_names, function(r) with_psd_key(up500_eed_by_river[[r]]$q50, paste0("river:x2D500:", r))), river_names),
+  n_risk = n_risk, seed = 9300)
+```
+
+```{r slope-methods-upper-500-table}
+# Share of the 1-5000 um particle volume carried by particles > 500 um, for a pure power law with each river's slope.
+vol_share_above <- function(a, lo = 1, mid = 500, hi = 5000) {
+  p <- a + 4; if (abs(p) < 1e-9) return(log(hi / mid) / log(hi / lo)); (hi^p - mid^p) / (hi^p - lo^p)
+}
+hc5_med <- function(h, erm) stats::median(h$PNEC[h$HCx == 5 & h$ERM == erm])
+upper_tbl <- tibble::tibble(
+  river = river_names,
+  a_psd = vapply(river_names, function(r) cpsd_fits_by_loc[[r]]$a_psd, 1),
+  vol_share_gt500 = vapply(river_names, function(r) vol_share_above(cpsd_fits_by_loc[[r]]$a_psd), 1),
+  W1_5000 = vapply(river_names, function(r) stats::median(C_sample_median$C_corr_med[C_sample_median$river == r]), 1),
+  W1_500 = vapply(river_names, function(r) stats::median(up500_csm$C_corr_med[up500_csm$river == r]), 1),
+  HC5_FD_5000 = vapply(river_names, function(r) hc5_med(haz_by_river[[r]], "Food Dilution"), 1),
+  HC5_FD_500 = vapply(river_names, function(r) hc5_med(up500_hazards[[r]], "Food Dilution"), 1))
+knitr::kable(upper_tbl, digits = c(0, 2, 2, 1, 1, 2, 2),
+  col.names = c("River", "a_psd (headline)", "Share of 1–5000 µm volume above 500 µm", "Exposure median, 1–5000 µm (/L)",
+                "Exposure median, 1–500 µm (/L)", "FD HC5 median, 1–5000 µm (/L)", "FD HC5 median, 1–500 µm (/L)"),
+  caption = "Upper size limit: exposure and aligned Food Dilution HC5 per river, 1–5000 µm (headline) vs 1–500 µm")
+upper_risk_compare <- dplyr::bind_rows(
+  dplyr::mutate(risk_summary, range = "1–5000 µm (headline)"),
+  dplyr::mutate(summarize_rq(up500_risk_draws), range = "1–500 µm (sensitivity)")) |>
+  dplyr::filter(HCx == 5) |> dplyr::select(range, ERM, RQ_p50, RQ_p95, P_exceed)
+knitr::kable(upper_risk_compare, digits = 3,
+  caption = "River HC5 risk quotients (1D, rivers equally weighted, aligned hazards) with the upper size limit at 5000 µm and at 500 µm")
+slope_method_params$upper_500 <- list(per_river = upper_tbl, risk = upper_risk_compare)
+rq_up <- function(rng, erm) upper_risk_compare$RQ_p50[upper_risk_compare$range == rng & upper_risk_compare$ERM == erm]
+```
+
+For a pure power law with the headline slopes, `r sprintf("%.0f", 100 * min(upper_tbl$vol_share_gt500))`–`r sprintf("%.0f", 100 * max(upper_tbl$vol_share_gt500))`% of each river's 1–5000 µm particle volume would lie above 500 µm; how much of it counts toward the Food Dilution threshold depends on the species' ingestible sizes. Setting the upper limit at 500 µm moves the river Food Dilution HC5 median risk quotient from `r sprintf("%.1f", rq_up("1–5000 µm (headline)", "Food Dilution"))` to `r sprintf("%.1f", rq_up("1–500 µm (sensitivity)", "Food Dilution"))`, and Tissue Translocation from `r sprintf("%.2f", rq_up("1–5000 µm (headline)", "Tissue Translocation"))` to `r sprintf("%.2f", rq_up("1–500 µm (sensitivity)", "Tissue Translocation"))`. The size of this change shows how far the Food Dilution result depends on predicted particles above 500 µm, the size range in which three rivers hold fewer particles than the slope predicts. It should be read alongside the lab's answer on the large-particle shortfall (GitHub issue #10).
+
 ```{r slope-methods-restore-rng, include=FALSE}
 if (!is.null(slope_rng_state)) assign(".Random.seed", slope_rng_state, envir = globalenv())
 ```
 
-**Interpretation.** The slope differences between rivers come largely from the estimator, not from the rivers' particles. The literature's reference estimator for raw size data is MLE, and with an incomplete upper tail it has to be bounded at both ends. The simulation confirms that the fixed-window truncated MLE is the only estimator here that stays close to the true slope whether the large or the small particles are undercounted. On that basis, the C-PSD slopes for `r paste(deficit_rivers, collapse = ", ")` overstate the steepness, and with it the sub-10 µm extrapolation, the 1–5000 µm concentrations and the risk quotients. With the fixed-window MLE slopes, the river Food Dilution HC5 median risk quotient is `r round(rq_fd("Truncated MLE, 100–500 µm (sensitivity)"), 2)`, against `r round(rq_fd("C-PSD (production)"), 2)` in production. Whether the large-particle deficit is a counting artefact (aliquoting or analysis of the >500 µm fraction) is an open question for the analytical lab (GitHub issue #10).
+**Interpretation.** The slope differences between rivers come largely from the estimator, not from the rivers' particles. The literature's reference estimator for raw size data is MLE, and with an incomplete upper tail it has to be bounded at both ends. The simulation confirms that the fixed-window truncated MLE is the only estimator here that stays close to the true slope whether the large or the small particles are undercounted. The former C-PSD slopes for `r paste(deficit_rivers, collapse = ", ")` overstated the steepness, and with it the sub-10 µm extrapolation and the 1–5000 µm particle concentrations. The effect on risk is not one-directional, because the hazard is re-derived with the same slopes. A shallower slope lowers the extrapolated particle count but raises the mean volume of the particles that test species can ingest, which lowers the volume-aligned Food Dilution threshold in particles per litre. With the headline fixed-window MLE slopes, the river Food Dilution HC5 median risk quotient is `r round(rq_fd("Fixed-window MLE (headline)"), 2)`; with the former C-PSD slopes it would be `r round(rq_fd("C-PSD (former production, sensitivity)"), 2)`. The upper-size sensitivity above shows how much of the headline Food Dilution result comes from predicted particles above 500 µm. Whether the large-particle deficit is a counting artefact (aliquoting or analysis of the >500 µm fraction) is an open question for the analytical lab (GitHub issue #10). If the lab confirms that large particles were under-sampled, that supports the fixed window. If the deficit is real, the window still keeps the slope estimate to the size range where the counts are complete.
 
 **References for this section.**
 Aban IB, Meerschaert MM, Panorska AK (2006) Parameter estimation for the truncated Pareto distribution. *J Am Stat Assoc* 101:270–277.

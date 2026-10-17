@@ -34,7 +34,7 @@ RIVM_INPUT_FILES <- c(
 # Okabe-Ito palette; dataset colours used in every benchmark figure.
 OKABE_ITO <- c("#E69F00", "#56B4E9", "#009E73", "#F0E442",
                "#0072B2", "#D55E00", "#CC79A7", "#000000")
-# This study's benchmark uses each river's own single C-PSD slope.
+# This study's benchmark uses each river's own headline slope (fixed-window MLE since 2026-10-15).
 RIVM_OURS_PRIMARY <- "river"
 RIVM_DATASET_COLS <- c("Dutch rivers" = "#0072B2", "This study" = "#D55E00")
 RIVM_TECH_SHAPES  <- c("FTIR" = 21, "LDIR" = 24, "µFTIR" = 22)
@@ -395,7 +395,7 @@ ours_sample_totals <- function(monitoring, conc_col = "C_measured_pL") {
                      n_polymer_rows = dplyr::n(), .groups = "drop")
 }
 
-#' Rescale this study's samples with river-specific C-PSD slopes
+#' Rescale this study's samples with river-specific headline slopes
 #'
 #' @param totals ours_sample_totals() output.
 #' @param river_fits Named list (river -> fit_cpsd_segur_r() output for "all").
@@ -527,8 +527,9 @@ rivm_slope_table <- function(alphas, river_fits, structural_sd = 0.25) {
     tibble::tibble(dataset = "This study", facet = facet, label = label, technique = "µFTIR",
                    a = f$a_psd, ci_lo = f$a_psd - 1.96 * f$se_a_psd, ci_hi = f$a_psd + 1.96 * f$se_a_psd,
                    sd_fit = f$se_a_psd,
-                   fit_window = sprintf("LOD %.0f–%.0f µm", f$lower_lod_um, f$upper_lod_um),
-                   fit_method = "C-PSD OLS in Segur LOD window", value_type = "measured")
+                   fit_window = sprintf("window %.0f–%.0f µm", f$lower_lod_um, f$upper_lod_um),
+                   fit_method = if (identical(f$estimator, "tpl_mle")) "Doubly truncated power-law MLE, fixed window" else "C-PSD OLS in Segur LOD window",
+                   value_type = "measured")
   }
   ours <- dplyr::bind_rows(
     lapply(names(river_fits), function(r) ours_row("This study: by river", r, river_fits[[r]])))
@@ -915,7 +916,7 @@ rivm_bootstrap_pipeline_objects <- function(proj_root, n_mc = 20000, slope_struc
 rivm_caption_common <- function() {
   paste(
     "Slope convention: differential PSD slope a (dN/dL ∝ L^a); RIVM's positive PDF exponent α is converted as a = −α.",
-    "Fitting methods differ: Dutch slopes are poweRlaw maximum-likelihood fits above an estimated xmin to particles ≤ 5000 µm, aggregated per water body and technique (Quik et al. 2026); this study's slopes are C-PSD fits within the Segur et al. (2026) LOD window.",
+    "Fitting methods differ: Dutch slopes are poweRlaw maximum-likelihood fits above an estimated xmin to particles ≤ 5000 µm, aggregated per water body and technique (Quik et al. 2026); this study's slopes are maximum-likelihood fits of a power law truncated at both ends of a fixed 100–500 µm window (the closest like-for-like estimator; the former C-PSD slopes were 0.45–0.9 steeper for three rivers).",
     "Systems differ: large perennial Dutch rivers and a canal (FTIR, Mintenig et al. 2020, 2025; LDIR, Mughini-Gras et al. 2021) versus discrete pumped samples from small, episodic Central Coast rivers (µFTIR).",
     "Dutch concentrations are study-reported totals (authors' blank and subsampling corrections), not recomputed from particles."
   )

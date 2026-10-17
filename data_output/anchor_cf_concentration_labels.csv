@@ -1,0 +1,7 @@
+"quantity","anchor","slope_source","window_um","CF_median","W1_median_L"
+"Production W1 (headline)","LOD window, particle-rebuilt concentration","each river's own headline slope (fixed-window MLE)","100–500 (fixed)",625.881621790232,107.727399887851
+"Pooled-slope W1 (sensitivity)","pooled LOD window, particle-rebuilt","pooled river slope","100–500",685.948531307452,129.13880248252
+"Two-segment W1 (sensitivity)","pooled LOD window, particle-rebuilt","pooled two-segment fit","100–500",1012.6617356551,189.874075435331
+"Sieve-anchored W1 (S-A arm B)","50–500 µm sieve, reported concentration","each river's own headline slope (fixed-window MLE)","50–500",225.700531005085,42.0770005726457
+"Nominal diagnostic CF (Section 10.2)","50–500 µm nominal","pooled river slope","50–500",243.166109500215,NA
+"Shape-stratified W1 (S-C, independent)","shape LOD windows, particle-rebuilt","pooled fragment / fiber slopes","fragment / fiber windows",NA,1632.83640458896

@@ -9,11 +9,11 @@ from vals import CAPS, FIG, fix_citations, AUDIT, SITABLE, PUBCHECK
 src, dst = sys.argv[1], sys.argv[2]
 doc = docx.Document(src)
 body = doc.element.body
-P = [el for el in body if el.tag == qn("w:p")]
+PARAS = [el for el in body if el.tag == qn("w:p")]
 
 
 def find_p(start_text, nth=0):
-    hits = [p for p in P if trk.ptext(p).startswith(start_text)]
+    hits = [p for p in PARAS if trk.ptext(p).startswith(start_text)]
     if len(hits) <= nth:
         raise ValueError("paragraph not found: " + start_text)
     return hits[nth]
@@ -163,11 +163,13 @@ trk.comment_markers(ia, ia, 812)
 P = vals.PARAMS
 assert P is not None, "run the pipeline first (psd_rescaling_params.json)"
 pooled = P["pooled"]; rs = P["rescaling"]
-p56 = find_p("The microplastic concentration associated with the operational 50-500")
+p56 = find_p("Because the same fitted PSD is used in the numerator and denominator")
+win_lo, win_hi = P["meta"]["headline_length_window_um"]
+trk.tracked_replace(p56, "For the pooled river-water C-PSD, the fitted cumulative slope was", [f"For pooled river-water particle lengths, the slope fitted by maximum likelihood on the fixed {win_lo:.0f}–{win_hi:.0f} µm window, in the cumulative convention, was"])
 trk.tracked_replace(p56, "-1.920 ± 0.035 SE", [f"{pooled['a_cum']:.3f} ± {pooled['a_cum_SE']:.3f} SE"])
 trk.tracked_replace(p56, "a = -2.92,", [f"a = {pooled['a_diff']:.2f},"])
 trk.tracked_replace(p56, "", [
-    " In the final analysis, each sample’s reported 50-500 µm concentration was first restricted to its river’s C-PSD window (multiplied by the fraction of its QC-passing particles inside that window; zero if none, retained as a non-detect), "
+    f" In the final analysis, each sample’s concentration within the {win_lo:.0f}–{win_hi:.0f} µm fitting window was rebuilt from its quality-controlled particle records (each scaled by the sample’s aliquot extrapolation factor; zero if none, retained as a non-detect), "
     "so that concentration and correction factor share the same size interval. Each river’s samples were then rescaled with that river’s own fitted slope (primary), with slope uncertainty propagated by Monte Carlo "
     "(fit standard error plus a structural standard deviation of " + str(P["meta"]["slope_structural_sd"]) + "); the pooled slope above is retained for comparison. "
     "River-specific slopes and rescaled concentrations are given in Table S-A."])
@@ -176,12 +178,12 @@ p66 = find_p("The piecewise model produced a substantially smaller correction fa
 cf_single, cf_two = rs["CF_pooled"][1], rs["CF_two"]
 trk.tracked_replace(p66, "22,465 under the single-slope model to 2,403 under the piecewise model, a 9.3-fold reduction (piecewise/single-slope ratio = 0.107)",
                     [f"{vals.sig(cf_single, 3)} under the single-slope model to {vals.sig(cf_two, 3)} under the piecewise model, "
-                     f"a {cf_single / cf_two:.1f}-fold reduction (piecewise/single-slope ratio = {cf_two / cf_single:.3f}; pooled C-PSD window, median of the single-slope Monte Carlo)"])
+                     f"a {cf_single / cf_two:.1f}-fold reduction (piecewise/single-slope ratio = {cf_two / cf_single:.3f}; pooled fitting window, median of the single-slope Monte Carlo)"])
 r66 = [r for r in p66.iter(qn("w:r")) if r.find(qn("w:t")) is not None and "fold reduction" in (r.find(qn("w:t")).text or "")]
 if r66:
     trk.comment_markers(r66[0], r66[0], 813)
-SI_CF_NOTE = ("Updated to the resolved concentration basis: concentrations restricted to the C-PSD window and rescaled from that same window (pooled-window values shown here; "
-              "the main text uses river-specific slopes and windows).")
+SI_CF_NOTE = ("Updated to the resolved concentration basis: concentrations restricted to the fixed fitting window and rescaled from that same window (pooled-slope values shown here; "
+              "the main text uses river-specific slopes).")
 
 from PIL import Image
 def swap_image(caption_start, fig_path, cid):

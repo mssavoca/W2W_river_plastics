@@ -343,6 +343,96 @@ volume_lod_bounds <- function(cpsd_fit_frag, cpsd_fit_fiber, r_med_frag, r_med_f
   )
 }
 
+# ── Headline slope estimator: doubly truncated power-law MLE on a fixed window ──
+#
+# Production slopes (2026-10-15 onward) use maximum likelihood on the unbinned
+# particle measurements within a window fixed in advance (length 100-500 um;
+# area/volume windows implied by that length window), not the Segur et al.
+# (2026) C-PSD regression. Rationale and evidence (literature, per-river
+# comparison, simulation): report Section 13.7 and docs/CHANGELOG_hoffman_revisions.md.
+# References: White et al. 2008 Ecology 89:905; Clauset et al. 2009 SIAM Rev
+# 51:661; Edwards et al. 2017 Methods Ecol Evol 8:57; Aban et al. 2006 JASA
+# 101:270; Deluca & Corral 2013 Acta Geophys 61:1351.
+
+#' Doubly truncated power-law MLE on [lo, hi)
+#'
+#' pdf f(x) proportional to x^(-alpha) on [lo, hi), alpha > 1. Returns the
+#' differential slope a_psd = -alpha, its SE from the observed information,
+#' and the number of observations in the window.
+tpl_mle <- function(x, lo, hi) {
+  x <- x[is.finite(x) & x >= lo & x < hi]
+  if (length(x) < 10) return(c(a_psd = NA_real_, se = NA_real_, n = length(x)))
+  # Valid for any exponent; alpha = 1 uses the log-normaliser limit. Bounds wide enough that
+  # shallow (e.g. fiber) distributions are estimated, not pinned at a bound.
+  nll <- function(al) {
+    k <- if (abs(al - 1) < 1e-6) 1 / log(hi / lo) else (1 - al) / (hi^(1 - al) - lo^(1 - al))
+    -sum(log(k) - al * log(x))
+  }
+  al <- stats::optimize(nll, c(-5, 10))$minimum
+  h <- (nll(al + 1e-4) - 2 * nll(al) + nll(al - 1e-4)) / 1e-8
+  c(a_psd = -al, se = sqrt(1 / h), n = length(x))
+}
+
+#' Convert a C-PSD fit object into a headline fixed-window MLE fit
+#'
+#' Keeps the C-PSD bins/regression (for plots and diagnostics) and stores the
+#' original C-PSD slope, SE, window and R^2 under `$cpsd`. Replaces the slope,
+#' SE and window used downstream (a_psd, se_a_psd, a_cpsd = a_psd + 1,
+#' lower/upper_lod_um) with the doubly truncated MLE on `window`. Fits that are
+#' invalid, or with fewer than `min_n` particles in the window, are returned
+#' unchanged with `estimator = "cpsd (fallback)"`.
+as_headline_fit <- function(fit, x, window, min_n = 30) {
+  if (is.null(fit) || isFALSE(fit$valid) || is.null(fit$a_psd)) return(fit)
+  m <- tpl_mle(x, window[1], window[2])
+  fit$cpsd <- list(a_cpsd = fit$a_cpsd, se_a_cpsd = fit$se_a_cpsd, a_psd = fit$a_psd, se_a_psd = fit$se_a_psd,
+                   lower_lod_um = fit$lower_lod_um, upper_lod_um = fit$upper_lod_um,
+                   lower_lod_used_um = fit$lower_lod_used_um %||% fit$lower_lod_um, r2 = fit$r2, n_bins = fit$n_bins)
+  if (!is.finite(m[["a_psd"]]) || m[["n"]] < min_n) {
+    fit$estimator <- "cpsd (fallback)"
+    fit$n_window <- m[["n"]]
+    return(fit)
+  }
+  fit$a_psd <- m[["a_psd"]]; fit$se_a_psd <- m[["se"]]
+  fit$a_cpsd <- m[["a_psd"]] + 1; fit$se_a_cpsd <- m[["se"]]
+  fit$lower_lod_um <- window[1]; fit$lower_lod_used_um <- window[1]; fit$upper_lod_um <- window[2]
+  fit$n_window <- m[["n"]]
+  fit$n_above_window <- sum(x >= window[2], na.rm = TRUE)
+  fit$estimator <- "tpl_mle"
+  fit
+}
+
+#' Predicted log10 N(>= L) and 95% band for a fit object, within its window
+#'
+#' C-PSD fits use their OLS regression. Headline MLE fits use the truncated
+#' power law scaled to the observed counts: N(>= L) = N(>= hi) + n_window *
+#' (L^(1-alpha) - hi^(1-alpha)) / (lo^(1-alpha) - hi^(1-alpha)), with the band
+#' from alpha +/- 1.96 SE.
+fit_curve_logN <- function(fo, L) {
+  if (identical(fo$estimator, "tpl_mle")) {
+    lo <- fo$lower_lod_um; hi <- fo$upper_lod_um
+    curve <- function(al) log10(fo$n_above_window + fo$n_window * (L^(1 - al) - hi^(1 - al)) / (lo^(1 - al) - hi^(1 - al)))
+    al <- -fo$a_psd
+    b1 <- curve(al - 1.96 * fo$se_a_psd); b2 <- curve(al + 1.96 * fo$se_a_psd)
+    return(tibble::tibble(L_low = L, logN_fit = curve(al), logN_lo = pmin(b1, b2), logN_hi = pmax(b1, b2)))
+  }
+  pred <- stats::predict(fo$fit, newdata = tibble::tibble(L_low = L), se.fit = TRUE)
+  tibble::tibble(L_low = L, logN_fit = pred$fit, logN_lo = pred$fit - 1.96 * pred$se.fit, logN_hi = pred$fit + 1.96 * pred$se.fit)
+}
+
+#' Area window implied by a length window, from the measured area/length^2 ratio
+#'
+#' For each shape, area ~ c * L^2 with c = median(area / length^2) over that
+#' shape's particles; "all" is the union of the shape windows.
+area_window_from_length <- function(df, length_window, length_col = "length_um", area_col = "area_um2", shape_col = "shape") {
+  w <- lapply(c(fragment = "fragment", fiber = "fiber"), function(sh) {
+    d <- df[df[[shape_col]] == sh & is.finite(df[[area_col]]) & df[[length_col]] > 0, ]
+    cc <- stats::median(d[[area_col]] / d[[length_col]]^2, na.rm = TRUE)
+    cc * length_window^2
+  })
+  w$all <- c(min(w$fragment[1], w$fiber[1]), max(w$fragment[2], w$fiber[2]))
+  w
+}
+
 #' Bootstrap aspect ratio and derive length:width summary
 #'
 #' Returns inverse aspect ratios (W/L), their bootstrap mean and SD,
@@ -1180,10 +1270,12 @@ aligned_freshwater_hazard <- function(tox_data, alpha_draws, aspect_ratio_vec, f
   pssd <- run_pssd_pipeline(tox_data = tox_data, param_matrix = pm, environments = c("Freshwater"),
                             cache_suffix = gsub("[^A-Za-z0-9]", "_", psd_key), dose_unit = "L",
                             n_sim = n, num_cores = num_cores, sim = 30, cv_uf = 0.5,
-                            rmore_method = "lognormal", seed = seed + 2, x1D_set = x1M_set)
+                            rmore_method = "lognormal", seed = seed + 2, x1D_set = x1M_set, x2D_set = x2D_set)
   haz <- build_haz_df(pssd$pSSDs, "Freshwater")
   attr(haz, "psd_key") <- psd_key
-  list(haz = haz, param_values = pv, pSSDs = pssd$pSSDs,
+  # The full pSSD fit objects are not returned: at production budgets they take several GB
+  # per call and nothing downstream reads them (only $haz and $alignment are used).
+  list(haz = haz, param_values = pv,
        alignment = tibble::tibble(psd_key = psd_key,
                                   alpha_freshwater = pv$alpha.freshwater, alpha_freshwater_sd = pv$alpha.freshwater.sd,
                                   a_sa = pv$a.sa.freshwater, a_v = pv$a.v.freshwater, a_m = pv$a.m.freshwater,
@@ -1280,6 +1372,8 @@ alpha_draws_by_group <- function(fits, n, structural_sd = 0, seed = 8101) {
 #' @param base_tempdir Base directory for cache/output subfolders (default tempdir()).
 #' @param seed If not NULL, set.seed(seed) immediately before the Monte Carlo
 #'   alignment + pSSD fit, for reproducibility independent of call order.
+#' @param x2D_set Upper size-integration bound (um) passed to MC_sim_align_parallel().
+#'   Default 5000; the upper-size sensitivity passes 500 (exposure CF moved together).
 #' @param x1D_set Lower size-integration bound (um) passed to
 #'   MC_sim_align_parallel(). Default 1 preserves prior behavior for every
 #'   existing call site; M1.2 passes L_tar_min here to match the exposure-side
@@ -1291,7 +1385,7 @@ run_pssd_pipeline <- function(tox_data, param_matrix, environments, cache_suffix
                                dose_unit = c("L", "kg"),
                                n_sim, num_cores = parallel::detectCores() - 2,
                                sim = 30, cv_uf = 0.5, rmore_method = "lognormal",
-                               base_tempdir = tempdir(), seed = NULL, x1D_set = 1) {
+                               base_tempdir = tempdir(), seed = NULL, x1D_set = 1, x2D_set = 5000) {
   dose_unit <- match.arg(dose_unit)
   food_col   <- paste0("particles_", dose_unit, "_food_dilution")
   tissue_col <- paste0("particles_", dose_unit, "_ox_stress")
@@ -1312,7 +1406,7 @@ run_pssd_pipeline <- function(tox_data, param_matrix, environments, cache_suffix
         param_matrix = param_matrix,
         n_sim        = n_sim,
         x1D_set      = x1D_set,
-        x2D_set      = 5000,
+        x2D_set      = x2D_set,
         num_cores    = 1L
       )
     }),

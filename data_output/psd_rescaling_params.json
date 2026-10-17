@@ -1,12 +1,15 @@
 {
   "meta": {
-    "run_budget": "quick",
-    "n_boot": 100,
-    "n_mc": 5000,
+    "run_budget": "production",
+    "n_boot": 1000,
+    "n_mc": 20000,
     "slope_application": "river",
     "slope_structural_sd": 0.25,
     "monitoring_file": "Part_dets_summ_final.rds",
-    "rendered": "2026-10-14 19:32 PDT"
+    "slope_estimator": "tpl_mle",
+    "headline_length_window_um": [100, 500],
+    "pssdplusplus_version": "0.3.5",
+    "rendered": "2026-10-17 01:20 PDT"
   },
   "monitoring": {
     "n_samples": 57,
@@ -20,221 +23,1490 @@
     "q75_conc_L": 0.475
   },
   "pooled": {
-    "a_cum": -2.17826231410133,
-    "a_cum_SE": 0.0370549923542561,
-    "a_diff": -3.17826231410133,
-    "a_diff_SE": 0.0370549923542561,
-    "CI95_a_diff": [-3.25089009911567, -3.10563452908699],
-    "R2": 0.987427232705261,
-    "n_bins": 46,
-    "window_LOD_um": [165, 460]
+    "a_cum": -1.39382541008611,
+    "a_cum_SE": 0.0398928863669827,
+    "a_diff": -2.39382541008611,
+    "a_diff_SE": 0.0398928863669827,
+    "CI95_a_diff": [-2.47201546736539, -2.31563535280682],
+    "R2": 0.996040941161332,
+    "n_bins": 69,
+    "window_LOD_um": [100, 500],
+    "estimator": "tpl_mle",
+    "n_window": 3680,
+    "a_diff_cpsd": -2.73146514887129,
+    "a_diff_SE_cpsd": 0.013336250247493,
+    "window_cpsd_um": [115, 480]
   },
   "fragment": {
-    "a_cum": -2.79639749352994,
-    "a_cum_SE": 0.0506781424768619,
-    "a_diff": -3.79639749352994,
-    "a_diff_SE": 0.0506781424768619,
-    "CI95_a_diff": [-3.89572665278459, -3.69706833427529],
-    "R2": 0.99088774101154,
-    "n_bins": 30,
-    "window_LOD_um": [125, 330]
+    "a_cum": -1.99883119908339,
+    "a_cum_SE": 0.0511130029978988,
+    "a_diff": -2.99883119908339,
+    "a_diff_SE": 0.0511130029978988,
+    "CI95_a_diff": [-3.09901268495927, -2.89864971320751],
+    "R2": 0.992004006558207,
+    "n_bins": 63,
+    "window_LOD_um": [100, 500],
+    "estimator": "tpl_mle",
+    "n_window": 2781,
+    "a_diff_cpsd": -3.84245772262582,
+    "a_diff_SE_cpsd": 0.0326744734715639,
+    "window_cpsd_um": [135, 485]
   },
   "fiber": {
-    "a_cum": -1.7351405653879,
-    "a_cum_SE": 0.0567815862512624,
-    "a_diff": -2.7351405653879,
-    "a_diff_SE": 0.0567815862512624,
-    "CI95_a_diff": [-2.84643247444037, -2.62384865633543],
-    "R2": 0.960897339884545,
-    "n_bins": 40,
-    "window_LOD_um": [170, 480]
+    "a_cum": 0.0477063131699185,
+    "a_cum_SE": 0.0717960608629128,
+    "a_diff": -0.952293686830082,
+    "a_diff_SE": 0.0717960608629128,
+    "CI95_a_diff": [-1.09301396612139, -0.811573407538772],
+    "R2": 0.992240484918454,
+    "n_bins": 85,
+    "window_LOD_um": [100, 500],
+    "estimator": "tpl_mle",
+    "n_window": 899,
+    "a_diff_cpsd": -2.48150751002481,
+    "a_diff_SE_cpsd": 0.0143804882133081,
+    "window_cpsd_um": [190, 645]
+  },
+  "ocean": {
+    "all": {
+      "a_cum": -1.00364938563062,
+      "a_cum_SE": 0.0654841703497156,
+      "a_diff": -2.00364938563062,
+      "a_diff_SE": 0.0654841703497156,
+      "CI95_a_diff": [-2.13199835951606, -1.87530041174518],
+      "R2": 0.997270491402167,
+      "n_bins": 112,
+      "window_LOD_um": [100, 500],
+      "estimator": "tpl_mle",
+      "n_window": 1225,
+      "a_diff_cpsd": -2.65308786801187,
+      "a_diff_SE_cpsd": 0.00824584838036296,
+      "window_cpsd_um": [250, 985]
+    },
+    "fragment": {
+      "a_cum": -1.69564204352647,
+      "a_cum_SE": 0.0839433152761264,
+      "a_diff": -2.69564204352647,
+      "a_diff_SE": 0.0839433152761264,
+      "CI95_a_diff": [-2.86017094146768, -2.53111314558526],
+      "R2": 0.99283807299941,
+      "n_bins": 53,
+      "window_LOD_um": [100, 500],
+      "estimator": "tpl_mle",
+      "n_window": 920,
+      "a_diff_cpsd": -3.58506396007815,
+      "a_diff_SE_cpsd": 0.0307441109281196,
+      "window_cpsd_um": [125, 430]
+    },
+    "fiber": {
+      "a_cum": 0.72473560748642,
+      "a_cum_SE": 0.127423431009861,
+      "a_diff": -0.27526439251358,
+      "a_diff_SE": 0.127423431009861,
+      "CI95_a_diff": [-0.525014317292906, -0.0255144677342531],
+      "R2": 0.989948840689519,
+      "n_bins": 123,
+      "window_LOD_um": [100, 500],
+      "estimator": "tpl_mle",
+      "n_window": 305,
+      "a_diff_cpsd": -2.49005686961398,
+      "a_diff_SE_cpsd": 0.0136493465834702,
+      "window_cpsd_um": [245, 1420]
+    }
+  },
+  "sand": {
+    "all": {
+      "a_cum": -0.909519987860241,
+      "a_cum_SE": 0.0299056299877444,
+      "a_diff": -1.90951998786024,
+      "a_diff_SE": 0.0299056299877444,
+      "CI95_a_diff": [-1.96813502263622, -1.85090495308426],
+      "R2": 0.996436160311222,
+      "n_bins": 163,
+      "window_LOD_um": [100, 500],
+      "estimator": "tpl_mle",
+      "n_window": 5747,
+      "a_diff_cpsd": -2.82212654800935,
+      "a_diff_SE_cpsd": 0.00858815626481372,
+      "window_cpsd_um": [240, 1090]
+    },
+    "fragment": {
+      "a_cum": -1.4832827995606,
+      "a_cum_SE": 0.0365968028733279,
+      "a_diff": -2.4832827995606,
+      "a_diff_SE": 0.0365968028733279,
+      "CI95_a_diff": [-2.55501253319233, -2.41155306592888],
+      "R2": 0.992605262832216,
+      "n_bins": 89,
+      "window_LOD_um": [100, 500],
+      "estimator": "tpl_mle",
+      "n_window": 4500,
+      "a_diff_cpsd": -3.78302020206548,
+      "a_diff_SE_cpsd": 0.0257531179570462,
+      "window_cpsd_um": [165, 650]
+    },
+    "fiber": {
+      "a_cum": 0.883911801668804,
+      "a_cum_SE": 0.0640212245618371,
+      "a_diff": -0.116088198331196,
+      "a_diff_SE": 0.0640212245618371,
+      "CI95_a_diff": [-0.241569798472397, 0.00939340181000441],
+      "R2": 0.989621900037739,
+      "n_bins": 208,
+      "window_LOD_um": [100, 500],
+      "estimator": "tpl_mle",
+      "n_window": 1247,
+      "a_diff_cpsd": -2.7005080254938,
+      "a_diff_SE_cpsd": 0.0121330322430652,
+      "window_cpsd_um": [270, 1580]
+    }
+  },
+  "hazard_alignment_slopes": {
+    "river_area": {
+      "a_cum": -0.613095792226371,
+      "a_cum_SE": 0.0147245213764841,
+      "a_diff": -1.61309579222637,
+      "a_diff_SE": 0.0147245213764841,
+      "CI95_a_diff": [-1.64195585412428, -1.58423573032846],
+      "R2": 0.997287736784443,
+      "n_bins": 99,
+      "window_LOD_um": [2790.76118038462, 125000],
+      "estimator": "tpl_mle",
+      "n_window": 4925,
+      "a_diff_cpsd": -2.03146954259293,
+      "a_diff_SE_cpsd": 0.00546167959560404,
+      "window_cpsd_um": [5500, 67000]
+    },
+    "river_volume": {
+      "a_cum": -0.508547218032922,
+      "a_cum_SE": 0.0132189906431453,
+      "a_diff": -1.50854721803292,
+      "a_diff_SE": 0.0132189906431453,
+      "CI95_a_diff": [-1.53445643969349, -1.48263799637236],
+      "R2": 0.999274074972005,
+      "n_bins": 214,
+      "window_LOD_um": [61169.5419437525, 8181230.86872342],
+      "estimator": "tpl_mle",
+      "n_window": 3807,
+      "a_diff_cpsd": -1.63856586016337,
+      "a_diff_SE_cpsd": 0.00118206495098683,
+      "window_cpsd_um": [200000, 5400000]
+    },
+    "ocean_area": {
+      "a_cum": -0.40073457524554,
+      "a_cum_SE": 0.0237453123143427,
+      "a_diff": -1.40073457524554,
+      "a_diff_SE": 0.0237453123143427,
+      "CI95_a_diff": [-1.44727538738165, -1.35419376310943],
+      "R2": 0.998094762755472,
+      "n_bins": 180,
+      "window_LOD_um": [2653.38757878751, 125000],
+      "estimator": "tpl_mle",
+      "n_window": 1609,
+      "a_diff_cpsd": -2.00061791142101,
+      "a_diff_SE_cpsd": 0.00327677721023099,
+      "window_cpsd_um": [23000, 363500]
+    },
+    "ocean_volume": {
+      "a_cum": -0.355808704473858,
+      "a_cum_SE": 0.0220101553947837,
+      "a_diff": -1.35580870447386,
+      "a_diff_SE": 0.0220101553947837,
+      "CI95_a_diff": [-1.39894860904763, -1.31266879990008],
+      "R2": 0.997268731932125,
+      "n_bins": 137,
+      "window_LOD_um": [65449.8469497874, 8181230.86872342],
+      "estimator": "tpl_mle",
+      "n_window": 1224,
+      "a_diff_cpsd": -1.54777733296974,
+      "a_diff_SE_cpsd": 0.00246725044121908,
+      "window_cpsd_um": [1560000, 8140000]
+    },
+    "sand_area": {
+      "a_cum": -0.330928414718244,
+      "a_cum_SE": 0.0109570431500452,
+      "a_diff": -1.33092841471824,
+      "a_diff_SE": 0.0109570431500452,
+      "CI95_a_diff": [-1.35240421929233, -1.30945261014416],
+      "R2": 0.997292156794672,
+      "n_bins": 299,
+      "window_LOD_um": [2671.62949265214, 125000],
+      "estimator": "tpl_mle",
+      "n_window": 7315,
+      "a_diff_cpsd": -2.09986925248729,
+      "a_diff_SE_cpsd": 0.00332554930805077,
+      "window_cpsd_um": [23000, 256500]
+    },
+    "sand_volume": {
+      "a_cum": -0.312995701157786,
+      "a_cum_SE": 0.0093966595772403,
+      "a_diff": -1.31299570115779,
+      "a_diff_SE": 0.0093966595772403,
+      "CI95_a_diff": [-1.33141315392918, -1.29457824838639],
+      "R2": 0.999175024702094,
+      "n_bins": 236,
+      "window_LOD_um": [56058.6119068357, 8181230.86872342],
+      "estimator": "tpl_mle",
+      "n_window": 6155,
+      "a_diff_cpsd": -1.63479499678695,
+      "a_diff_SE_cpsd": 0.0011924090234568,
+      "window_cpsd_um": [2400000, 8200000]
+    }
+  },
+  "ocean_heterogeneity": {
+    "Q": 21.2638959254857,
+    "df": 3,
+    "p_value": 9.27922091176e-05,
+    "i2": 85.8915788032786,
+    "weighted_mean": -0.989686889336327
   },
   "by_river": {
     "Carmel": {
-      "a_cum": -1.49167641127908,
-      "a_cum_SE": 0.0275994627980085,
-      "a_diff": -2.49167641127908,
-      "a_diff_SE": 0.0275994627980085,
-      "CI95_a_diff": [-2.54577135836318, -2.43758146419498],
-      "R2": 0.993875698111927,
-      "n_bins": 20,
-      "window_LOD_um": [150, 460]
+      "a_cum": -1.15926184157195,
+      "a_cum_SE": 0.0752305133393824,
+      "a_diff": -2.15926184157195,
+      "a_diff_SE": 0.0752305133393824,
+      "CI95_a_diff": [-2.30671364771714, -2.01181003542676],
+      "R2": 0.996604655971908,
+      "n_bins": 68,
+      "window_LOD_um": [100, 500],
+      "estimator": "tpl_mle",
+      "n_window": 966,
+      "a_diff_cpsd": -2.61021967186044,
+      "a_diff_SE_cpsd": 0.0115689407521692,
+      "window_cpsd_um": [165, 535]
     },
     "Pajaro": {
-      "a_cum": -2.71056574497845,
-      "a_cum_SE": 0.0630779449448687,
-      "a_diff": -3.71056574497845,
-      "a_diff_SE": 0.0630779449448687,
-      "CI95_a_diff": [-3.83419851707039, -3.5869329728865],
-      "R2": 0.992475407760871,
-      "n_bins": 16,
-      "window_LOD_um": [80, 195]
+      "a_cum": -1.5849821051695,
+      "a_cum_SE": 0.0721185882018514,
+      "a_diff": -2.5849821051695,
+      "a_diff_SE": 0.0721185882018514,
+      "CI95_a_diff": [-2.72633453804513, -2.44362967229387],
+      "R2": 0.992525484143503,
+      "n_bins": 64,
+      "window_LOD_um": [100, 500],
+      "estimator": "tpl_mle",
+      "n_window": 1199,
+      "a_diff_cpsd": -3.46217619626766,
+      "a_diff_SE_cpsd": 0.0271358846261188,
+      "window_cpsd_um": [145, 535]
     },
     "Salinas": {
-      "a_cum": -1.67993854579683,
-      "a_cum_SE": 0.0911172362671311,
-      "a_diff": -2.67993854579683,
-      "a_diff_SE": 0.0911172362671311,
-      "CI95_a_diff": [-2.8585283288804, -2.50134876271325],
-      "R2": 0.936626380965167,
-      "n_bins": 25,
-      "window_LOD_um": [145, 350]
+      "a_cum": -1.25807118666116,
+      "a_cum_SE": 0.101465726672775,
+      "a_diff": -2.25807118666116,
+      "a_diff_SE": 0.101465726672775,
+      "CI95_a_diff": [-2.4569440109398, -2.05919836238252],
+      "R2": 0.985707265751504,
+      "n_bins": 52,
+      "window_LOD_um": [100, 500],
+      "estimator": "tpl_mle",
+      "n_window": 546,
+      "a_diff_cpsd": -3.04125018843338,
+      "a_diff_SE_cpsd": 0.0347612124638551,
+      "window_cpsd_um": [145, 480]
     },
     "San Lorenzo": {
-      "a_cum": -1.88821121405602,
-      "a_cum_SE": 0.0540244529029099,
-      "a_diff": -2.88821121405602,
-      "a_diff_SE": 0.0540244529029099,
-      "CI95_a_diff": [-2.99409914174572, -2.78232328636632],
-      "R2": 0.975250997086815,
-      "n_bins": 33,
-      "window_LOD_um": [150, 380]
+      "a_cum": -1.48617607017689,
+      "a_cum_SE": 0.0789030189869127,
+      "a_diff": -2.48617607017689,
+      "a_diff_SE": 0.0789030189869127,
+      "CI95_a_diff": [-2.64082598739124, -2.33152615296254],
+      "R2": 0.997675407130458,
+      "n_bins": 40,
+      "window_LOD_um": [100, 500],
+      "estimator": "tpl_mle",
+      "n_window": 969,
+      "a_diff_cpsd": -2.3989438015453,
+      "a_diff_SE_cpsd": 0.010954367009808,
+      "window_cpsd_um": [80, 330]
     }
   },
   "heterogeneity": {
-    "Q": 323.548060873564,
+    "Q": 19.8923024200239,
     "df": 3,
-    "p_value": 7.95567159459854e-70,
-    "i2": 99.0727807201501,
-    "weighted_mean": -1.72585165735084
+    "p_value": 0.000178692804510903,
+    "i2": 84.9187895063361,
+    "weighted_mean": -1.3889682080366
   },
   "two_segment": {
-    "breakpoint_um": 245,
-    "a_fine_cum": -1.53197986310198,
-    "a_coarse_cum": -2.43741534239922,
-    "a_fine_diff": -2.53197986310198,
-    "a_coarse_diff": -3.43741534239922,
-    "dAIC": -54.6460695328647
+    "breakpoint_um": 200,
+    "a_fine_cum": -1.47304303561338,
+    "a_coarse_cum": -1.87328843087525,
+    "a_fine_diff": -2.47304303561338,
+    "a_coarse_diff": -2.87328843087525,
+    "dAIC": -142.715503530127
   },
   "rescaling": {
-    "basis": "C-PSD-window concentration (reported 50-500 um concentration x in-window particle fraction); CF from the same window to 1-5000 um",
-    "n_nondetect_river_window": 18,
+    "basis": "Concentration in the headline fit window (100-500 um) rebuilt from QC-passing particle rows x summary aliquot factor (extrap_count/count) / analysed volume; CF from the same window to 1-5000 um with the headline fixed-window MLE slope. FLAG: rebuild basis needs data-owner confirmation before publication.",
+    "concentration_basis": "particle_rebuild",
+    "n_samples_river_used": 56,
+    "river_excluded_no_particle_data": ["SRR20250303SD"],
+    "ocean_excluded_no_particle_data": ["CRO20250121S", "CRO20250611S", "CRO20251212", "PRO20250122S", "PRO20250616S", "PRO20251210S", "SLO20250122S", "SLO20251210S", "SRO20250122S"],
+    "sand_excluded_no_particle_data": ["CRL20250415S", "CRL20250711S", "CRL20251001S", "CRM20250415S", "CRM20251001S", "CRU20250415S", "CRU20250711S", "CRU20251001S", "PRL20250414", "PRL20250414S", "PRL20250709S", "PRL20251202S", "PRM20250414S", "PRM20250709S", "PRM20250930S", "PRM20251202S", "PRU20241204_WaterBlank", "PRU20250414S", "PRU20250709S", "PRU20250930S", "PRU20251202S", "SLL20250414S", "SLL20250709S", "SLL20250930S", "SLL20251202S", "SLM20250414S", "SLM20250709S", "SLM20250930S", "SLM20251202S", "SLU20250414", "SLU20250414S", "SLU20250709S", "SLU20250930S", "SLU20251202S", "SRL20250415S", "SRL20250711S", "SRL20251001S", "SRL20251203S", "SRM20250415S", "SRM20251203S", "SRU20250415S", "SRU20250711S", "SRU20251001L", "SRU20251001S", "SRU20251203S"],
+    "n_nondetect_river_window": 0,
+    "C_rebuilt_50_500_river": {
+      "median_L": 0.3525,
+      "q25_L": 0.14,
+      "q75_L": 0.83125,
+      "mean_L": 0.841615657701627,
+      "n": 56
+    },
     "C_W2_reported": {
-      "median_L": 0.2,
-      "q25_L": 0.08,
-      "q75_L": 0.475,
-      "mean_L": 0.464591708160767,
-      "n": 57
+      "median_L": 0.19,
+      "q25_L": 0.0775,
+      "q75_L": 0.50125,
+      "mean_L": 0.46869156009221,
+      "n": 56
     },
     "C_lod_window_river": {
-      "median_L": 0.03,
-      "q25_L": 0,
-      "q75_L": 0.125,
-      "mean_L": 0.151700156470646,
-      "n": 57
+      "median_L": 0.1875,
+      "q25_L": 0.06625,
+      "q75_L": 0.46375,
+      "mean_L": 0.44125872378657,
+      "n": 56
     },
-    "lod_fraction_median": 0.247619047619048,
+    "lod_fraction_median": 0.52859477124183,
     "windows_by_river": {
-      "Carmel": [150, 460],
-      "Pajaro": [80, 195],
-      "Salinas": [145, 350],
-      "San Lorenzo": [150, 380]
+      "Carmel": [100, 500],
+      "Pajaro": [100, 500],
+      "Salinas": [100, 500],
+      "San Lorenzo": [100, 500]
     },
     "CF_by_river": {
-      "Carmel": [309.767057949527, 2101.70157911137, 14914.5701886524],
-      "Pajaro": [26460.0670083, 161427.70543833, 913841.882495833],
-      "Salinas": [737.098445631053, 5358.28825707951, 42729.5219809018],
-      "San Lorenzo": [2161.75686009979, 15686.5657906927, 120724.150708937]
+      "Carmel": [41.354757268389, 245.977916873192, 1607.44054333265],
+      "Pajaro": [246.247056067403, 1613.85296964264, 10669.7661334659],
+      "Salinas": [58.3146339605043, 381.267293123562, 2667.61670356643],
+      "San Lorenzo": [159.965587057955, 1024.22191498425, 7391.1364133707]
     },
-    "CF_pooled": [10039.078020354, 77553.5594431058, 613994.002920407],
-    "CF_pooled_window": [145, 350],
-    "CF_two": 2860.2351230267,
+    "CF_pooled": [116.98984328116, 685.948531307452, 4434.13285485541],
+    "CF_pooled_window": [100, 500],
+    "CF_two": 1012.6617356551,
     "C_W1_river": {
-      "median_L": 219.874777279981,
-      "q25_L": 0,
-      "q75_L": 4889.76095349738,
-      "mean_L": 14002.6740706165,
-      "n": 57
+      "median_L": 107.727399887851,
+      "q25_L": 36.4203313792547,
+      "q75_L": 307.23138211111,
+      "mean_L": 396.619391205419,
+      "n": 56
     },
     "C_W1_pooled": {
-      "median_L": 301.793342770836,
-      "q25_L": 0,
-      "q75_L": 3585.59714463412,
-      "mean_L": 6393.72197877323,
-      "n": 57
+      "median_L": 129.13880248252,
+      "q25_L": 45.1045427479298,
+      "q75_L": 318.649423402446,
+      "mean_L": 301.327981202315,
+      "n": 56
     },
     "C_W1_two": {
-      "median_L": 11.3568159296648,
-      "q25_L": 0,
-      "q75_L": 135.00309780686,
-      "mean_L": 237.042868647464,
-      "n": 57
+      "median_L": 189.874075435331,
+      "q25_L": 67.0888399871502,
+      "q75_L": 469.621879910051,
+      "mean_L": 446.845825102661,
+      "n": 56
     },
-    "ratio_W1_river_over_two": 19.3606005980648
+    "ratio_W1_pooled_over_two": 0.680128670469833
   },
   "risk_headline": {
     "food_dilution_HC5": {
-      "RQ_p50": 3.55970072606283,
-      "RQ_p95": 1628.53486954673,
-      "P_exceed": 0.6255
+      "RQ_p50": 117.072923518028,
+      "RQ_p95": 24308.2197756217,
+      "P_exceed": 0.9585
     },
     "tissue_translocation_HC5": {
-      "RQ_p50": 0.0669628561197123,
-      "RQ_p95": 70.7956166443522,
-      "P_exceed": 0.27825
+      "RQ_p50": 0.162145120555575,
+      "RQ_p95": 18.4060859076259,
+      "P_exceed": 0.25625
     }
   },
   "risk_by_river": {
     "Carmel": {
       "food_dilution_HC5": {
-        "RQ_p50": 0.845570134254346,
-        "RQ_p95": 378.591421284867,
-        "P_exceed": 0.483
+        "RQ_p50": 155.736438879833,
+        "RQ_p95": 27474.3171524164,
+        "P_exceed": 0.965
       },
       "tissue_translocation_HC5": {
-        "RQ_p50": 0.00454885892899055,
-        "RQ_p95": 0.796524193290094,
-        "P_exceed": 0.043
+        "RQ_p50": 0.0693246418033147,
+        "RQ_p95": 6.94084638228574,
+        "P_exceed": 0.16
       }
     },
     "Pajaro": {
       "food_dilution_HC5": {
-        "RQ_p50": 33.7852204959845,
-        "RQ_p95": 6124.16669508525,
-        "P_exceed": 0.924
+        "RQ_p50": 55.6459510911203,
+        "RQ_p95": 8840.55244801718,
+        "P_exceed": 0.928
       },
       "tissue_translocation_HC5": {
-        "RQ_p50": 4.49118831825525,
-        "RQ_p95": 629.485340422477,
-        "P_exceed": 0.74
+        "RQ_p50": 0.266206087813335,
+        "RQ_p95": 22.2863353608376,
+        "P_exceed": 0.312
       }
     },
     "Salinas": {
       "food_dilution_HC5": {
-        "RQ_p50": 12.98226905444,
-        "RQ_p95": 2663.36342750644,
-        "P_exceed": 0.775
+        "RQ_p50": 145.901129580233,
+        "RQ_p95": 22911.6284558765,
+        "P_exceed": 0.955
       },
       "tissue_translocation_HC5": {
-        "RQ_p50": 0.0769208715966853,
-        "RQ_p95": 10.5661536015438,
-        "P_exceed": 0.215
+        "RQ_p50": 0.0917491294483092,
+        "RQ_p95": 14.0974309878467,
+        "P_exceed": 0.202
       }
     },
     "San Lorenzo": {
       "food_dilution_HC5": {
-        "RQ_p50": 0.110453179051915,
-        "RQ_p95": 72.3452046049767,
-        "P_exceed": 0.32
+        "RQ_p50": 153.709842483087,
+        "RQ_p95": 34300.8403870848,
+        "P_exceed": 0.986
       },
       "tissue_translocation_HC5": {
-        "RQ_p50": 0.00715434675811575,
-        "RQ_p95": 7.66857732609726,
-        "P_exceed": 0.115
+        "RQ_p50": 0.366235621123634,
+        "RQ_p95": 43.6753672026764,
+        "P_exceed": 0.351
       }
     }
   },
   "risk_pooled_slope": {
     "food_dilution_HC5": {
-      "RQ_p50": 0.278535773996391,
-      "RQ_p95": 120.709806629672,
-      "P_exceed": 0.363
+      "RQ_p50": 124.600745901847,
+      "RQ_p95": 14951.0086813715,
+      "P_exceed": 0.979
     },
     "tissue_translocation_HC5": {
-      "RQ_p50": 0.0218317362404307,
-      "RQ_p95": 12.3009255431407,
-      "P_exceed": 0.164
+      "RQ_p50": 0.176586890627026,
+      "RQ_p95": 15.6803336940171,
+      "P_exceed": 0.259
     }
   },
-  "eed_river_q50_median_L": 247.829717924929
+  "eed_river_q50_median_L": 107.727399887851,
+  "particle_qc": {
+    "rule": "acc_analy_conf == 'confident' & bad_spectra == FALSE (bad_spectra TRUE <=> max_cor_val <= 0.66)",
+    "polarity_fixed": "2026-10-15 (previously kept bad_spectra == TRUE)",
+    "waterfall": {
+      "Beach sand": {
+        "All rows (all matrices)": 77335,
+        "Samples only (blanks removed)": 75053,
+        "Matrix (sample_type)": 32353,
+        "Canonical sample set": 27963,
+        "Plastic (not mineral/organic)": 10670,
+        "Spectral QC (confident, bad_spectra == FALSE)": 9734,
+        "Valid length": 9734,
+        "Inside 50-500 um": 8990
+      },
+      "Ocean water": {
+        "All rows (all matrices)": 77335,
+        "Samples only (blanks removed)": 75053,
+        "Matrix (sample_type)": 5351,
+        "Canonical sample set": 5170,
+        "Plastic (not mineral/organic)": 2318,
+        "Spectral QC (confident, bad_spectra == FALSE)": 2184,
+        "Valid length": 2184,
+        "Inside 50-500 um": 2013
+      },
+      "River water": {
+        "All rows (all matrices)": 77335,
+        "Samples only (blanks removed)": 75053,
+        "Matrix (sample_type)": 36355,
+        "Canonical sample set": 36044,
+        "Plastic (not mineral/organic)": 8840,
+        "Spectral QC (confident, bad_spectra == FALSE)": 7148,
+        "Valid length": 7148,
+        "Inside 50-500 um": 6885
+      }
+    },
+    "reconciliation": {
+      "Beach sand": {
+        "n_samples": 75,
+        "n_excluded_no_particle_rows": 45,
+        "summary_count_total": 7581,
+        "qc_rows_total": 9734,
+        "pooled_ratio_measured": 1.53074382764586,
+        "median_ratio_measured": 1.64838167297184
+      },
+      "Ocean water": {
+        "n_samples": 15,
+        "n_excluded_no_particle_rows": 9,
+        "summary_count_total": 1379,
+        "qc_rows_total": 2184,
+        "pooled_ratio_measured": 1.66844919786096,
+        "median_ratio_measured": 1.97408789386401
+      },
+      "River water": {
+        "n_samples": 57,
+        "n_excluded_no_particle_rows": 1,
+        "summary_count_total": 3777,
+        "qc_rows_total": 7148,
+        "pooled_ratio_measured": 1.91635388739946,
+        "median_ratio_measured": 1.9
+      }
+    },
+    "summary_count_river": 3777,
+    "qc_rows_river": 7150
+  },
+  "anchor_shape": {
+    "S_A": {
+      "W1_A_LOD": {
+        "median": 107.83766229756,
+        "q25": 37.7672138751088,
+        "q75": 304.527117078848
+      },
+      "W1_B_sieve": {
+        "median": 42.0770005726457,
+        "q25": 14.3093611849578,
+        "q75": 115.81494199941
+      },
+      "ratio_A_over_B_median": 2.56286476768654,
+      "n_samples_low_n": 19
+    },
+    "S_B": {
+      "table": [
+        {
+          "arm": "Production (sample-specific, particle-rebuilt)",
+          "n_zero_samples": 0,
+          "W1_median": 107.83766229756,
+          "EED_q50": 107.83766229756,
+          "EED_q95": 2053.86066532021,
+          "log10_IQR": 0.90651102342762
+        },
+        {
+          "arm": "S-B (river pooled fraction x reported)",
+          "n_zero_samples": 0,
+          "W1_median": 64.7242530834349,
+          "EED_q50": 64.7242530834349,
+          "EED_q95": 1300.62242429421,
+          "log10_IQR": 0.913427832418745
+        }
+      ],
+      "pooled_fraction": [
+        {
+          "river": "Carmel",
+          "pooled_fraction": 0.539363484087102
+        },
+        {
+          "river": "Pajaro",
+          "pooled_fraction": 0.51792656587473
+        },
+        {
+          "river": "Salinas",
+          "pooled_fraction": 0.566978193146417
+        },
+        {
+          "river": "San Lorenzo",
+          "pooled_fraction": 0.533590308370044
+        }
+      ]
+    },
+    "S_C": {
+      "table": [
+        {
+          "arm": "Production (river slopes, all shapes)",
+          "EED_q50": 107.727399887851,
+          "EED_q95": 1979.24755659642,
+          "W1_median": 107.727399887851
+        },
+        {
+          "arm": "S-C shape slopes, independent",
+          "EED_q50": 1632.83640458896,
+          "EED_q95": 14521.7503274499,
+          "W1_median": 1632.83640458896
+        },
+        {
+          "arm": "S-C shape slopes, correlated",
+          "EED_q50": 1654.47777224298,
+          "EED_q95": 14713.360823292,
+          "W1_median": 1654.47777224298
+        }
+      ],
+      "cf": [
+        {
+          "shape": "fragment",
+          "a_psd": -2.99883119908339,
+          "LOD_window_um": "100–500",
+          "CF_median": 10424.874157786,
+          "share_below_10um": 0.989973091112416
+        },
+        {
+          "shape": "fiber",
+          "a_psd": -0.952293686830082,
+          "LOD_window_um": "100–500",
+          "CF_median": 7.99344745691009,
+          "share_below_10um": 0.231619488206643
+        },
+        {
+          "shape": "pooled (all)",
+          "a_psd": -2.39382541008611,
+          "LOD_window_um": "100–500",
+          "CF_median": 685.948531307452,
+          "share_below_10um": 0.95962593533356
+        }
+      ],
+      "fit_validity": [
+        {
+          "river": "Carmel",
+          "shape": "fragment",
+          "valid": true,
+          "n_bins": 56,
+          "r2": 0.993054079958782,
+          "passes_rule": true
+        },
+        {
+          "river": "Carmel",
+          "shape": "fiber",
+          "valid": true,
+          "n_bins": 83,
+          "r2": 0.983442887699031,
+          "passes_rule": true
+        },
+        {
+          "river": "Pajaro",
+          "shape": "fragment",
+          "valid": true,
+          "n_bins": 35,
+          "r2": 0.990702092890256,
+          "passes_rule": true
+        },
+        {
+          "river": "Pajaro",
+          "shape": "fiber",
+          "valid": true,
+          "n_bins": 55,
+          "r2": 0.979454665418902,
+          "passes_rule": true
+        },
+        {
+          "river": "Salinas",
+          "shape": "fragment",
+          "valid": true,
+          "n_bins": 39,
+          "r2": 0.997071619576959,
+          "passes_rule": true
+        },
+        {
+          "river": "Salinas",
+          "shape": "fiber",
+          "valid": true,
+          "n_bins": 53,
+          "r2": 0.968775073041621,
+          "passes_rule": true
+        },
+        {
+          "river": "San Lorenzo",
+          "shape": "fragment",
+          "valid": true,
+          "n_bins": 46,
+          "r2": 0.990838901216589,
+          "passes_rule": true
+        },
+        {
+          "river": "San Lorenzo",
+          "shape": "fiber",
+          "valid": true,
+          "n_bins": 83,
+          "r2": 0.994596858648437,
+          "passes_rule": true
+        }
+      ]
+    },
+    "S_D": [
+      {
+        "quantity": "Production W1 (headline)",
+        "anchor": "LOD window, particle-rebuilt concentration",
+        "slope_source": "each river's own headline slope (fixed-window MLE)",
+        "window_um": "100–500 (fixed)",
+        "CF_median": 625.881621790232,
+        "W1_median_L": 107.727399887851
+      },
+      {
+        "quantity": "Pooled-slope W1 (sensitivity)",
+        "anchor": "pooled LOD window, particle-rebuilt",
+        "slope_source": "pooled river slope",
+        "window_um": "100–500",
+        "CF_median": 685.948531307452,
+        "W1_median_L": 129.13880248252
+      },
+      {
+        "quantity": "Two-segment W1 (sensitivity)",
+        "anchor": "pooled LOD window, particle-rebuilt",
+        "slope_source": "pooled two-segment fit",
+        "window_um": "100–500",
+        "CF_median": 1012.6617356551,
+        "W1_median_L": 189.874075435331
+      },
+      {
+        "quantity": "Sieve-anchored W1 (S-A arm B)",
+        "anchor": "50–500 µm sieve, reported concentration",
+        "slope_source": "each river's own headline slope (fixed-window MLE)",
+        "window_um": "50–500",
+        "CF_median": 225.700531005085,
+        "W1_median_L": 42.0770005726457
+      },
+      {
+        "quantity": "Nominal diagnostic CF (Section 10.2)",
+        "anchor": "50–500 µm nominal",
+        "slope_source": "pooled river slope",
+        "window_um": "50–500",
+        "CF_median": 243.166109500215
+      },
+      {
+        "quantity": "Shape-stratified W1 (S-C, independent)",
+        "anchor": "shape LOD windows, particle-rebuilt",
+        "slope_source": "pooled fragment / fiber slopes",
+        "window_um": "fragment / fiber windows",
+        "W1_median_L": 1632.83640458896
+      }
+    ],
+    "slope_bootstrap": {
+      "table": [
+        {
+          "river": "Carmel",
+          "a_cpsd": -1.15926184157195,
+          "se_info": 0.0752305133393824,
+          "se_boot": 0.0760376506986784,
+          "boot_ci_lo": -1.31384406578389,
+          "boot_ci_hi": -1.01742359125932,
+          "n_failed": 0,
+          "reps": 1000
+        },
+        {
+          "river": "Pajaro",
+          "a_cpsd": -1.5849821051695,
+          "se_info": 0.0721185882018514,
+          "se_boot": 0.0720673288498335,
+          "boot_ci_lo": -1.72463170556597,
+          "boot_ci_hi": -1.44041241279528,
+          "n_failed": 0,
+          "reps": 1000
+        },
+        {
+          "river": "Salinas",
+          "a_cpsd": -1.25807118666116,
+          "se_info": 0.101465726672775,
+          "se_boot": 0.101449327790192,
+          "boot_ci_lo": -1.46100014709987,
+          "boot_ci_hi": -1.06778071259977,
+          "n_failed": 0,
+          "reps": 1000
+        },
+        {
+          "river": "San Lorenzo",
+          "a_cpsd": -1.48617607017689,
+          "se_info": 0.0789030189869127,
+          "se_boot": 0.0797527471383716,
+          "boot_ci_lo": -1.64808633838123,
+          "boot_ci_hi": -1.33930215943166,
+          "n_failed": 0,
+          "reps": 1000
+        }
+      ],
+      "heterogeneity_boot": {
+        "Q": 19.6737702803481,
+        "df": 3,
+        "p_value": 0.000198323411595326,
+        "i2": 84.7512705635449,
+        "weighted_mean": -1.38989685860667
+      }
+    }
+  },
+  "mpsizebase": {
+    "D1": {
+      "n_ocean_psd": 99,
+      "detection": {
+        "FTIR": 90,
+        "microscopy": 2,
+        "Raman": 7
+      },
+      "n_observed_window": 57,
+      "n_studies_observed_window": 11,
+      "n_lod_covers": 26,
+      "lod_covers_by_shape": [
+        {
+          "shape": "Fibers",
+          "n": 8,
+          "median_a_psd": -1.3418557558815
+        },
+        {
+          "shape": "Fragments",
+          "n": 18,
+          "median_a_psd": -2.94031098045391
+        }
+      ],
+      "n_samples_observed": 40,
+      "sample_median_m3": 61.8521442307694,
+      "sample_location": {
+        "coastal": 25,
+        "offshore": 15
+      },
+      "sample_sampling": {
+        "CTD": 10,
+        "IS pump": 8,
+        "pump": 20,
+        "tow": 2
+      }
+    },
+    "D3": {
+      "stage_counts": [
+        {
+          "stage": "Ocean PSDs",
+          "n_psd": 99
+        },
+        {
+          "stage": "FTIR or Raman",
+          "n_psd": 97
+        },
+        {
+          "stage": "+ PSD_MP_count >= 50",
+          "n_psd": 92
+        },
+        {
+          "stage": "+ LOD overlaps our ocean fit window (slope tier)",
+          "n_psd": 59
+        },
+        {
+          "stage": "+ observed 165-385 µm window (concentration tier)",
+          "n_psd": 53
+        }
+      ]
+    },
+    "D4": {
+      "ours": [
+        {
+          "shape": "all",
+          "a_psd": -2.65308786801187,
+          "se": 0.00824584838036296,
+          "window": "250–985 µm",
+          "a_psd_mle": -2.00364938563062,
+          "se_mle": 0.0654841703497156
+        },
+        {
+          "shape": "fragment",
+          "a_psd": -3.58506396007815,
+          "se": 0.0307441109281196,
+          "window": "125–430 µm",
+          "a_psd_mle": -2.69564204352647,
+          "se_mle": 0.0839433152761264
+        },
+        {
+          "shape": "fiber",
+          "a_psd": -2.49005686961398,
+          "se": 0.0136493465834702,
+          "window": "245–1420 µm",
+          "a_psd_mle": -0.27526439251358,
+          "se_mle": 0.127423431009861
+        }
+      ],
+      "mpsizebase": [
+        {
+          "shape": "fragment",
+          "level": "PSD level: all included",
+          "n": 34,
+          "median": -2.9952141965296,
+          "q25": -3.31611791484097,
+          "q75": -2.78294801652402,
+          "boot_ci_lo": -3.05011741260528,
+          "boot_ci_hi": -2.94031098045391,
+          "ours": -3.58506396007815,
+          "ours_window": "125–430 µm",
+          "ours_headline_mle": -2.69564204352647,
+          "mann_whitney_p_descriptive": 3.70323959697183e-07
+        },
+        {
+          "shape": "fragment",
+          "level": "PSD level: LOD covers 165-385",
+          "n": 17,
+          "median": -2.94031098045391,
+          "q25": -2.94031098045391,
+          "q75": -2.58822345127969,
+          "boot_ci_lo": -2.94031098045391,
+          "boot_ci_hi": -2.58822345127969,
+          "ours": -3.58506396007815,
+          "ours_window": "125–430 µm",
+          "ours_headline_mle": -2.69564204352647,
+          "mann_whitney_p_descriptive": 0.000287567281794699
+        },
+        {
+          "shape": "fragment",
+          "level": "Study level (mean per study)",
+          "n": 10,
+          "median": -3.00465211229028,
+          "q25": -3.28090647723315,
+          "q75": -2.75447412426259,
+          "boot_ci_lo": -3.35534867063348,
+          "boot_ci_hi": -2.66817701647663,
+          "ours": -3.58506396007815,
+          "ours_window": "125–430 µm",
+          "ours_headline_mle": -2.69564204352647,
+          "mann_whitney_p_descriptive": 0.00592153702414871
+        },
+        {
+          "shape": "fiber",
+          "level": "PSD level: all included",
+          "n": 25,
+          "median": -1.77359581634433,
+          "q25": -2.16750613833638,
+          "q75": -1.77359581634433,
+          "boot_ci_lo": -2.16542113254368,
+          "boot_ci_hi": -1.77359581634433,
+          "ours": -2.49005686961398,
+          "ours_window": "245–1420 µm",
+          "ours_headline_mle": -0.27526439251358,
+          "mann_whitney_p_descriptive": 1.44362940505353e-05
+        },
+        {
+          "shape": "fiber",
+          "level": "PSD level: LOD covers 165-385",
+          "n": 6,
+          "median": -1.27292552286514,
+          "q25": -1.59577354409325,
+          "q75": -1.27292552286514,
+          "boot_ci_lo": -2.19364634248154,
+          "boot_ci_hi": -1.27292552286514,
+          "ours": -2.49005686961398,
+          "ours_window": "245–1420 µm",
+          "ours_headline_mle": -0.27526439251358,
+          "mann_whitney_p_descriptive": 0.0522595003179698
+        },
+        {
+          "shape": "fiber",
+          "level": "Study level (mean per study)",
+          "n": 6,
+          "median": -2.03307620021482,
+          "q25": -2.14609105437457,
+          "q75": -1.82627351174337,
+          "boot_ci_lo": -2.27308822041711,
+          "boot_ci_hi": -1.52326066960473,
+          "ours": -2.49005686961398,
+          "ours_window": "245–1420 µm",
+          "ours_headline_mle": -0.27526439251358,
+          "mann_whitney_p_descriptive": 0.0360316862182336
+        }
+      ]
+    },
+    "D5": {
+      "table": [
+        {
+          "source": "MPsizeBase",
+          "group": "all Ocean subsurface",
+          "n": 18,
+          "median_m3": 22.494375,
+          "q25": 13.9601582350272,
+          "q75": 141.64345
+        },
+        {
+          "source": "MPsizeBase",
+          "group": "all Ocean surface",
+          "n": 22,
+          "median_m3": 99.5551888888889,
+          "q25": 10.4532,
+          "q75": 645.255162
+        },
+        {
+          "source": "MPsizeBase",
+          "group": "coastal / pump/CTD",
+          "n": 24,
+          "median_m3": 83.4226055555555,
+          "q25": 17.6472723878662,
+          "q75": 617.930382
+        },
+        {
+          "source": "MPsizeBase",
+          "group": "coastal / tow",
+          "n": 1,
+          "median_m3": 0.544,
+          "q25": 0.544,
+          "q75": 0.544
+        },
+        {
+          "source": "MPsizeBase",
+          "group": "offshore / pump/CTD",
+          "n": 14,
+          "median_m3": 22.494375,
+          "q25": 13.3703125,
+          "q75": 259.32061875
+        },
+        {
+          "source": "MPsizeBase",
+          "group": "offshore / tow",
+          "n": 1,
+          "median_m3": 0.00887112,
+          "q25": 0.00887112,
+          "q75": 0.00887112
+        },
+        {
+          "source": "This study (CA coastal, depth not recorded)",
+          "group": "This study",
+          "n": 6,
+          "median_m3": 320,
+          "q25": 142.5,
+          "q75": 478.75
+        }
+      ],
+      "n_ours": 6,
+      "n_ours_zero": 0
+    },
+    "D6": [
+      {
+        "panel": "1. Measured: identical window\n165–385 µm",
+        "source": "This study: 6 samples with particle data",
+        "variant": "particle-rebuilt",
+        "n": 6,
+        "median_m3": 320,
+        "q25": 142.5,
+        "q75": 478.75
+      },
+      {
+        "panel": "1. Measured: identical window\n165–385 µm",
+        "source": "This study: 6 samples with particle data",
+        "variant": "reported x in-window fraction",
+        "n": 6,
+        "median_m3": 201.605999351922,
+        "q25": 64.3657205240175,
+        "q75": 486.220901711596
+      },
+      {
+        "panel": "1. Measured: identical window\n165–385 µm",
+        "source": "MPsizeBase: sample totals",
+        "variant": "observed bins",
+        "n": 40,
+        "median_m3": 61.8521442307694,
+        "q25": 12.73875,
+        "q75": 486.576261
+      },
+      {
+        "panel": "2. Measured: identical window\n50–500 µm",
+        "source": "This study: all 15 samples (reported)",
+        "variant": "reported",
+        "n": 15,
+        "median_m3": 100,
+        "q25": 62.5,
+        "q75": 387.5
+      },
+      {
+        "panel": "2. Measured: identical window\n50–500 µm",
+        "source": "This study: 6 samples with particle data",
+        "variant": "particle-rebuilt",
+        "n": 6,
+        "median_m3": 1280,
+        "q25": 841.25,
+        "q75": 1745
+      },
+      {
+        "panel": "2. Measured: identical window\n50–500 µm",
+        "source": "MPsizeBase: sample totals",
+        "variant": "observed bins",
+        "n": 26,
+        "median_m3": 984.959450899471,
+        "q25": 145.807192307693,
+        "q75": 2007.38216777778
+      },
+      {
+        "panel": "3. Measured: each study's\nown reported range",
+        "source": "This study: all 15 samples (reported)",
+        "variant": "reported",
+        "n": 15,
+        "median_m3": 100,
+        "q25": 62.5,
+        "q75": 387.5
+      },
+      {
+        "panel": "3. Measured: each study's\nown reported range",
+        "source": "MPsizeBase: sample totals",
+        "variant": "reported (own range)",
+        "n": 79,
+        "median_m3": 44.3,
+        "q25": 1.125,
+        "q75": 418.5
+      },
+      {
+        "panel": "4. Rescaled 1–5000 µm:\nLOD-anchored",
+        "source": "This study: 6 samples with particle data",
+        "variant": "production (LOD window x CF)",
+        "n": 6,
+        "median_m3": 93322.4461896553,
+        "q25": 53518.1094270518,
+        "q75": 140309.534237494
+      },
+      {
+        "panel": "4. Rescaled 1–5000 µm:\nLOD-anchored",
+        "source": "MPsizeBase: sample totals",
+        "variant": "LOD window x own CF",
+        "n": 79,
+        "median_m3": 23544.2606133864,
+        "q25": 873.458489032483,
+        "q75": 533374.042502425
+      },
+      {
+        "panel": "5. Rescaled 1–5000 µm:\nreported-range anchored",
+        "source": "This study: all 15 samples (reported)",
+        "variant": "50-500 µm sieve x CF",
+        "n": 15,
+        "median_m3": 5654.36545294702,
+        "q25": 3533.97840809189,
+        "q75": 21910.6661301697
+      },
+      {
+        "panel": "5. Rescaled 1–5000 µm:\nreported-range anchored",
+        "source": "MPsizeBase: sample totals",
+        "variant": "reported range x own CF",
+        "n": 78,
+        "median_m3": 9637.91513610365,
+        "q25": 455.477372189923,
+        "q75": 201109.930159791
+      },
+      {
+        "panel": "6. Rescaled 1–5000 µm:\nMPsizeBase published fit",
+        "source": "MPsizeBase: sample totals",
+        "variant": "published fit",
+        "n": 79,
+        "median_m3": 24512.7964143521,
+        "q25": 867.064110006419,
+        "q75": 551432.297331217
+      }
+    ],
+    "ocean_decomposition": {
+      "steps": [
+        {
+          "step": "A. All 15 samples: reported 50–500 µm x CF(50–500 µm -> 1–5000 µm)",
+          "value_m3": 5654.36545294702
+        },
+        {
+          "step": "B. Only the 6 samples with particle-level data (same anchor)",
+          "value_m3": 42973.1774423974,
+          "fold_vs_previous": 7.6
+        },
+        {
+          "step": "C. Concentration rebuilt from QC-passing particle rows (same anchor)",
+          "value_m3": 72375.8777977219,
+          "fold_vs_previous": 1.68421052631579
+        },
+        {
+          "step": "D. Anchored on the fitted LOD window instead of 50–500 µm (production)",
+          "value_m3": 93322.4461896553,
+          "fold_vs_previous": 1.28941366971017
+        }
+      ],
+      "predicted_lod_fraction": 0.443558264167511,
+      "observed_lod_fraction": 0.608544461003477,
+      "field_blank_qc_particles_median": 11,
+      "ocean_sample_volume_L": 200,
+      "mpsizebase_blank_corrected": {
+        "no": 9,
+        "yes": 90
+      }
+    }
+  },
+  "slope_methods": {
+    "per_river": [
+      {
+        "river": "Carmel",
+        "n_particles": 1890,
+        "window_um": "165–535",
+        "cpsd_segur": -2.61021967186044,
+        "tpl_mle_fixed": -2.15926184157195,
+        "tpl_mle_fixed_se": 0.0752305133393824,
+        "tpl_mle_fixed_n": 966,
+        "tpl_mle_segur_window": -2.08439502268608,
+        "bn_psd_window": -1.8765815553794,
+        "mle_xmin_poweRlaw": -3.01728863394014,
+        "mle_xmin_um": 382.9455266,
+        "cpsd_blank_subtracted": -2.44418994859384,
+        "above_window_observed": 81,
+        "above_window_expected": 155.736985563223,
+        "tail_ratio": 0.520107665543052
+      },
+      {
+        "river": "Pajaro",
+        "n_particles": 2350,
+        "window_um": "145–535",
+        "cpsd_segur": -3.46217619626766,
+        "tpl_mle_fixed": -2.5849821051695,
+        "tpl_mle_fixed_se": 0.0721185882018514,
+        "tpl_mle_fixed_n": 1199,
+        "tpl_mle_segur_window": -2.80641255911659,
+        "bn_psd_window": -2.68741858797823,
+        "mle_xmin_poweRlaw": -3.89449124085235,
+        "mle_xmin_um": 248.6067977,
+        "cpsd_blank_subtracted": -3.3657823955566,
+        "above_window_observed": 26,
+        "above_window_expected": 93.3320536725753,
+        "tail_ratio": 0.278575248019425
+      },
+      {
+        "river": "Salinas",
+        "n_particles": 987,
+        "window_um": "145–480",
+        "cpsd_segur": -3.04125018843338,
+        "tpl_mle_fixed": -2.25807118666116,
+        "tpl_mle_fixed_se": 0.101465726672775,
+        "tpl_mle_fixed_n": 546,
+        "tpl_mle_segur_window": -2.42378392550176,
+        "bn_psd_window": -1.85673694072927,
+        "mle_xmin_poweRlaw": -2.91083317908548,
+        "mle_xmin_um": 128.0776406,
+        "cpsd_blank_subtracted": -2.74271387455244,
+        "above_window_observed": 25,
+        "above_window_expected": 87.5034801591042,
+        "tail_ratio": 0.285702922381412
+      },
+      {
+        "river": "San Lorenzo",
+        "n_particles": 1923,
+        "window_um": "80–330",
+        "cpsd_segur": -2.3989438015453,
+        "tpl_mle_fixed": -2.48617607017689,
+        "tpl_mle_fixed_se": 0.0789030189869127,
+        "tpl_mle_fixed_n": 969,
+        "tpl_mle_segur_window": -2.44013184347667,
+        "bn_psd_window": -2.45485474277994,
+        "mle_xmin_poweRlaw": -2.53492736221779,
+        "mle_xmin_um": 240.0581317,
+        "cpsd_blank_subtracted": -2.34262597726096,
+        "above_window_observed": 193,
+        "above_window_expected": 166.514718993147,
+        "tail_ratio": 1.15905669581044
+      }
+    ],
+    "simulation": [
+      {
+        "case": "complete detection",
+        "estimator": "C-PSD (Segur)",
+        "n_reps": 100,
+        "mean_bias": -0.0908639913482508,
+        "sd": 0.0951338115565448,
+        "rmse": 0.13121052779407
+      },
+      {
+        "case": "complete detection",
+        "estimator": "MLE above xmin (poweRlaw)",
+        "n_reps": 100,
+        "mean_bias": -0.028139547497512,
+        "sd": 0.0480305419434665,
+        "rmse": 0.0554589736936593
+      },
+      {
+        "case": "complete detection",
+        "estimator": "Truncated MLE, 100–500 µm",
+        "n_reps": 100,
+        "mean_bias": 0.00610026317826309,
+        "sd": 0.0787224966552375,
+        "rmse": 0.0785650836929588
+      },
+      {
+        "case": "complete detection",
+        "estimator": "Truncated MLE, Segur window",
+        "n_reps": 100,
+        "mean_bias": 0.452300735458232,
+        "sd": 0.470694661385747,
+        "rmse": 0.651086695387434
+      },
+      {
+        "case": "large particles undercounted",
+        "estimator": "C-PSD (Segur)",
+        "n_reps": 100,
+        "mean_bias": -0.397790479048194,
+        "sd": 0.109406932014097,
+        "rmse": 0.412416589417062
+      },
+      {
+        "case": "large particles undercounted",
+        "estimator": "MLE above xmin (poweRlaw)",
+        "n_reps": 100,
+        "mean_bias": -0.20391657949199,
+        "sd": 0.132397875256504,
+        "rmse": 0.242767124607978
+      },
+      {
+        "case": "large particles undercounted",
+        "estimator": "Truncated MLE, 100–500 µm",
+        "n_reps": 100,
+        "mean_bias": 0.00205196334729207,
+        "sd": 0.0901100128809492,
+        "rmse": 0.0896818088062981
+      },
+      {
+        "case": "large particles undercounted",
+        "estimator": "Truncated MLE, Segur window",
+        "n_reps": 100,
+        "mean_bias": 0.049054793392439,
+        "sd": 0.145079246281526,
+        "rmse": 0.152459439128492
+      },
+      {
+        "case": "small particles undercounted",
+        "estimator": "C-PSD (Segur)",
+        "n_reps": 100,
+        "mean_bias": -0.0665219688188737,
+        "sd": 0.063944756628723,
+        "rmse": 0.0920500674461608
+      },
+      {
+        "case": "small particles undercounted",
+        "estimator": "MLE above xmin (poweRlaw)",
+        "n_reps": 100,
+        "mean_bias": -0.0342560475027081,
+        "sd": 0.0618011820289281,
+        "rmse": 0.0703894099256328
+      },
+      {
+        "case": "small particles undercounted",
+        "estimator": "Truncated MLE, 100–500 µm",
+        "n_reps": 100,
+        "mean_bias": 7.09075380580959e-05,
+        "sd": 0.0919724511489328,
+        "rmse": 0.091511460924402
+      },
+      {
+        "case": "small particles undercounted",
+        "estimator": "Truncated MLE, Segur window",
+        "n_reps": 100,
+        "mean_bias": 0.374631083567219,
+        "sd": 0.35846849073734,
+        "rmse": 0.517265029784288
+      }
+    ],
+    "sensitivity": {
+      "cf_w1": [
+        {
+          "river": "Carmel",
+          "a_psd_mle": -2.15926184157195,
+          "a_psd_cpsd": -2.61021967186044,
+          "CF_mle": 245.977916873192,
+          "CF_cpsd": 4372.75113587904,
+          "W1_mle": 41.6319832912429,
+          "W1_cpsd": 233.784404187393
+        },
+        {
+          "river": "Pajaro",
+          "a_psd_mle": -2.5849821051695,
+          "a_psd_cpsd": -3.46217619626766,
+          "CF_mle": 1613.85296964264,
+          "CF_cpsd": 219924.73371874,
+          "W1_mle": 320.915164466736,
+          "W1_cpsd": 30265.878848809
+        },
+        {
+          "river": "Salinas",
+          "a_psd_mle": -2.25807118666116,
+          "a_psd_cpsd": -3.04125018843338,
+          "CF_mle": 381.267293123562,
+          "CF_cpsd": 28517.7815170887,
+          "W1_mle": 55.730707149833,
+          "W1_cpsd": 2476.69313627527
+        },
+        {
+          "river": "San Lorenzo",
+          "a_psd_mle": -2.48617607017689,
+          "a_psd_cpsd": -2.3989438015453,
+          "CF_mle": 1024.22191498425,
+          "CF_cpsd": 528.994418154213,
+          "W1_mle": 219.420013380588,
+          "W1_cpsd": 143.763506814179
+        }
+      ],
+      "risk": [
+        {
+          "slopes": "Fixed-window MLE (headline)",
+          "ERM": "Food Dilution",
+          "RQ_p50": 117.072923518028,
+          "RQ_p95": 24308.2197756217,
+          "P_exceed": 0.9585
+        },
+        {
+          "slopes": "Fixed-window MLE (headline)",
+          "ERM": "Tissue Translocation",
+          "RQ_p50": 0.162145120555575,
+          "RQ_p95": 18.4060859076259,
+          "P_exceed": 0.25625
+        },
+        {
+          "slopes": "C-PSD (former production, sensitivity)",
+          "ERM": "Food Dilution",
+          "RQ_p50": 41.6815427899452,
+          "RQ_p95": 9168.28902184084,
+          "P_exceed": 0.91775
+        },
+        {
+          "slopes": "C-PSD (former production, sensitivity)",
+          "ERM": "Tissue Translocation",
+          "RQ_p50": 0.552773915393641,
+          "RQ_p95": 131.757745582199,
+          "P_exceed": 0.41475
+        }
+      ],
+      "W1_median_all": {
+        "mle": 107.727399887851,
+        "cpsd": 1193.0794942126
+      }
+    },
+    "upper_500": {
+      "per_river": [
+        {
+          "river": "Carmel",
+          "a_psd": -2.15926184157195,
+          "vol_share_gt500": 0.985570302226142,
+          "W1_5000": 41.6319832912429,
+          "W1_500": 41.6029395528779,
+          "HC5_FD_5000": 0.291657788285372,
+          "HC5_FD_500": 6.01431524130012
+        },
+        {
+          "river": "Pajaro",
+          "a_psd": -2.5849821051695,
+          "vol_share_gt500": 0.961548015149233,
+          "W1_5000": 320.915164466736,
+          "W1_500": 320.898399621237,
+          "HC5_FD_5000": 4.95974454441373,
+          "HC5_FD_500": 42.5306869528831
+        },
+        {
+          "river": "Salinas",
+          "a_psd": -2.25807118666116,
+          "vol_share_gt500": 0.981883983569675,
+          "W1_5000": 55.730707149833,
+          "W1_500": 55.7096683386801,
+          "HC5_FD_5000": 0.378990069741521,
+          "HC5_FD_500": 7.41249016313209
+        },
+        {
+          "river": "San Lorenzo",
+          "a_psd": -2.48617607017689,
+          "vol_share_gt500": 0.969370386691455,
+          "W1_5000": 219.420013380588,
+          "W1_500": 219.399318376828,
+          "HC5_FD_5000": 1.13888169071126,
+          "HC5_FD_500": 15.6290708068
+        }
+      ],
+      "risk": [
+        {
+          "range": "1–5000 µm (headline)",
+          "ERM": "Food Dilution",
+          "RQ_p50": 117.072923518028,
+          "RQ_p95": 24308.2197756217,
+          "P_exceed": 0.9585
+        },
+        {
+          "range": "1–5000 µm (headline)",
+          "ERM": "Tissue Translocation",
+          "RQ_p50": 0.162145120555575,
+          "RQ_p95": 18.4060859076259,
+          "P_exceed": 0.25625
+        },
+        {
+          "range": "1–500 µm (sensitivity)",
+          "ERM": "Food Dilution",
+          "RQ_p50": 8.19268007258059,
+          "RQ_p95": 1560.93101508356,
+          "P_exceed": 0.78775
+        },
+        {
+          "range": "1–500 µm (sensitivity)",
+          "ERM": "Tissue Translocation",
+          "RQ_p50": 0.16217229195871,
+          "RQ_p95": 18.4097650600436,
+          "P_exceed": 0.25625
+        }
+      ]
+    }
+  }
 }

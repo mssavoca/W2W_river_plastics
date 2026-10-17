@@ -66,27 +66,35 @@ plot_cpsd_multi <- function(fits,
       dplyr::filter(L_low > 0, N_ge > 0, n > 0)  # populated bins only (as in the fit); empty bins repeat N_ge
   }))
 
-  # Per-group fit parameters for equation labels
+  # Per-group fit parameters for equation labels. Headline fits (estimator =
+  # "tpl_mle") are labelled with the fixed-window MLE slope; C-PSD fits with the
+  # cumulative slope and R^2.
   params <- dplyr::bind_rows(lapply(names(fits), function(grp) {
     fo         <- fits[[grp]]
-    r_squared  <- summary(fo$fit)$r.squared
+    is_mle     <- identical(fo$estimator, "tpl_mle")
     lod_lo     <- if (!is.null(fo$lower_lod_used_um) && is.finite(fo$lower_lod_used_um))
                     fo$lower_lod_used_um else fo$lower_lod_um
     data.frame(
       shape            = grp,
+      is_mle           = is_mle,
+      a_psd            = fo$a_psd,
+      se_a_psd         = fo$se_a_psd,
       a_cpsd           = fo$a_cpsd,
       se_a_cpsd        = fo$se_a_cpsd,
-      r_squared        = r_squared,
+      r_squared        = if (is_mle) NA_real_ else summary(fo$fit)$r.squared,
       lower_lod_um     = lod_lo,
       upper_lod_um     = fo$upper_lod_um,
       stringsAsFactors = FALSE
     )
   })) |>
     dplyr::mutate(
-      fit_label = sprintf(
-        "atop(italic(a)[cpsd]==%.2f~(SE==%.3f), italic(R)^2==%.3f~~'LOD:'~%d*'-'*%d~mu*m)",
-        a_cpsd, se_a_cpsd, r_squared,
-        round(lower_lod_um), round(upper_lod_um)
+      fit_label = ifelse(
+        is_mle,
+        sprintf("atop(italic(a)[psd]==%.2f~(SE==%.3f)~'MLE', 'window: %s-%s'~mu*m)",
+                a_psd, se_a_psd, format(signif(lower_lod_um, 3), big.mark = ",", scientific = FALSE, trim = TRUE),
+                format(signif(upper_lod_um, 3), big.mark = ",", scientific = FALSE, trim = TRUE)),
+        sprintf("atop(italic(a)[cpsd]==%.2f~(SE==%.3f), italic(R)^2==%.3f~~'LOD:'~%d*'-'*%d~mu*m)",
+                a_cpsd, se_a_cpsd, r_squared, round(lower_lod_um), round(upper_lod_um))
       )
     )
 
@@ -95,17 +103,7 @@ plot_cpsd_multi <- function(fits,
     fo     <- fits[[grp]]
     lod_lo <- if (!is.null(fo$lower_lod_used_um) && is.finite(fo$lower_lod_used_um))
                  fo$lower_lod_used_um else fo$lower_lod_um
-    grid <- tibble::tibble(
-      L_low = seq(lod_lo, fo$upper_lod_um, length.out = 200)
-    )
-    pred <- predict(fo$fit, newdata = grid, se.fit = TRUE)
-    tibble::tibble(
-      shape    = grp,
-      L_low    = grid$L_low,
-      logN_fit = pred$fit,
-      logN_lo  = pred$fit - 1.96 * pred$se.fit,
-      logN_hi  = pred$fit + 1.96 * pred$se.fit
-    )
+    dplyr::mutate(fit_curve_logN(fo, seq(lod_lo, fo$upper_lod_um, length.out = 200)), shape = grp)
   }))
 
   # LOD boundary positions for vertical dotted lines (one row per boundary per shape)

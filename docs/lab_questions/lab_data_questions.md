@@ -79,11 +79,13 @@ For the rescaling to be valid, **the concentration and the CF must describe the 
 
 ## 3. Why the rescaled estimates are so high
 
+> **Update 2026-10-15.** The numbers in Sections 3.1 and 3.2 were calculated with the former production slopes: C-PSD fits (Segur et al. 2026), each with its own data-selected LOD window. Section 3.3 shows why those slopes are too steep for Carmel, Pajaro and Salinas. The report now uses maximum-likelihood slopes on a fixed 100–500 µm window for every matrix, which lowers the river median 1–5000 µm estimate roughly tenfold. The Food Dilution risk quotient nevertheless rises, because the shallower slopes raise the mean volume of the particles that test species can ingest, which lowers the hazard threshold in particles per litre. How much of that comes from particles larger than 500 µm, where the counts fall short (Section 3.3), is being tested; Q6/Q7 (the large-particle shortfall) bear directly on it. The data questions themselves (Q1–Q14) are unchanged: blank correction, the summary-vs-particle count mismatch, sample selection and the large-particle shortfall still need the lab's answers.
+
 ### 3.1 Ocean water
 
 ![Figure 5](figs/fig5_ocean_decomposition.png)
 
-*Figure 5. The ocean 1–5000 µm estimate step by step (medians over samples, fitted ocean slope). Starting from all 15 samples' reported 50–500 µm concentrations, the estimate (about 67,000 per m³) is comparable to MPsizeBase (dashed line, sample median about 25,000; fragment PSDs about 51,000). Three steps raise it to the production value of about 2.5 million per m³.*
+*Figure 5. The ocean 1–5000 µm estimate step by step (medians over samples, fitted ocean slope). Starting from all 15 samples' reported 50–500 µm concentrations, the estimate (about 67,000 per m³) is comparable to MPsizeBase (dashed line, sample median about 25,000; fragment PSDs about 51,000). Three steps raise it to about 2.5 million per m³ under the former C-PSD production slopes.*
 
 1. **Sample selection (×7.6).** Only the 2024 ocean samples have particle data, and they are the high ones (reported 180–2,540 per m³). The 2025 samples (10–130 per m³) drop out of any analysis that needs particle rows. → Q10
 2. **Rebuild basis and blanks (×1.7).** The particle rows outnumber the summary counts and are not blank-corrected. → Q3, Q4
@@ -103,7 +105,7 @@ The river comparison uses the RIVM Dutch-river benchmark in the report (Section 
 |---|---|---|---|---|---|
 | A. Reported 50–500 µm, sieve-anchored with each river's slope (= RIVM W1) | 282,000 | 78,400 | 3,060,000 | 350,000 | 70,100 |
 | B. Rebuilt from QC-passing particle rows | 559,000 | 197,000 | 4,510,000 | 934,000 | 97,300 |
-| C. Anchored on the LOD window (production) | 1,200,000 | 241,000 | 30,600,000 | 2,470,000 | 144,000 |
+| C. Anchored on the C-PSD LOD window (former production) | 1,200,000 | 241,000 | 30,600,000 | 2,470,000 | 144,000 |
 | Fitted slope (a) | | −2.61 | −3.46 | −3.04 | −2.40 |
 | LOD window (µm) | | 165–535 | 145–535 | 145–480 | 80–330 |
 | Share of 1–5000 µm count below 10 µm | | 97.5% | 99.7% | 99.1% | 96.0% |
@@ -123,14 +125,14 @@ How each ocean mechanism carries over to rivers:
 
 The steep river slopes come mostly from a shortage of large particles, not from the rivers or from contamination. The Segur et al. (2026) C-PSD method regresses the number of particles at or above each size. Every point in the fit window therefore also counts the particles above the window, and a shortage there bends the top of the window down and steepens the slope. Segur et al. describe this right-tail "slump" and tie the upper detection limit to the sampled volume and the fraction of the filter analysed.
 
-| River | C-PSD slope (production) | Maximum-likelihood slope, 100–500 µm | Particles above window, observed vs expected | Correction factor 50–500 → 1–5000 µm: C-PSD vs MLE |
+| River | C-PSD slope (former production) | Maximum-likelihood slope, 100–500 µm | Particles above window, observed vs expected | Correction factor 50–500 → 1–5000 µm: C-PSD vs MLE |
 |---|---|---|---|---|
 | Carmel | −2.61 | −2.16 | 52% | 557 vs 100 (5.5×) |
 | Pajaro | −3.46 | −2.58 | 28% | 15,170 vs 497 (31×) |
 | Salinas | −3.04 | −2.26 | 29% | 2,950 vs 146 (20×) |
 | San Lorenzo | −2.40 | −2.49 | 116% | 249 vs 351 (0.7×) |
 
-The power-law fitting literature recommends maximum likelihood on the individual measurements, bounded at both ends when the upper tail is incomplete, over a window fixed in advance. Here that window is 100–500 µm: reliable µFTIR detection starts around 100 µm, and 500 µm is the sieve boundary. In simulation, this estimator stays close to the true slope whether large or small particles are undercounted; the C-PSD fit becomes about 0.4 too steep when large particles are undercounted. On that basis the C-PSD slopes for Carmel, Pajaro and Salinas are too steep, which inflates their extrapolated concentrations 5.5–31-fold. The report now includes this comparison, the simulation and a risk sensitivity (Section 13.7). Subtracting the expected blank particles changes the slopes only slightly (+0.06 to +0.30), so contamination is not the cause.
+The power-law fitting literature recommends maximum likelihood on the individual measurements, bounded at both ends when the upper tail is incomplete, over a window fixed in advance. Here that window is 100–500 µm: reliable µFTIR detection starts around 100 µm, and 500 µm is the sieve boundary. In simulation, this estimator stays close to the true slope whether large or small particles are undercounted; the C-PSD fit becomes about 0.4 too steep when large particles are undercounted. On that basis the C-PSD slopes for Carmel, Pajaro and Salinas are too steep, which inflates their extrapolated concentrations 5.5–31-fold. On 2026-10-15 the report switched its headline slopes, for every matrix, to this fixed-window maximum-likelihood estimator. The C-PSD slopes are kept as a comparison and as a full exposure-and-risk sensitivity (Section 13.7, with figures, simulation and references). Subtracting the expected blank particles changes the slopes only slightly (+0.06 to +0.30), so contamination is not the cause.
 
 Whether the shortage is real or a counting artefact is a question for the lab: were the 212–500 µm and >500 µm sieve fractions aliquoted, imaged or counted differently from the <212 µm fraction? → Q6, Q7
 
