@@ -233,8 +233,6 @@ p_small_w_arrows <- ggplot() +
   
   theme_minimal(base_size = 13) +
   theme(
-    axis.text = element_text(size = 14),
-    axis.title = element_text(size = 16),
     axis.text.x = element_text(
       angle = 45,
       hjust = 1
@@ -446,8 +444,6 @@ p_large_vert_w_arrows <- ggplot() +
   # Theme
   theme_minimal(base_size = 13) +
   theme(
-    axis.text = element_text(size = 14),
-    axis.title = element_text(size = 16),
     axis.text.x = element_text(angle = 45, hjust = 1),
     strip.text = element_text(face = "bold", size = 12),
     axis.title.y.right = element_text(color = "steelblue3"),
@@ -1547,7 +1543,6 @@ p_MP_flux <- ggplot() +
   )
 
 p_MP_flux
-
 
 
 
