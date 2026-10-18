@@ -1343,6 +1343,23 @@ alpha_draws_by_group <- function(fits, n, structural_sd = 0, seed = 8101) {
   }), names(fits))
 }
 
+#' Mouth-size coverage of toxicity records for Food Dilution alignment
+#'
+#' PSSDplusplus >= 0.3.6 predicts each record's maximum ingestible size from
+#' body.length.cm with the Jams et al. (2020) model (log10 mouth mm =
+#' 0.9341 log10 body mm - 1.12, sampled coefficients) and excludes records with
+#' neither a mouth size nor a body length from Food Dilution SSDs
+#' (missing_mouth = "exclude"). Earlier versions assumed ingestion up to the
+#' upper size limit (5000 um) for such records (ToMEx2.0_EcoToxRisk#6).
+#' This helper only reports the coverage; it does not modify the data.
+ingestion_coverage <- function(tox) {
+  no_mouth <- is.na(tox$max.size.ingest.um) & (is.na(tox$body.length.cm) | tox$body.length.cm <= 0)
+  heterotroph <- tox$Group != "Algae"
+  list(n_records = nrow(tox), n_excluded_fd = sum(no_mouth & heterotroph),
+       n_predicted_from_body = sum(is.na(tox$max.size.ingest.um) & !no_mouth),
+       species_excluded_fd = sort(unique(as.character(tox$Species[no_mouth & heterotroph]))))
+}
+
 #' Run the MC_sim_align_parallel() + make_all_pSSDs() pipeline for one matrix
 #'
 #' Wraps toxicity-data/particle-trait Monte Carlo alignment, ERM-specific
@@ -1391,6 +1408,10 @@ run_pssd_pipeline <- function(tox_data, param_matrix, environments, cache_suffix
   tissue_col <- paste0("particles_", dose_unit, "_ox_stress")
   dose_col   <- paste0("dose_new_particles_", dose_unit)
 
+  stopifnot("PSSDplusplus >= 0.3.6 is required (missing mouth sizes; ToMEx2.0_EcoToxRisk#6)" =
+              utils::packageVersion("PSSDplusplus") >= "0.3.6")
+  ingestion_prep <- ingestion_coverage(tox_data)
+
   if (!is.null(seed)) set.seed(seed)
 
   # PSSDplusplus::MC_sim_align_parallel() writes per-step status via cat()
@@ -1407,7 +1428,9 @@ run_pssd_pipeline <- function(tox_data, param_matrix, environments, cache_suffix
         n_sim        = n_sim,
         x1D_set      = x1D_set,
         x2D_set      = x2D_set,
-        num_cores    = 1L
+        num_cores    = 1L,
+        missing_mouth     = "exclude",       # no mouth size and no body length: not aligned for ingestion
+        mouth_size_source = "body_length"    # Jams et al. (2020) model with sampled coefficients
       )
     }),
     type = "output"
@@ -1465,7 +1488,7 @@ run_pssd_pipeline <- function(tox_data, param_matrix, environments, cache_suffix
     type = "output"
   ))
 
-  list(MC_sim_df = MC_sim_df, erm_registry = erm_registry, pSSDs = pSSDs)
+  list(MC_sim_df = MC_sim_df, erm_registry = erm_registry, pSSDs = pSSDs, ingestion_prep = ingestion_prep)
 }
 
 #' Build a "legacy" (cumulative-slope) copy of a param_values row (SPEC 1b)
@@ -1512,12 +1535,30 @@ build_haz_df <- function(pSSDs, environment_key) {
   food_key   <- paste0("Tier3_", environment_key, "_Food Dilution")
   tissue_key <- paste0("Tier3_", environment_key, "_Tissue Translocation")
 
-  haz_HC5_food    <- pSSDs[[food_key]]$summary_05$df   |> dplyr::mutate(HCx = 5,  ERM = "Food Dilution")
-  haz_HC10_food   <- pSSDs[[food_key]]$summary_10$df   |> dplyr::mutate(HCx = 10, ERM = "Food Dilution")
-  haz_HC5_tissue  <- pSSDs[[tissue_key]]$summary_05$df |> dplyr::mutate(HCx = 5,  ERM = "Tissue Translocation")
-  haz_HC10_tissue <- pSSDs[[tissue_key]]$summary_10$df |> dplyr::mutate(HCx = 10, ERM = "Tissue Translocation")
-
-  dplyr::bind_rows(haz_HC5_food, haz_HC10_food, haz_HC5_tissue, haz_HC10_tissue)
+  # An ERM whose SSD could not be fitted (e.g. too few species after excluding records
+  # without a mouth size) yields NA thresholds instead of an error; the caller reports it.
+  get_df <- function(key, slot, hcx, erm) {
+    d <- pSSDs[[key]][[slot]]$df
+    if (is.null(d)) return(NULL)
+    dplyr::mutate(d, HCx = hcx, ERM = erm)
+  }
+  parts <- list(get_df(food_key, "summary_05", 5, "Food Dilution"), get_df(food_key, "summary_10", 10, "Food Dilution"),
+                get_df(tissue_key, "summary_05", 5, "Tissue Translocation"), get_df(tissue_key, "summary_10", 10, "Tissue Translocation"))
+  template <- Filter(Negate(is.null), parts)
+  stopifnot("no pSSD could be fitted for either ERM" = length(template) > 0)
+  template <- template[[1]]
+  fill <- function(hcx, erm) dplyr::mutate(template, PNEC = NA_real_, HCx = hcx, ERM = erm)
+  missing <- c()
+  if (is.null(parts[[1]])) { parts[[1]] <- fill(5, "Food Dilution"); missing <- c(missing, "Food Dilution") }
+  if (is.null(parts[[2]])) parts[[2]] <- fill(10, "Food Dilution")
+  if (is.null(parts[[3]])) { parts[[3]] <- fill(5, "Tissue Translocation"); missing <- c(missing, "Tissue Translocation") }
+  if (is.null(parts[[4]])) parts[[4]] <- fill(10, "Tissue Translocation")
+  out <- dplyr::bind_rows(parts)
+  if (length(missing)) {
+    warning(sprintf("%s: no pSSD fitted for %s; thresholds set to NA", environment_key, paste(missing, collapse = ", ")), call. = FALSE)
+    attr(out, "missing_erm") <- missing
+  }
+  out
 }
 
 

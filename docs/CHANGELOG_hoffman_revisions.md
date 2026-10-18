@@ -361,3 +361,43 @@ This entry changes production numbers on purpose. The C1 number snapshot was reg
 6. **`run_pssd_pipeline()` upper bound.** The function hard-coded `x2D_set = 5000` in its `MC_sim_align_parallel()` call, so an `x2D_set` passed to `aligned_freshwater_hazard()` reached the parameter matrix but not the alignment. It is now passed through (default 5000, so existing results are unchanged). This was caught because the first 1–500 µm sensitivity returned hazards identical to the headline to every digit. That fix was necessary but not sufficient: PSSDplusplus 0.3.4 itself drops `x1D_set`/`x2D_set` between `MC_sim_align_parallel()` and `align_data()` (reported as ToMEx2.0_EcoToxRisk#5, verified with a minimal reproduction). Until the package is fixed, the hazard alignment always runs over 1–5000 µm, which also affects the alignment-floor component of the M1.2 floor sensitivity and the M2 decomposition. Fixed upstream in PSSDplusplus 0.3.5 (commit `f8615ea`, 2026-10-16) and installed here; the reproduction now shows Food Dilution moving about 1.6% and Tissue Translocation about 0.004% for `x2D_set` 500 vs 5000. The `m12-floor-sensitivity`, `m2-grid-run` and `slope-methods-upper-500` cache keys now include the package version, and the JSON `meta` records it (`pssdplusplus_version`). Results at the default 1–5000 µm bounds are unchanged by the fix (package regression test).
 
 The manuscript Sections 3.3–3.11 and the abstract still quote pre-2026-10-15 numbers. They must be refreshed from the JSON after the production render.
+
+## 2026-10-17 - Missing mouth sizes excluded from Food Dilution SSDs (user decision)
+
+PSSDplusplus `align_data()` treats a missing `max.size.ingest.um` as the upper size limit (5000 µm), which assumes the organism can ingest 5 mm particles. Because Food Dilution alignment averages volume up to the ingestible size, this drove the Food Dilution HC5 down by orders of magnitude. The most sensitive species in both SSDs were affected: *Moina macrocopa* (river) and *Pseudechinus huttoni* (ocean). The bug is reported upstream as ToMEx2.0_EcoToxRisk#6. That issue also records that the Jâms et al. (2020) body-length model is sampled but never used, and that the intercept's SD is drawn from the wrong parameter.
+
+`run_pssd_pipeline()` now calls `prepare_tox_ingestion()`:
+
+- A missing mouth size is predicted from the record's body length with the built-in formula, log10(mouth, mm) = 0.9341·log10(body length, mm) − 1.12. No affected record currently has a body length.
+- Records that still have no mouth size are excluded from the Food Dilution SSD only; their Tissue Translocation alignment is unchanged.
+- The test is in `tests/testthat/test-ingestion_prep.R`.
+
+Effect on the median Food Dilution HC5 (standalone pSSD++, n_sim = 200):
+
+| Records | Parameters | Before | After |
+|---|---|---|---|
+| Freshwater | package defaults | 32.6 /L | 450 /L |
+| Freshwater | pooled river slopes | 1.4 /L | 76 /L |
+| Marine | defaults | 0.155 /L | 0.47 /L |
+| Marine | ocean slopes | 0.013 /L | 0.037 /L |
+
+Every hazard changes, so the next production render regenerates all risk numbers.
+
+**Update (same day): fixed upstream in PSSDplusplus 0.3.6** (commit `139eab1`, closes #6). `align_data()` now predicts mouth size from `body.length.cm` with the sampled Jâms coefficients and excludes records with neither value from Food Dilution (`missing_mouth = "exclude"`, `mouth_size_source = "body_length"`, passed explicitly by `run_pssd_pipeline()`). The local tag-and-drop workaround is removed; `ingestion_coverage()` only reports the excluded records. `run_pssd_pipeline()` stops if the package is older than 0.3.6, and the package version is now part of `raw_data_cache_key`, so every cached hazard recomputes. Checks with 0.3.6 (n_sim = 200), median FD HC5:
+
+- marine defaults 0.56 /L, marine with our ocean slopes 0.045 /L;
+- freshwater defaults 459 /L, freshwater with our pooled river slopes 74 /L.
+
+These agree with the workaround within Monte Carlo noise; the mouth-model uncertainty is now propagated. Body lengths are used only for the life stage they were recorded on: adult-only lengths for five species are not transferred (Discussion 4.5).
+
+New report Section 13.8 (`R/fd_alignment_sensitivity.qmd`):
+
+- the mouth-size coverage table;
+- Food Dilution HC5 against volume slope for freshwater and marine records, with the Kooi, RIVM and this-study values marked (`figures/fd_hc5_vs_volume_slope.png`);
+- a pooled-shape vs fragment-only alignment sensitivity for the river (pooled slope) and the ocean.
+
+Pooled shapes stay the headline, following Koelmans 2020/2023, Kooi 2021 and RIVM 2026. Results are exported to the JSON as `fd_alignment`.
+
+**Sediment consequence.** With records lacking a mouth size or body length excluded, the sediment Tier 3–4 Food Dilution set has only 3 species: *Chironomus tepperi* drops out, having previously been treated as able to ingest 5 mm particles. No sediment Food Dilution SSD can be fitted. `build_haz_df()` now returns NA thresholds with a warning for an ERM that could not be fitted, `plot_ecdf_overlap()` skips NA hazards, and the sediment text states that no Food Dilution HC5 could be derived. Sediment was already excluded from the headline, and sediment Tissue Translocation (7 species) is unaffected.
+
+**C1 snapshot rebaselined again (2026-10-17).** The 0.3.5 production baseline is archived as `data_output/c1_number_snapshot_pre_2026-10-17_pssd036.json`. The numbers change on purpose because every hazard is recomputed under PSSDplusplus 0.3.6 (missing mouth sizes excluded; mouth-model uncertainty propagated).

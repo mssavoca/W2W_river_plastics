@@ -135,7 +135,8 @@ raw_data_cache_key <- list(
   concentration_basis = concentration_basis,
   slope_estimator = slope_estimator,
   headline_length_window = headline_length_window,
-  estimator_code = rlang::hash(list(deparse(tpl_mle), deparse(as_headline_fit))))
+  estimator_code = rlang::hash(list(deparse(tpl_mle), deparse(as_headline_fit))),
+  pssdplusplus = as.character(packageVersion("PSSDplusplus")))
 
 # Hoffman et al. (2026)-motivated sensitivity controls. These are explicit
 # assumptions so they can be changed without editing hidden model logic.
@@ -2820,7 +2821,7 @@ if (isTRUE(sediment_concentration_is_quantitative)) {
 }
 ```
 
-**The current derived sediment Food Dilution HC5 fails the plausibility guard above by roughly eleven orders of magnitude** (see the rendered value; expected to be on the order of `r round(sed_HC5_food_dilution_pkg, 4)` particles/kg vs. a published benthic range of 10¹-10¹² particles/kg dw), consistent with the SPEC 1d-i finding that the sediment pathway's exposure concentration is not a genuine particles/kg-dry-weight value. **The sediment Food Dilution and Tissue Translocation RQ/HC5 figures in this report are illustrative/non-quantitative and are excluded from the headline risk characterization (Sections 14-15) pending a genuine dry-weight sediment concentration.**
+`r if (is.na(sed_HC5_food_dilution_pkg)) paste0('**No sediment Food Dilution HC5 could be derived.** After records without a mouth size or body length are excluded (PSSDplusplus 0.3.6; ', paste(ingestion_coverage(tox_data_sed)$species_excluded_fd, collapse = ', '), '), the Tier 3-4 Food Dilution set has too few species for an SSD. Sediment Food Dilution results below are therefore NA.') else paste0('**The current derived sediment Food Dilution HC5 (', signif(sed_HC5_food_dilution_pkg, 3), ' particles/kg) fails the plausibility guard above** (published benthic range 10¹-10¹² particles/kg dw)')`, consistent with the SPEC 1d-i finding that the sediment pathway's exposure concentration is not a genuine particles/kg-dry-weight value. **The sediment Food Dilution and Tissue Translocation RQ/HC5 figures in this report are illustrative/non-quantitative and are excluded from the headline risk characterization (Sections 14-15) pending a genuine dry-weight sediment concentration.**
 
 ```{r sed-hazard-threshold-plot}
 sed_hazard_threshold_plot <- plot_hazard_threshold(haz_sed, "Sediment")
@@ -4666,6 +4667,9 @@ rq_bounding_plot
 ```{r slope-method-child, child = file.path(proj_root, "R", "slope_method_comparison.qmd")}
 ```
 
+```{r fd-alignment-child, child = file.path(proj_root, "R", "fd_alignment_sensitivity.qmd")}
+```
+
 
 # 14. Combined risk quotient comparison across matrices
 
@@ -5537,8 +5541,10 @@ m2_interp_main <- if (m2_have_core) {
     "With both exposure and hazard rescaled coherently to a common [L_tar_min, 5000] µm range but the toxicity ",
     "study set held fixed (Arm B), the river Food Dilution RQ at a 1 µm exposure floor is ",
     round(m2_armB_river_1$RQ_p50_1D, 3), " (1D) -- ", if (armB_below1) "below 1" else "at or above 1",
-    ". Allowing the study set to open as the floor drops (M12/production) collapses the Food Dilution HC5 from ~",
-    round(m2_armB_river_10$HC5_median, 0), " to ~", round(m2_m12_river_1$HC5, 0), " and raises the RQ to ",
+    ". Allowing the study set to open as the floor drops (M12/production) ",
+    if (m2_m12_river_1$HC5 < m2_armB_river_10$HC5_median) "lowers" else "raises",
+    " the Food Dilution HC5 from ~", signif(m2_armB_river_10$HC5_median, 2), " to ~", signif(m2_m12_river_1$HC5, 2),
+    " particles/L and ", if (m2_m12_river_1$RQ_p50 > m2_armB_river_1$RQ_p50_1D) "raises" else "lowers", " the RQ to ",
     round(m2_m12_river_1$RQ_p50, 3), ". ", crossing_phrase
   )
 } else {
@@ -7986,6 +7992,7 @@ psd_params$particle_qc <- list(
 if (exists("anchor_params")) psd_params$anchor_shape <- anchor_params
 if (exists("mpsb_params")) psd_params$mpsizebase <- mpsb_params
 if (exists("slope_method_params")) psd_params$slope_methods <- slope_method_params
+if (exists("fda_params")) psd_params$fd_alignment <- fda_params
 
 jsonlite::write_json(psd_params, "data_output/psd_rescaling_params.json", auto_unbox = TRUE, digits = NA, pretty = TRUE)
 flat <- unlist(psd_params)

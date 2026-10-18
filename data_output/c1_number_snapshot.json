@@ -119,118 +119,112 @@
     {
       "ERM": "Food Dilution",
       "structural_sd": 0,
-      "P_exceed_med": 1,
-      "RQ_p50_med": 338.19670810640002,
-      "RQ_p95_med": 3640.0645688298
+      "P_exceed_med": 0.651,
+      "RQ_p50_med": 1.7945354698,
+      "RQ_p95_med": 19.632746407900001
     },
     {
       "ERM": "Tissue Translocation",
       "structural_sd": 0,
-      "P_exceed_med": 0.166,
-      "RQ_p50_med": 0.1969817583,
-      "RQ_p95_med": 2.1774470042
+      "P_exceed_med": 0.127,
+      "RQ_p50_med": 0.1652837046,
+      "RQ_p95_med": 1.784955312
     },
     {
       "ERM": "Food Dilution",
       "structural_sd": 0.25,
-      "P_exceed_med": 1,
-      "RQ_p50_med": 236.1016042752,
-      "RQ_p95_med": 2524.1425540907999
+      "P_exceed_med": 0.632,
+      "RQ_p50_med": 1.7306045472,
+      "RQ_p95_med": 18.5369507857
     },
     {
       "ERM": "Tissue Translocation",
       "structural_sd": 0.25,
-      "P_exceed_med": 0.238,
-      "RQ_p50_med": 0.4034793392,
-      "RQ_p95_med": 4.3416866342
+      "P_exceed_med": 0.133,
+      "RQ_p50_med": 0.1589953584,
+      "RQ_p95_med": 1.7465915315
     },
     {
       "ERM": "Food Dilution",
       "structural_sd": 0.5,
-      "P_exceed_med": 1,
-      "RQ_p50_med": 105.0947682991,
-      "RQ_p95_med": 1156.1984264353
+      "P_exceed_med": 0.724,
+      "RQ_p50_med": 2.7534585951,
+      "RQ_p95_med": 29.7814674213
     },
     {
       "ERM": "Tissue Translocation",
       "structural_sd": 0.5,
-      "P_exceed_med": 0.112,
-      "RQ_p50_med": 0.1605214792,
-      "RQ_p95_med": 1.7106528125
+      "P_exceed_med": 0.142,
+      "RQ_p50_med": 0.1809659779,
+      "RQ_p95_med": 1.9266976117
     },
     {
       "ERM": "Food Dilution",
       "structural_sd": 1,
-      "P_exceed_med": 1,
-      "RQ_p50_med": 358.54762032000002,
-      "RQ_p95_med": 3884.6315968941999
+      "P_exceed_med": 0.96,
+      "RQ_p50_med": 9.567649017300001,
+      "RQ_p95_med": 101.7156472834
     },
     {
       "ERM": "Tissue Translocation",
       "structural_sd": 1,
-      "P_exceed_med": 0.409,
-      "RQ_p50_med": 0.8530524644,
-      "RQ_p95_med": 8.9173558245
+      "P_exceed_med": 0.647,
+      "RQ_p50_med": 1.7924050942,
+      "RQ_p95_med": 19.434521265499999
     }
   ],
   "rq_1d_river": [
     {
       "ERM": "Food Dilution",
       "HCx": 5,
-      "P_exceed": 0.9585,
-      "RQ_p50": 117.072923518,
-      "RQ_p95": 24308.219775621699
+      "P_exceed": 0.6705,
+      "RQ_p50": 2.1217643102,
+      "RQ_p95": 453.45261380260001
     },
     {
       "ERM": "Food Dilution",
       "HCx": 10,
-      "P_exceed": 0.96175,
-      "RQ_p50": 12.349287015,
-      "RQ_p95": 350.76992286230001
+      "P_exceed": 0.6695,
+      "RQ_p50": 2.1268847594,
+      "RQ_p95": 501.19167648920001
     },
     {
       "ERM": "Tissue Translocation",
       "HCx": 5,
-      "P_exceed": 0.25625,
-      "RQ_p50": 0.1621451206,
-      "RQ_p95": 18.406085907600001
+      "P_exceed": 0.24275,
+      "RQ_p50": 0.1439347541,
+      "RQ_p95": 19.563102988699999
     },
     {
       "ERM": "Tissue Translocation",
       "HCx": 10,
-      "P_exceed": 0.077,
-      "RQ_p50": 0.0590036053,
-      "RQ_p95": 1.6811567334
+      "P_exceed": 0.07049999999999999,
+      "RQ_p50": 0.0583612463,
+      "RQ_p95": 1.4562754193
     }
   ],
   "rq_1d_sed": [
     {
       "ERM": "Food Dilution",
-      "HCx": 5,
-      "P_exceed": 1,
-      "RQ_p50": 4388042.9616790358,
-      "RQ_p95": 16596392.775175674
+      "HCx": 5
     },
     {
       "ERM": "Food Dilution",
-      "HCx": 10,
-      "P_exceed": 1,
-      "RQ_p50": 4225895.0791297425,
-      "RQ_p95": 17776185.386733055
+      "HCx": 10
     },
     {
       "ERM": "Tissue Translocation",
       "HCx": 5,
       "P_exceed": 1,
-      "RQ_p50": 220.31803599849999,
-      "RQ_p95": 1039.7289265652
+      "RQ_p50": 230.32138899629999,
+      "RQ_p95": 1036.1966524987999
     },
     {
       "ERM": "Tissue Translocation",
       "HCx": 10,
       "P_exceed": 1,
-      "RQ_p50": 228.13058046379999,
-      "RQ_p95": 941.86820959440001
+      "RQ_p50": 222.9873758871,
+      "RQ_p95": 994.10782458870005
     }
   ],
   "rq_1d_ocean": [
@@ -238,59 +232,59 @@
       "ERM": "Food Dilution",
       "HCx": 5,
       "P_exceed": 1,
-      "RQ_p50": 7479.1814006110999,
-      "RQ_p95": 104160.1512234619
+      "RQ_p50": 2671.7749247083002,
+      "RQ_p95": 98629.223221952896
     },
     {
       "ERM": "Food Dilution",
       "HCx": 10,
       "P_exceed": 1,
-      "RQ_p50": 2256.7741586252,
-      "RQ_p95": 18136.195954897899
+      "RQ_p50": 522.10005984209999,
+      "RQ_p95": 8129.4334492807002
     },
     {
       "ERM": "Tissue Translocation",
       "HCx": 5,
-      "P_exceed": 0.378,
-      "RQ_p50": 0.660063305,
-      "RQ_p95": 7.1785607604
+      "P_exceed": 0.385,
+      "RQ_p50": 0.6675757623,
+      "RQ_p95": 8.995748503
     },
     {
       "ERM": "Tissue Translocation",
       "HCx": 10,
-      "P_exceed": 0.128,
-      "RQ_p50": 0.2767097138,
-      "RQ_p95": 2.1936499978
+      "P_exceed": 0.133,
+      "RQ_p50": 0.3090681451,
+      "RQ_p95": 1.8415872644
     }
   ],
   "mc2d_river": [
     {
       "ERM": "Food Dilution",
       "HCx": 5,
-      "P_exceed_med": 0.9795,
-      "RQ_p50_med": 163.9390873493,
-      "RQ_p95_med": 15655.2326998769
+      "P_exceed_med": 0.648,
+      "RQ_p50_med": 2.7529369822,
+      "RQ_p95_med": 236.26554682150001
     },
     {
       "ERM": "Food Dilution",
       "HCx": 10,
-      "P_exceed_med": 0.8825,
-      "RQ_p50_med": 12.7770563204,
-      "RQ_p95_med": 444.16342717420002
+      "P_exceed_med": 0.6445,
+      "RQ_p50_med": 2.4900389031,
+      "RQ_p95_med": 201.3448454041
     },
     {
       "ERM": "Tissue Translocation",
       "HCx": 5,
-      "P_exceed_med": 0.264,
-      "RQ_p50_med": 0.1773417369,
-      "RQ_p95_med": 13.4427946569
+      "P_exceed_med": 0.276,
+      "RQ_p50_med": 0.1831780243,
+      "RQ_p95_med": 19.927434249200001
     },
     {
       "ERM": "Tissue Translocation",
       "HCx": 10,
-      "P_exceed_med": 0.113,
-      "RQ_p50_med": 0.0681472436,
-      "RQ_p95_med": 2.7294289491
+      "P_exceed_med": 0.1155,
+      "RQ_p50_med": 0.056761156,
+      "RQ_p95_med": 2.6168238859
     }
   ],
   "mc2d_ocean": [
@@ -298,29 +292,29 @@
       "ERM": "Food Dilution",
       "HCx": 5,
       "P_exceed_med": 1,
-      "RQ_p50_med": 8797.3055006279992,
-      "RQ_p95_med": 32469.028725436401
+      "RQ_p50_med": 2219.8663355866001,
+      "RQ_p95_med": 8798.1214319912997
     },
     {
       "ERM": "Food Dilution",
       "HCx": 10,
       "P_exceed_med": 1,
-      "RQ_p50_med": 2404.1361229094,
-      "RQ_p95_med": 9996.8173447846002
+      "RQ_p50_med": 535.76591220559999,
+      "RQ_p95_med": 2167.8773856000998
     },
     {
       "ERM": "Tissue Translocation",
       "HCx": 5,
-      "P_exceed_med": 0.348,
-      "RQ_p50_med": 0.7647248348,
-      "RQ_p95_med": 3.2176972295
+      "P_exceed_med": 0.4855,
+      "RQ_p50_med": 0.8806209119,
+      "RQ_p95_med": 3.4456678096
     },
     {
       "ERM": "Tissue Translocation",
       "HCx": 10,
-      "P_exceed_med": 0.1565,
-      "RQ_p50_med": 0.2959926667,
-      "RQ_p95_med": 1.17184962
+      "P_exceed_med": 0.1505,
+      "RQ_p50_med": 0.2841443903,
+      "RQ_p95_med": 1.0981589243
     }
   ]
 }

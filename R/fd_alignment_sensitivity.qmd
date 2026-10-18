@@ -1,0 +1,172 @@
+## 13.8 Food Dilution alignment: mouth sizes, volume slope and particle shape
+
+The Food Dilution threshold is aligned on ingestible particle volume. For each toxicity record, PSSDplusplus averages particle volume from the lower size limit up to the largest particle the test species can ingest (its mouth size, capped at the upper limit). That range spans about 11 orders of magnitude in volume, so three inputs control the threshold: the mouth sizes, the volume slope (`a.v`) and how particle shapes are pooled. This section documents each one and the choice made for the headline. The child saves and restores the global RNG state.
+
+```{r fda-setup, include=FALSE}
+fda_rng_state <- if (exists(".Random.seed", envir = globalenv())) get(".Random.seed", envir = globalenv()) else NULL
+fda_params <- list()
+```
+
+### Mouth sizes
+
+PSSDplusplus 0.3.6 and later predict each record's mouth size from its body length with the Jâms et al. (2020) model, log₁₀(mouth size, mm) = 0.9341 · log₁₀(body length, mm) − 1.12. The coefficients are sampled, so the model's uncertainty is propagated. Records with neither a mouth size nor a body length are excluded from the Food Dilution SSD. Earlier versions instead assumed such organisms could ingest particles up to 5000 µm, which drove the threshold down by orders of magnitude ([ToMEx2.0_EcoToxRisk#6](https://github.com/ScottCoffin/ToMEx2.0_EcoToxRisk/issues/6)). Body lengths are used only for the life stage they were recorded for. Five species have body lengths in other ToMEx records only for other (mostly adult) life stages, and these are not transferred: *Carassius auratus*, *Dreissena polymorpha*, *Hyalella azteca*, *Oncorhynchus mykiss* and *Oryzias latipes*.
+
+```{r fda-mouth-coverage}
+fda_cov <- list(Freshwater = ingestion_coverage(tox_data), Marine = ingestion_coverage(tox_data_ocean))
+fda_cov_tbl <- tibble::tibble(
+  `Toxicity set` = names(fda_cov),
+  Records = vapply(fda_cov, `[[`, 1L, "n_records"),
+  `Excluded from Food Dilution (no mouth size or body length)` = vapply(fda_cov, `[[`, 1L, "n_excluded_fd"),
+  `Mouth size predicted from body length` = vapply(fda_cov, `[[`, 1L, "n_predicted_from_body"),
+  `Species excluded` = vapply(fda_cov, function(x) paste(x$species_excluded_fd, collapse = ", "), ""))
+knitr::kable(fda_cov_tbl, caption = "Toxicity records without a usable mouth size (heterotrophs; algae are not in the Food Dilution SSD)")
+fda_params$mouth_coverage <- fda_cov
+```
+
+### Volume slope
+
+```{r fda-av-scan, cache=TRUE, cache.extra=list(n_boot, raw_data_cache_key)}
+# Food Dilution HC5 as a function of the volume slope, with the length slope tied to it
+# for isometric particles (a.v = (alpha + 2) / 3) and all other parameters at package defaults.
+fda_n <- min(n_boot, 200)
+fda_av_grid <- c(1.30, 1.40, 1.50, 1.60, 1.70, 1.80)
+fda_hc5 <- function(env, tox, av, seed) {
+  pv <- PSSDplusplus::param_default_values
+  sfx <- if (env == "Marine") "marine" else "freshwater"
+  pv[[paste0("a.v.", sfx)]] <- av; pv[[paste0("a.m.", sfx)]] <- av
+  pv[[paste0("alpha.", sfx)]] <- 3 * av - 2
+  set.seed(seed)
+  pm <- PSSDplusplus::matrix_function(n = fda_n, params = pv, upper.tissue.truncation.limit = 500, x1M_set = 1, x2D_set = 5000,
+                                      include_marine_surface_water = env == "Marine", include_freshwater_surface_water = env == "Freshwater",
+                                      include_marine_sediment = FALSE, include_freshwater_sediment = FALSE)
+  res <- run_pssd_pipeline(tox_data = tox, param_matrix = pm, environments = env, cache_suffix = paste0("fda_", sfx, "_", av * 100),
+                           dose_unit = "L", n_sim = fda_n, sim = 30, cv_uf = 0.5, rmore_method = "lognormal", seed = seed + 1)
+  h <- build_haz_df(res$pSSDs, env); rm(res); invisible(gc())
+  x <- h$PNEC[h$ERM == "Food Dilution" & h$HCx == 5]
+  tibble::tibble(env = env, a_v = av, alpha = 3 * av - 2, hc5_q05 = stats::quantile(x, 0.05, names = FALSE),
+                 hc5_median = stats::median(x), hc5_q95 = stats::quantile(x, 0.95, names = FALSE))
+}
+fda_av_tbl <- dplyr::bind_rows(lapply(seq_along(fda_av_grid), function(i) dplyr::bind_rows(
+  fda_hc5("Freshwater", tox_data, fda_av_grid[i], 71000 + 10 * i),
+  fda_hc5("Marine", tox_data_ocean, fda_av_grid[i], 72000 + 10 * i))))
+```
+
+```{r fda-av-plot, fig.width=10, fig.height=5}
+d0 <- PSSDplusplus::param_default_values
+fda_marks <- tibble::tribble(
+  ~env,         ~label,                                   ~a_v,
+  "Freshwater", "Kooi et al. 2021 default",               d0$a.v.freshwater,
+  "Marine",     "Kooi et al. 2021 default",               d0$a.v.marine,
+  "Freshwater", "RIVM 2026 (PP, Rhine/Meuse)",            1.715,
+  "Freshwater", "This study: pooled river",               -cpsd_fit_volume$a_psd,
+  "Marine",     "This study: ocean",                      -cpsd_fit_volume_ocean$a_psd)
+fda_av_plot <- ggplot2::ggplot(fda_av_tbl, ggplot2::aes(a_v, hc5_median)) +
+  ggplot2::geom_ribbon(ggplot2::aes(ymin = hc5_q05, ymax = hc5_q95), fill = "gray80", alpha = 0.6) +
+  ggplot2::geom_line(linewidth = 0.9) + ggplot2::geom_point(size = 2) +
+  ggplot2::geom_vline(data = fda_marks, ggplot2::aes(xintercept = a_v, color = label), linetype = "dashed", linewidth = 0.8) +
+  ggplot2::facet_wrap(~ env, labeller = ggplot2::as_labeller(c(Freshwater = "Freshwater toxicity records", Marine = "Marine toxicity records"))) +
+  ggplot2::scale_y_log10(labels = scales::label_log()) +
+  ggplot2::scale_color_manual(values = c("Kooi et al. 2021 default" = "#0072B2", "RIVM 2026 (PP, Rhine/Meuse)" = "#009E73",
+                                         "This study: pooled river" = "#D55E00", "This study: ocean" = "#CC79A7"), name = NULL) +
+  ggplot2::labs(x = "Volume slope a.v (length slope tied as 3·a.v − 2)", y = "Food Dilution HC5 (particles/L, log)",
+                title = "The Food Dilution threshold depends steeply on the volume slope",
+                subtitle = "pSSD++ with package defaults except a.v and alpha; band = 5th–95th percentile of the HC5") +
+  ggplot2::theme_minimal(base_size = 12) + ggplot2::theme(legend.position = "bottom")
+ggplot2::ggsave(fda_av_plot, filename = "figures/fd_hc5_vs_volume_slope.png", width = 10, height = 5, dpi = 300)
+fda_av_plot
+fda_params$av_scan <- fda_av_tbl
+fold_per_01 <- function(env) { x <- fda_av_tbl[fda_av_tbl$env == env, ]; 10^(stats::coef(stats::lm(log10(hc5_median) ~ a_v, x))[2] / 10) }
+```
+
+Across the plausible range of volume slopes, the Food Dilution HC5 changes by about `r sprintf("%.1f", fold_per_01("Freshwater"))`-fold (freshwater records) and `r sprintf("%.1f", fold_per_01("Marine"))`-fold (marine records) for every 0.1 change in `a.v`. Our river volume slope (`r sprintf("%.2f", -cpsd_fit_volume$a_psd)`) lies below the Kooi et al. (2021) freshwater default (`r sprintf("%.2f", d0$a.v.freshwater)`), and below the polypropylene-only slopes RIVM fitted for the Rhine and Meuse (1.70–1.73). Our ocean slope (`r sprintf("%.2f", -cpsd_fit_volume_ocean$a_psd)`) lies just below the marine default (`r sprintf("%.2f", d0$a.v.marine)`). Both of our volume slopes agree with their length slopes for isometric particles (a.v ≈ (α + 2)/3), so they reflect the shallow length distributions rather than a separate estimation problem. The marine threshold is low even at the package's own marine default. Most of that comes from the marine toxicity data together with a marine default slope that is shallower than the freshwater one; our ocean-specific slope adds a further factor.
+
+### Particle shape: pooled versus fragment-only alignment
+
+**Choice for the headline: pooled shapes.** The headline aligns exposure and hazard with slopes fitted to all particles, fibers and fragments together. This follows every published application of the framework:
+
+- **Koelmans et al. (2020, 2023):** one pooled length slope per compartment, from Kooi et al. (2021), for both rescaling and alignment.
+- **Kooi et al. (2021):** the package defaults come from power laws fitted to all particles in each compartment.
+- **RIVM (2026):** hazard thresholds from the ToMEx 2.0 pSSD paper (Coffin et al. 2026) with those pooled defaults. Their own volume slope was fitted to polypropylene particles only, with Kooi's ellipsoid shape factors, so shapes were not separated.
+
+The package's marine default length slope (2.07) is itself a pooled-shape value, close to our pooled ocean slope (`r sprintf("%.2f", -cpsd_fit_ocean_all$a_psd)`). Shape mixing is therefore built into the reference values too.
+
+**Why it matters here.** In our data, fibers have nearly flat length distributions between 100 and 500 µm (river `r sprintf("%.2f", cpsd_fit_fiber$a_psd)`, ocean `r sprintf("%.2f", cpsd_fit_ocean_fiber$a_psd)`), so they make the pooled slopes shallower than the fragment slopes (river `r sprintf("%.2f", cpsd_fit_frag$a_psd)`, ocean `r sprintf("%.2f", cpsd_fit_ocean_frag$a_psd)`). Food dilution is a gut-filling mechanism, and fibers are only about 10% of the particles in the toxicity tests (Koelmans et al. 2023). So we also align with fragment-only slopes as a sensitivity: the fragment length, area and volume slopes on both the exposure and hazard sides, applied to the same concentrations.
+
+```{r fda-fragment, cache=TRUE, cache.extra=list(n_boot, n_mc, slope_structural_sd, raw_data_cache_key)}
+invisible(gc())
+# River (pooled): fragment slopes for exposure and hazard
+alpha_frag_river <- withr::with_seed(8301, alpha_dist(mu = cpsd_fit_frag$a_psd, sd = cpsd_fit_frag$se_a_psd, n = n_mc, structural_sd = slope_structural_sd))
+frag_corr_river <- withr::with_seed(9301, correct_and_bootstrap_eed(
+  monitoring = monitoring, conc_col = "C_measured_pL", cpsd_fit = cpsd_fit_frag, alpha_draws = alpha_frag_river,
+  L_tar_min = 1, L_tar_max = 5000, n_draws = 3000, n_boot = n_boot, probs = c(0.5, 0.95), slope_convention = "differential"))
+frag_haz_river <- aligned_freshwater_hazard(
+  tox_data = tox_data, alpha_draws = alpha_frag_river,
+  aspect_ratio_vec = raw_particles_river$aspect_ratio[raw_particles_river$shape == "fragment"],
+  fit_volume = cpsd_fit_volume_fragment, fit_area = cpsd_fit_area_fragment,
+  n = n_boot, seed = 5301, psd_key = "river:fragment")$haz
+frag_risk_river <- summarize_rq(draw_rq_aligned(list(river = frag_haz_river),
+  list(river = with_psd_key(frag_corr_river$eed_boot$q50, "river:fragment")), n_risk = n_risk, seed = 9310))
+
+# Ocean: fragment slopes for exposure and hazard
+alpha_frag_ocean <- withr::with_seed(8302, alpha_dist(mu = cpsd_fit_ocean_frag$a_psd, sd = cpsd_fit_ocean_frag$se_a_psd, n = n_mc, structural_sd = slope_structural_sd))
+frag_corr_ocean <- withr::with_seed(9303, correct_and_bootstrap_eed(
+  monitoring = monitoring_ocean, conc_col = "C_measured_pL", cpsd_fit = cpsd_fit_ocean_frag, alpha_draws = alpha_frag_ocean,
+  L_tar_min = 1, L_tar_max = 5000, n_draws = 3000, n_boot = n_boot, probs = c(0.5, 0.95), slope_convention = "differential"))
+ar_frag_ocean <- withr::with_seed(9004, bootstrap_aspect_ratio(raw_particles_ocean$aspect_ratio[raw_particles_ocean$shape == "fragment"], n_boot = n_boot))
+pv_frag_ocean <- param_values_ocean
+pv_frag_ocean[["alpha.marine"]] <- -mean(alpha_frag_ocean); pv_frag_ocean[["alpha.marine.sd"]] <- stats::sd(alpha_frag_ocean)
+pv_frag_ocean[["R.ave.water.marine"]] <- ar_frag_ocean$boot_mean; pv_frag_ocean[["R.ave.water.marine.sd"]] <- ar_frag_ocean$boot_sd
+pv_frag_ocean[["a.sa.marine"]] <- -cpsd_fit_area_ocean_frag$a_psd; pv_frag_ocean[["a.sa.marine.sd"]] <- cpsd_fit_area_ocean_frag$se_a_psd
+pv_frag_ocean[["a.v.marine"]] <- -cpsd_fit_volume_ocean_frag$a_psd; pv_frag_ocean[["a.v.marine.sd"]] <- cpsd_fit_volume_ocean_frag$se_a_psd
+pv_frag_ocean[["a.m.marine"]] <- -cpsd_fit_volume_ocean_frag$a_psd; pv_frag_ocean[["a.m.marine.sd"]] <- cpsd_fit_volume_ocean_frag$se_a_psd
+pm_frag_ocean <- withr::with_seed(5311, PSSDplusplus::matrix_function(
+  n = n_boot, params = pv_frag_ocean, upper.tissue.truncation.limit = 500, x1M_set = 1, x2D_set = 5000,
+  include_marine_surface_water = TRUE, include_freshwater_surface_water = FALSE,
+  include_marine_sediment = FALSE, include_freshwater_sediment = FALSE)) |>
+  dplyr::mutate(R.ave.water.marine = sample(ar_frag_ocean$vals, size = dplyr::n(), replace = TRUE),
+                H_W_ratio.water.marine = sample(ar_frag_ocean$vals, size = dplyr::n(), replace = TRUE))
+frag_pssd_ocean <- run_pssd_pipeline(tox_data = tox_data_ocean, param_matrix = pm_frag_ocean, environments = "Marine",
+                                     cache_suffix = "ocean_fragment", dose_unit = "L", n_sim = n_boot, sim = 30, cv_uf = 0.5,
+                                     rmore_method = "lognormal", seed = 5313)
+frag_haz_ocean <- build_haz_df(frag_pssd_ocean$pSSDs, "Marine"); rm(frag_pssd_ocean); invisible(gc())
+frag_risk_ocean <- summarize_rq(withr::with_seed(9311, draw_rq_mc1d(frag_haz_ocean, frag_corr_ocean$eed_boot$q50, n_risk = n_risk_ocean)))
+```
+
+```{r fda-fragment-table}
+hc5_of <- function(h, erm) stats::median(h$PNEC[h$ERM == erm & h$HCx == 5])
+fda_row <- function(matrix, alignment, slopes, eed, haz, risk) {
+  r <- dplyr::filter(risk, HCx == 5)
+  tibble::tibble(Matrix = matrix, Alignment = alignment, `Length slope` = slopes[1], `Volume slope` = slopes[2],
+                 `EED median (/L)` = stats::median(eed), `FD HC5 (/L)` = hc5_of(haz, "Food Dilution"),
+                 `FD RQ median` = r$RQ_p50[r$ERM == "Food Dilution"], `FD P(RQ>1)` = r$P_exceed[r$ERM == "Food Dilution"],
+                 `TT HC5 (/L)` = hc5_of(haz, "Tissue Translocation"), `TT RQ median` = r$RQ_p50[r$ERM == "Tissue Translocation"])
+}
+fda_shape_tbl <- dplyr::bind_rows(
+  fda_row("River (pooled slope)", "Pooled shapes (headline framework)", c(cpsd_fit_all$a_psd, cpsd_fit_volume$a_psd),
+          eed_boot_pooled$q50, haz_pooled, risk_summary_pooled),
+  fda_row("River (pooled slope)", "Fragment-only (sensitivity)", c(cpsd_fit_frag$a_psd, cpsd_fit_volume_fragment$a_psd),
+          frag_corr_river$eed_boot$q50, frag_haz_river, frag_risk_river),
+  fda_row("Ocean", "Pooled shapes (headline)", c(cpsd_fit_ocean_all$a_psd, cpsd_fit_volume_ocean$a_psd),
+          eed_boot_ocean$q50, haz_ocean, risk_summary_ocean),
+  fda_row("Ocean", "Fragment-only (sensitivity)", c(cpsd_fit_ocean_frag$a_psd, cpsd_fit_volume_ocean_frag$a_psd),
+          frag_corr_ocean$eed_boot$q50, frag_haz_ocean, frag_risk_ocean))
+knitr::kable(fda_shape_tbl, digits = 3,
+  caption = "Pooled-shape vs fragment-only alignment (exposure and hazard both re-derived; HC5, 1D risk)")
+fda_params$shape <- fda_shape_tbl
+fda_fd_rq <- function(m, a) fda_shape_tbl$`FD RQ median`[fda_shape_tbl$Matrix == m & grepl(a, fda_shape_tbl$Alignment)]
+```
+
+With fragment-only slopes, the river Food Dilution median RQ (pooled slope) moves from `r sprintf("%.2f", fda_fd_rq("River (pooled slope)", "Pooled"))` to `r sprintf("%.2f", fda_fd_rq("River (pooled slope)", "Fragment"))`, and the ocean value from `r sprintf("%.1f", fda_fd_rq("Ocean", "Pooled"))` to `r sprintf("%.1f", fda_fd_rq("Ocean", "Fragment"))`. The steeper fragment slopes raise the extrapolated particle count and the Food Dilution threshold together. The net effect on the RQ is what this sensitivity shows.
+
+**Interpretation.** We keep pooled-shape alignment for the headline because it is the established precedent (Koelmans et al. 2020, 2023; Kooi et al. 2021; RIVM 2026), and because the reference thresholds it is compared with were derived the same way. Two points are reported alongside it. First, the Food Dilution threshold is exponentially sensitive to the volume slope. Second, fragment-only alignment, arguably closer to a gut-filling mechanism, gives the result above. Food Dilution risk quotients, the ocean ones in particular, should be read with these two dependencies in mind.
+
+```{r fda-restore-rng, include=FALSE}
+if (!is.null(fda_rng_state)) assign(".Random.seed", fda_rng_state, envir = globalenv())
+```
+
+**References for this section.**
+Jâms IB, Windsor FM, Poudevigne-Durance T, Ormerod SJ, Durance I (2020) Estimating the size distribution of plastics ingested by animals. *Nat Commun* 11:1594.
+Koelmans AA, Redondo-Hasselerharm PE, Mohamed Nor NH, Kooi M (2020) Solving the nonalignment of methods and approaches used in microplastic research to consistently characterize risk. *Environ Sci Technol* 54:12307–12315.
+Koelmans AA, Redondo-Hasselerharm PE, Mohamed Nor NH, Gouin T (2023) On the probability of ecological risks from microplastics in the Laurentian Great Lakes. *Environ Pollut* 325:121445.
+Kooi M, Primpke S, Mintenig SM, Lorenz C, Gerdts G, Koelmans AA (2021) Characterizing the multidimensionality of microplastics across environmental compartments. *Water Res* 202:117429.
+Quik JTK et al. (2026) Screening level ecological risk assessment of microplastics in Dutch surface waters. RIVM letter report 2026-0069.

@@ -76,7 +76,8 @@ install.packages(c(
   "sensitivity", "rmarkdown", "reticulate", "knitr"
 ))
 
-# PSSDplusplus (GitHub). Version 0.3.5 or later is required: earlier versions ignore the
+# PSSDplusplus (GitHub). Version 0.3.6 or later is required: 0.3.5 fixed the size bounds and 0.3.6 the
+# missing-mouth-size default (ToMEx2.0_EcoToxRisk#6). Earlier versions ignore the
 # x1D_set/x2D_set size bounds in MC_sim_align_parallel() (ToMEx2.0_EcoToxRisk#5), which the
 # floor sensitivity, the M2 decomposition and the upper-size sensitivity depend on.
 # If install_github() fails to download the tarball, sparse-clone the repo and run

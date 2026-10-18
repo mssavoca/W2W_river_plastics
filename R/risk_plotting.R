@@ -188,6 +188,9 @@ plot_ecdf_overlap <- function(eed_vals, haz_df, matrix_label, n_boot, grid_n = 2
   # ECDF (which therefore starts at the non-detect fraction at the left edge)
   # and are counted in the subtitle; the axis range uses positive values only.
   n_nd   <- sum(eed_vals == 0, na.rm = TRUE)
+  # An ERM whose SSD could not be fitted has NA thresholds (build_haz_df()); leave it out.
+  haz_df <- haz_df |> dplyr::filter(is.finite(.data$PNEC)) |>
+    dplyr::group_by(.data$ERM, .data$HCx) |> dplyr::filter(dplyr::n() >= 5) |> dplyr::ungroup()
   all_x  <- c(eed_vals, haz_df$PNEC)
   pos_x  <- all_x[is.finite(all_x) & all_x > 0]
   grid_x <- 10^seq(log10(min(pos_x)), log10(max(pos_x)), length.out = grid_n)

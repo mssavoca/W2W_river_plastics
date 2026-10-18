@@ -8,8 +8,8 @@
     "monitoring_file": "Part_dets_summ_final.rds",
     "slope_estimator": "tpl_mle",
     "headline_length_window_um": [100, 500],
-    "pssdplusplus_version": "0.3.5",
-    "rendered": "2026-10-17 01:20 PDT"
+    "pssdplusplus_version": "0.3.6",
+    "rendered": "2026-10-17 19:27 PDT"
   },
   "monitoring": {
     "n_samples": 57,
@@ -407,76 +407,76 @@
   },
   "risk_headline": {
     "food_dilution_HC5": {
-      "RQ_p50": 117.072923518028,
-      "RQ_p95": 24308.2197756217,
-      "P_exceed": 0.9585
+      "RQ_p50": 2.12176431021819,
+      "RQ_p95": 453.452613802572,
+      "P_exceed": 0.6705
     },
     "tissue_translocation_HC5": {
-      "RQ_p50": 0.162145120555575,
-      "RQ_p95": 18.4060859076259,
-      "P_exceed": 0.25625
+      "RQ_p50": 0.143934754113058,
+      "RQ_p95": 19.5631029886574,
+      "P_exceed": 0.24275
     }
   },
   "risk_by_river": {
     "Carmel": {
       "food_dilution_HC5": {
-        "RQ_p50": 155.736438879833,
-        "RQ_p95": 27474.3171524164,
-        "P_exceed": 0.965
+        "RQ_p50": 1.60246636558355,
+        "RQ_p95": 251.303374380195,
+        "P_exceed": 0.626
       },
       "tissue_translocation_HC5": {
-        "RQ_p50": 0.0693246418033147,
-        "RQ_p95": 6.94084638228574,
-        "P_exceed": 0.16
+        "RQ_p50": 0.0696809835180857,
+        "RQ_p95": 6.78577394445218,
+        "P_exceed": 0.148
       }
     },
     "Pajaro": {
       "food_dilution_HC5": {
-        "RQ_p50": 55.6459510911203,
-        "RQ_p95": 8840.55244801718,
-        "P_exceed": 0.928
+        "RQ_p50": 1.63679940843475,
+        "RQ_p95": 448.596211094889,
+        "P_exceed": 0.61
       },
       "tissue_translocation_HC5": {
-        "RQ_p50": 0.266206087813335,
-        "RQ_p95": 22.2863353608376,
-        "P_exceed": 0.312
+        "RQ_p50": 0.317740923263439,
+        "RQ_p95": 45.3756198858201,
+        "P_exceed": 0.35
       }
     },
     "Salinas": {
       "food_dilution_HC5": {
-        "RQ_p50": 145.901129580233,
-        "RQ_p95": 22911.6284558765,
-        "P_exceed": 0.955
+        "RQ_p50": 1.75233447896141,
+        "RQ_p95": 331.037918907116,
+        "P_exceed": 0.631
       },
       "tissue_translocation_HC5": {
-        "RQ_p50": 0.0917491294483092,
-        "RQ_p95": 14.0974309878467,
-        "P_exceed": 0.202
+        "RQ_p50": 0.0692976361225989,
+        "RQ_p95": 9.56745964173039,
+        "P_exceed": 0.148
       }
     },
     "San Lorenzo": {
       "food_dilution_HC5": {
-        "RQ_p50": 153.709842483087,
-        "RQ_p95": 34300.8403870848,
-        "P_exceed": 0.986
+        "RQ_p50": 3.9380048073747,
+        "RQ_p95": 884.075865626736,
+        "P_exceed": 0.815
       },
       "tissue_translocation_HC5": {
-        "RQ_p50": 0.366235621123634,
-        "RQ_p95": 43.6753672026764,
-        "P_exceed": 0.351
+        "RQ_p50": 0.310045713807794,
+        "RQ_p95": 26.9903928598785,
+        "P_exceed": 0.325
       }
     }
   },
   "risk_pooled_slope": {
     "food_dilution_HC5": {
-      "RQ_p50": 124.600745901847,
-      "RQ_p95": 14951.0086813715,
-      "P_exceed": 0.979
+      "RQ_p50": 2.0248247349698,
+      "RQ_p95": 818.268351035539,
+      "P_exceed": 0.678
     },
     "tissue_translocation_HC5": {
-      "RQ_p50": 0.176586890627026,
-      "RQ_p95": 15.6803336940171,
-      "P_exceed": 0.259
+      "RQ_p50": 0.166422665810332,
+      "RQ_p95": 26.6496268348293,
+      "P_exceed": 0.257
     }
   },
   "eed_river_q50_median_L": 107.727399887851,
@@ -1407,30 +1407,30 @@
         {
           "slopes": "Fixed-window MLE (headline)",
           "ERM": "Food Dilution",
-          "RQ_p50": 117.072923518028,
-          "RQ_p95": 24308.2197756217,
-          "P_exceed": 0.9585
+          "RQ_p50": 2.12176431021819,
+          "RQ_p95": 453.452613802572,
+          "P_exceed": 0.6705
         },
         {
           "slopes": "Fixed-window MLE (headline)",
           "ERM": "Tissue Translocation",
-          "RQ_p50": 0.162145120555575,
-          "RQ_p95": 18.4060859076259,
-          "P_exceed": 0.25625
+          "RQ_p50": 0.143934754113058,
+          "RQ_p95": 19.5631029886574,
+          "P_exceed": 0.24275
         },
         {
           "slopes": "C-PSD (former production, sensitivity)",
           "ERM": "Food Dilution",
-          "RQ_p50": 41.6815427899452,
-          "RQ_p95": 9168.28902184084,
-          "P_exceed": 0.91775
+          "RQ_p50": 2.93590970448692,
+          "RQ_p95": 1034.23080986091,
+          "P_exceed": 0.67875
         },
         {
           "slopes": "C-PSD (former production, sensitivity)",
           "ERM": "Tissue Translocation",
-          "RQ_p50": 0.552773915393641,
-          "RQ_p95": 131.757745582199,
-          "P_exceed": 0.41475
+          "RQ_p50": 0.457962635472896,
+          "RQ_p95": 148.779845677015,
+          "P_exceed": 0.39725
         }
       ],
       "W1_median_all": {
@@ -1446,8 +1446,8 @@
           "vol_share_gt500": 0.985570302226142,
           "W1_5000": 41.6319832912429,
           "W1_500": 41.6029395528779,
-          "HC5_FD_5000": 0.291657788285372,
-          "HC5_FD_500": 6.01431524130012
+          "HC5_FD_5000": 25.850798550712,
+          "HC5_FD_500": 93.2866512451188
         },
         {
           "river": "Pajaro",
@@ -1455,8 +1455,8 @@
           "vol_share_gt500": 0.961548015149233,
           "W1_5000": 320.915164466736,
           "W1_500": 320.898399621237,
-          "HC5_FD_5000": 4.95974454441373,
-          "HC5_FD_500": 42.5306869528831
+          "HC5_FD_5000": 160.865778830079,
+          "HC5_FD_500": 269.183594075136
         },
         {
           "river": "Salinas",
@@ -1464,8 +1464,8 @@
           "vol_share_gt500": 0.981883983569675,
           "W1_5000": 55.730707149833,
           "W1_500": 55.7096683386801,
-          "HC5_FD_5000": 0.378990069741521,
-          "HC5_FD_500": 7.41249016313209
+          "HC5_FD_5000": 32.0551038803799,
+          "HC5_FD_500": 126.876619114082
         },
         {
           "river": "San Lorenzo",
@@ -1473,40 +1473,204 @@
           "vol_share_gt500": 0.969370386691455,
           "W1_5000": 219.420013380588,
           "W1_500": 219.399318376828,
-          "HC5_FD_5000": 1.13888169071126,
-          "HC5_FD_500": 15.6290708068
+          "HC5_FD_5000": 60.2060989221651,
+          "HC5_FD_500": 146.149150892178
         }
       ],
       "risk": [
         {
           "range": "1–5000 µm (headline)",
           "ERM": "Food Dilution",
-          "RQ_p50": 117.072923518028,
-          "RQ_p95": 24308.2197756217,
-          "P_exceed": 0.9585
+          "RQ_p50": 2.12176431021819,
+          "RQ_p95": 453.452613802572,
+          "P_exceed": 0.6705
         },
         {
           "range": "1–5000 µm (headline)",
           "ERM": "Tissue Translocation",
-          "RQ_p50": 0.162145120555575,
-          "RQ_p95": 18.4060859076259,
-          "P_exceed": 0.25625
+          "RQ_p50": 0.143934754113058,
+          "RQ_p95": 19.5631029886574,
+          "P_exceed": 0.24275
         },
         {
           "range": "1–500 µm (sensitivity)",
           "ERM": "Food Dilution",
-          "RQ_p50": 8.19268007258059,
-          "RQ_p95": 1560.93101508356,
-          "P_exceed": 0.78775
+          "RQ_p50": 0.765373633843476,
+          "RQ_p95": 404.714159715092,
+          "P_exceed": 0.4705
         },
         {
           "range": "1–500 µm (sensitivity)",
           "ERM": "Tissue Translocation",
-          "RQ_p50": 0.16217229195871,
-          "RQ_p95": 18.4097650600436,
-          "P_exceed": 0.25625
+          "RQ_p50": 0.144111372586762,
+          "RQ_p95": 19.5838999077022,
+          "P_exceed": 0.24275
         }
       ]
     }
+  },
+  "fd_alignment": {
+    "mouth_coverage": {
+      "Freshwater": {
+        "n_records": 366,
+        "n_excluded_fd": 103,
+        "n_predicted_from_body": 0,
+        "species_excluded_fd": ["Carassius auratus", "Chironomus tepperi", "Dreissena polymorpha", "Hyalella azteca", "Moina macrocopa", "Oncorhynchus mykiss", "Oryzias latipes", "Perca flavescens"]
+      },
+      "Marine": {
+        "n_records": 493,
+        "n_excluded_fd": 49,
+        "n_predicted_from_body": 0,
+        "species_excluded_fd": ["Amphidinium carterae", "Centropristis striata", "Pseudechinus huttoni", "Strombidium sulcatum"]
+      }
+    },
+    "av_scan": [
+      {
+        "env": "Freshwater",
+        "a_v": 1.3,
+        "alpha": 1.9,
+        "hc5_q05": 0.0489324068775236,
+        "hc5_median": 3.16033133157131,
+        "hc5_q95": 57.7566259245918
+      },
+      {
+        "env": "Marine",
+        "a_v": 1.3,
+        "alpha": 1.9,
+        "hc5_q05": 0.000273244528254301,
+        "hc5_median": 0.0133913045455853,
+        "hc5_q95": 0.270257979340587
+      },
+      {
+        "env": "Freshwater",
+        "a_v": 1.4,
+        "alpha": 2.2,
+        "hc5_q05": 0.123033020967804,
+        "hc5_median": 13.4869615850512,
+        "hc5_q95": 208.655968265652
+      },
+      {
+        "env": "Marine",
+        "a_v": 1.4,
+        "alpha": 2.2,
+        "hc5_q05": 0.00226514361467167,
+        "hc5_median": 0.105014544796233,
+        "hc5_q95": 2.36655606970853
+      },
+      {
+        "env": "Freshwater",
+        "a_v": 1.5,
+        "alpha": 2.5,
+        "hc5_q05": 0.655824815445348,
+        "hc5_median": 69.5740605882246,
+        "hc5_q95": 1069.54905280515
+      },
+      {
+        "env": "Marine",
+        "a_v": 1.5,
+        "alpha": 2.5,
+        "hc5_q05": 0.0214796527750995,
+        "hc5_median": 0.792652330161382,
+        "hc5_q95": 13.8275859922724
+      },
+      {
+        "env": "Freshwater",
+        "a_v": 1.6,
+        "alpha": 2.8,
+        "hc5_q05": 0.884642760646647,
+        "hc5_median": 213.704044144835,
+        "hc5_q95": 3320.49436863659
+      },
+      {
+        "env": "Marine",
+        "a_v": 1.6,
+        "alpha": 2.8,
+        "hc5_q05": 0.15018018418445,
+        "hc5_median": 5.25817648501493,
+        "hc5_q95": 76.6544471748441
+      },
+      {
+        "env": "Freshwater",
+        "a_v": 1.7,
+        "alpha": 3.1,
+        "hc5_q05": 1.47596486242476,
+        "hc5_median": 602.43338820868,
+        "hc5_q95": 10261.3368875029
+      },
+      {
+        "env": "Marine",
+        "a_v": 1.7,
+        "alpha": 3.1,
+        "hc5_q05": 0.88730566469987,
+        "hc5_median": 38.0882143078931,
+        "hc5_q95": 602.200053556941
+      },
+      {
+        "env": "Freshwater",
+        "a_v": 1.8,
+        "alpha": 3.4,
+        "hc5_q05": 3.33869700304873,
+        "hc5_median": 1166.04623136292,
+        "hc5_q95": 36177.4013541065
+      },
+      {
+        "env": "Marine",
+        "a_v": 1.8,
+        "alpha": 3.4,
+        "hc5_q05": 6.86771968901982,
+        "hc5_median": 332.561130820061,
+        "hc5_q95": 3662.84401038845
+      }
+    ],
+    "shape": [
+      {
+        "Matrix": "River (pooled slope)",
+        "Alignment": "Pooled shapes (headline framework)",
+        "Length slope": -2.39382541008611,
+        "Volume slope": -1.50854721803292,
+        "EED median (/L)": 129.13880248252,
+        "FD HC5 (/L)": 67.155976119346,
+        "FD RQ median": 2.0248247349698,
+        "FD P(RQ>1)": 0.678,
+        "TT HC5 (/L)": 733.739228383094,
+        "TT RQ median": 0.166422665810332
+      },
+      {
+        "Matrix": "River (pooled slope)",
+        "Alignment": "Fragment-only (sensitivity)",
+        "Length slope": -2.99883119908339,
+        "Volume slope": -1.70750786671026,
+        "EED median (/L)": 1933.86952058646,
+        "FD HC5 (/L)": 751.602582376631,
+        "FD RQ median": 2.71141645859332,
+        "FD P(RQ>1)": 0.653,
+        "TT HC5 (/L)": 2400.68496291004,
+        "TT RQ median": 0.836763360034809
+      },
+      {
+        "Matrix": "Ocean",
+        "Alignment": "Pooled shapes (headline)",
+        "Length slope": -2.00364938563062,
+        "Volume slope": -1.35580870447386,
+        "EED median (/L)": 93.3224461896553,
+        "FD HC5 (/L)": 0.0383992164775359,
+        "FD RQ median": 2671.77492470829,
+        "FD P(RQ>1)": 1,
+        "TT HC5 (/L)": 135.180117627813,
+        "TT RQ median": 0.667575762290192
+      },
+      {
+        "Matrix": "Ocean",
+        "Alignment": "Fragment-only (sensitivity)",
+        "Length slope": -2.69564204352647,
+        "Volume slope": -1.62383033500716,
+        "EED median (/L)": 2056.66261502124,
+        "FD HC5 (/L)": 9.72417614665673,
+        "FD RQ median": 197.896286297966,
+        "FD P(RQ>1)": 1,
+        "TT HC5 (/L)": 2203.62852287194,
+        "TT RQ median": 0.871745688826739
+      }
+    ]
   }
 }

@@ -19,7 +19,7 @@ attached base packages:
 [1] stats     graphics  grDevices utils     datasets  methods   base     
 
 other attached packages:
- [1] PSSDplusplus_0.3.5 readxl_1.4.5       ggpubr_0.6.2       fitdistrplus_1.2-4
+ [1] PSSDplusplus_0.3.6 readxl_1.4.5       ggpubr_0.6.2       fitdistrplus_1.2-4
  [5] survival_3.8-3     MASS_7.3-65        truncnorm_1.0-9    lubridate_1.9.4   
  [9] forcats_1.0.1      stringr_1.6.0      dplyr_1.1.4        purrr_1.2.1       
 [13] readr_2.1.6        tidyr_1.3.2        tibble_3.3.0       tidyverse_2.0.0   
