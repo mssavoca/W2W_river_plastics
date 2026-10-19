@@ -1357,6 +1357,599 @@ ggsave(
 
 
 
+# Code for Fig 5B bootstrapping median and 95% CI method ----
+
+
+### Fig 5B ----
+### Season 1 microplastic transport estimates ----
+### Median concentrations and bootstrap 95% confidence intervals ----
+
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+
+set.seed(123)
+n_boot <- 10000L
+
+river_levels <- c(
+  "San Lorenzo",
+  "Pajaro",
+  "Salinas",
+  "Carmel"
+)
+
+
+# ------------------------------------------------------------
+# 1. Get Season 1 plastic concentrations by river
+#
+# Each row must represent one sample-level plastic concentration.
+# ------------------------------------------------------------
+
+season1_conc <- Part_dets_summ_river2 %>%
+  filter(
+    material_simple == "plastic",
+    sampling_season == "Season 1",
+    Client_ID_MSSupdate != "CRR20240124_WaterBlank"
+  ) %>%
+  mutate(
+    river = as.character(river),
+    sampling_date = ymd(
+      stringr::str_extract(Client_ID_MSSupdate, "\\d{8}")
+    )
+  )
+
+if (anyDuplicated(
+  season1_conc[c("river", "Client_ID_MSSupdate")]
+) > 0) {
+  stop(
+    "Multiple plastic rows per sample: aggregate to one ",
+    "sample-level concentration before bootstrapping."
+  )
+}
+
+if (anyNA(season1_conc$sampling_date)) {
+  stop("Some sample IDs could not be converted to sampling dates.")
+}
+
+if (anyNA(season1_conc$river) ||
+    any(!season1_conc$river %in% river_levels)) {
+  stop("Missing or unexpected river names.")
+}
+
+n_excluded <- sum(!is.finite(season1_conc$particles_per_L))
+
+if (n_excluded > 0) {
+  warning(
+    n_excluded,
+    " missing/nonfinite concentrations excluded.",
+    call. = FALSE
+  )
+}
+
+season1_conc <- season1_conc %>%
+  filter(is.finite(particles_per_L))
+
+if (any(season1_conc$particles_per_L < 0)) {
+  stop("Negative concentrations found; review before proceeding.")
+}
+
+if (!all(river_levels %in% season1_conc$river)) {
+  stop("At least one river has no valid Season 1 concentrations.")
+}
+
+
+# ------------------------------------------------------------
+# 2. Bootstrap median concentrations
+#
+# Resample sampling dates within each river.
+# Keep all measurements from each selected date together.
+#
+# Compute the median across the resampled measurements,
+# NOT the median of date-specific medians.
+# ------------------------------------------------------------
+
+bootstrap_river_median <- function(dat, n_boot) {
+  
+  concentrations_by_date <- split(
+    dat$particles_per_L,
+    dat$sampling_date
+  )
+  
+  n_dates <- length(concentrations_by_date)
+  
+  if (n_dates < 2L) {
+    stop("At least two sampling dates per river are required.")
+  }
+  
+  if (n_dates < 10L) {
+    warning(
+      unique(dat$river),
+      ": only ", n_dates,
+      " sampling dates; interpret bootstrap intervals cautiously.",
+      call. = FALSE
+    )
+  }
+  
+  boot_medians <- replicate(n_boot, {
+    
+    selected_dates <- sample.int(
+      n_dates,
+      size = n_dates,
+      replace = TRUE
+    )
+    
+    resampled_concentrations <- unlist(
+      concentrations_by_date[selected_dates],
+      use.names = FALSE
+    )
+    
+    median(resampled_concentrations)
+  })
+  
+  tibble(
+    river = unique(dat$river),
+    replicate_id = seq_len(n_boot),
+    conc_boot = boot_medians
+  )
+}
+
+season1_conc_boot <- bind_rows(
+  lapply(river_levels, function(r) {
+    bootstrap_river_median(
+      dat = filter(season1_conc, river == r),
+      n_boot = n_boot
+    )
+  })
+)
+
+season1_conc_stats <- season1_conc %>%
+  group_by(river) %>%
+  summarise(
+    conc_med = median(particles_per_L),
+    n_measurements = n(),
+    n_sampling_dates = n_distinct(sampling_date),
+    .groups = "drop"
+  ) %>%
+  left_join(
+    season1_conc_boot %>%
+      group_by(river) %>%
+      summarise(
+        conc_low95 = quantile(
+          conc_boot,
+          0.025,
+          names = FALSE
+        ),
+        conc_high95 = quantile(
+          conc_boot,
+          0.975,
+          names = FALSE
+        ),
+        .groups = "drop"
+      ),
+    by = "river"
+  ) %>%
+  mutate(
+    river = factor(river, levels = river_levels)
+  )
+
+print(season1_conc_stats, n = Inf, width = Inf)
+
+
+# ------------------------------------------------------------
+# 3. Build hourly flow dataset
+#
+# IMPORTANT:
+# Input datasets must already be restricted to the intended
+# storm windows. This code does not identify storm boundaries.
+#
+# Each hourly mean is assumed to represent one complete hour.
+# ------------------------------------------------------------
+
+flow_hourly_observed <- bind_rows(
+  
+  flow_hourly_SanLorenzo_clean %>%
+    mutate(river = "San Lorenzo"),
+  
+  flow_hourly_Pajaro_clean %>%
+    mutate(river = "Pajaro"),
+  
+  flow_hourly_Salinas_clean %>%
+    mutate(river = "Salinas"),
+  
+  flow_hourly_Carmel_clean %>%
+    mutate(river = "Carmel")
+  
+) %>%
+  mutate(
+    date_hour = floor_date(date_time, unit = "hour"),
+    river = factor(river, levels = river_levels)
+  ) %>%
+  group_by(river, date_hour) %>%
+  summarise(
+    Flow_m3s = mean(Flow_m3s, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(river, date_hour)
+
+if (anyNA(flow_hourly_observed$date_hour)) {
+  stop("Missing flow timestamps: correct these before proceeding.")
+}
+
+if (!all(river_levels %in% flow_hourly_observed$river)) {
+  stop("Flow data are missing for at least one river.")
+}
+
+
+# ------------------------------------------------------------
+# 4. Make missing hours explicit
+#
+# Missing/invalid discharge remains NA.
+# No interpolation is applied.
+#
+# Coverage is checked between the first and last input
+# timestamps, not against independently specified event bounds.
+# ------------------------------------------------------------
+
+all_FF_flow_hourly <- flow_hourly_observed %>%
+  group_by(river) %>%
+  tidyr::complete(
+    date_hour = seq(
+      min(date_hour),
+      max(date_hour),
+      by = "hour"
+    )
+  ) %>%
+  ungroup() %>%
+  mutate(
+    Flow_m3s = if_else(
+      is.finite(Flow_m3s) & Flow_m3s >= 0,
+      Flow_m3s,
+      NA_real_
+    )
+  ) %>%
+  arrange(river, date_hour)
+
+flow_coverage <- all_FF_flow_hourly %>%
+  group_by(river) %>%
+  summarise(
+    first_hour = min(date_hour),
+    last_hour = max(date_hour),
+    n_expected_hours = n(),
+    n_available_hours = sum(!is.na(Flow_m3s)),
+    n_missing_hours = sum(is.na(Flow_m3s)),
+    coverage_percent =
+      100 * n_available_hours / n_expected_hours,
+    .groups = "drop"
+  )
+
+print(flow_coverage, n = Inf, width = Inf)
+
+if (any(flow_coverage$n_available_hours == 0)) {
+  stop("At least one river has no usable discharge data.")
+}
+
+has_flow_gaps <- any(flow_coverage$n_missing_hours > 0)
+
+if (has_flow_gaps) {
+  warning(
+    "Missing discharge hours detected. Results cover available ",
+    "hours only and are incomplete storm totals. See flow_coverage.",
+    call. = FALSE
+  )
+}
+
+
+# ------------------------------------------------------------
+# 5. Calculate hourly and cumulative transport
+#
+# Accumulate only available hourly estimates.
+# Leave gaps in the plot where discharge is missing.
+# Include the final available hour in totals.
+#
+# For a fixed nonnegative discharge volume, multiplying the
+# concentration CI by that volume gives the corresponding
+# percentile-bootstrap transport CI.
+# ------------------------------------------------------------
+
+cumsum_available <- function(x) {
+  
+  result <- rep(NA_real_, length(x))
+  available <- which(is.finite(x))
+  
+  result[available] <- cumsum(x[available])
+  
+  result
+}
+
+all_FF_flow_hourly <- all_FF_flow_hourly %>%
+  left_join(
+    season1_conc_stats,
+    by = "river"
+  ) %>%
+  mutate(
+    water_volume_L = Flow_m3s * 1000 * 3600,
+    
+    MP_flux_per_hr_med =
+      water_volume_L * conc_med,
+    
+    MP_flux_per_hr_low95 =
+      water_volume_L * conc_low95,
+    
+    MP_flux_per_hr_high95 =
+      water_volume_L * conc_high95,
+    
+    # Cumulative values include the hour just completed
+    hour_end = date_hour + hours(1)
+  ) %>%
+  arrange(river, date_hour) %>%
+  group_by(river) %>%
+  mutate(
+    MP_flux_cumulative_med =
+      cumsum_available(MP_flux_per_hr_med),
+    
+    MP_flux_cumulative_low95 =
+      cumsum_available(MP_flux_per_hr_low95),
+    
+    MP_flux_cumulative_high95 =
+      cumsum_available(MP_flux_per_hr_high95),
+    
+    # Prevent lines from connecting across missing intervals
+    flow_segment = cumsum(is.na(Flow_m3s))
+  ) %>%
+  ungroup()
+
+
+# ------------------------------------------------------------
+# 6. River-specific transport totals and confidence intervals
+# ------------------------------------------------------------
+
+final_MP_flux <- all_FF_flow_hourly %>%
+  group_by(river) %>%
+  summarise(
+    MP_flux_cumulative_med =
+      sum(MP_flux_per_hr_med, na.rm = TRUE),
+    
+    MP_flux_cumulative_low95 =
+      sum(MP_flux_per_hr_low95, na.rm = TRUE),
+    
+    MP_flux_cumulative_high95 =
+      sum(MP_flux_per_hr_high95, na.rm = TRUE),
+    
+    .groups = "drop"
+  ) %>%
+  left_join(
+    flow_coverage,
+    by = "river"
+  ) %>%
+  mutate(
+    coverage_status = if_else(
+      n_missing_hours == 0,
+      "Complete within input time window",
+      "Incomplete: available hours only"
+    )
+  )
+
+print(final_MP_flux, n = Inf, width = Inf)
+
+
+# ------------------------------------------------------------
+# 7. Combined transport across rivers
+#
+# Point estimate: sum of river-specific median-based estimates.
+#
+# CI: sum transport within each bootstrap replicate, then
+# take the 2.5th and 97.5th percentiles of those totals.
+#
+# Do not sum individual river confidence limits.
+# Resampling is independent among rivers.
+# ------------------------------------------------------------
+
+storm_volumes <- all_FF_flow_hourly %>%
+  group_by(river) %>%
+  summarise(
+    available_volume_L =
+      sum(water_volume_L, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    river = as.character(river)
+  )
+
+total_MP_flux_boot <- season1_conc_boot %>%
+  left_join(
+    storm_volumes,
+    by = "river"
+  ) %>%
+  mutate(
+    MP_transport_boot =
+      conc_boot * available_volume_L
+  ) %>%
+  group_by(replicate_id) %>%
+  summarise(
+    total_boot = sum(MP_transport_boot),
+    .groups = "drop"
+  )
+
+total_MP_flux <- tibble(
+  
+  total_med_based =
+    sum(final_MP_flux$MP_flux_cumulative_med),
+  
+  total_low95 = quantile(
+    total_MP_flux_boot$total_boot,
+    0.025,
+    names = FALSE
+  ),
+  
+  total_high95 = quantile(
+    total_MP_flux_boot$total_boot,
+    0.975,
+    names = FALSE
+  ),
+  
+  coverage_status = if (has_flow_gaps) {
+    "Incomplete: available hours only"
+  } else {
+    "Complete within input time windows"
+  }
+)
+
+print(total_MP_flux, width = Inf)
+
+
+# ------------------------------------------------------------
+# 8. Common scaling factor for discharge
+# ------------------------------------------------------------
+
+scale_factor <- max(
+  all_FF_flow_hourly$MP_flux_cumulative_med,
+  na.rm = TRUE
+) /
+  max(
+    all_FF_flow_hourly$Flow_m3s,
+    na.rm = TRUE
+  )
+
+# Fallback if all median-based estimates are zero but
+# bootstrap upper bounds are positive
+if (!is.finite(scale_factor) || scale_factor <= 0) {
+  
+  scale_factor <- max(
+    all_FF_flow_hourly$MP_flux_cumulative_high95,
+    na.rm = TRUE
+  ) /
+    max(
+      all_FF_flow_hourly$Flow_m3s,
+      na.rm = TRUE
+    )
+}
+
+if (!is.finite(scale_factor) || scale_factor <= 0) {
+  scale_factor <- 1
+}
+
+plot_flux <- all_FF_flow_hourly %>%
+  mutate(
+    Flow_scaled = Flow_m3s * scale_factor
+  ) %>%
+  filter(!is.na(Flow_m3s))
+
+
+# ------------------------------------------------------------
+# 9. Figure
+#
+# Solid maroon: median-based cumulative transport
+# Dashed maroon: bootstrap 95% confidence limits
+# Steel blue: discharge
+# ------------------------------------------------------------
+
+figure_caption <- paste0(
+  "Solid maroon: median-based estimate; ",
+  "dashed maroon: bootstrap 95% CI.",
+  if (has_flow_gaps) {
+    paste0(
+      "\nMissing discharge hours excluded; ",
+      "cumulative transport covers available hours only."
+    )
+  } else {
+    ""
+  }
+)
+
+First_flush_flux <- ggplot(
+  plot_flux,
+  aes(
+    x = hour_end,
+    group = interaction(river, flow_segment)
+  )
+) +
+  
+  geom_line(
+    aes(y = MP_flux_cumulative_med),
+    color = "maroon",
+    linewidth = 0.6
+  ) +
+  
+  geom_line(
+    aes(y = MP_flux_cumulative_low95),
+    color = "maroon",
+    linewidth = 0.4,
+    linetype = "dashed"
+  ) +
+  
+  geom_line(
+    aes(y = MP_flux_cumulative_high95),
+    color = "maroon",
+    linewidth = 0.4,
+    linetype = "dashed"
+  ) +
+  
+  geom_line(
+    aes(y = Flow_scaled),
+    color = "steelblue",
+    linewidth = 0.5
+  ) +
+  
+  facet_wrap(
+    ~ river,
+    scales = "free",
+    ncol = 1
+  ) +
+  
+  scale_y_continuous(
+    name = paste0(
+      "Cumulative microplastic transport ",
+      "(50–500 µm; particles)"
+    ),
+    labels = scales::comma,
+    sec.axis = sec_axis(
+      ~ . / scale_factor,
+      name = expression(River~flow~(m^3~s^-1)),
+      labels = scales::comma
+    )
+  ) +
+  
+  labs(
+    caption = figure_caption
+  ) +
+  
+  theme_minimal(base_size = 12) +
+  
+  theme(
+    strip.text = element_text(
+      face = "bold",
+      size = 10
+    ),
+    axis.title.x = element_blank(),
+    axis.title.y.left = element_text(color = "maroon"),
+    axis.text.y.left = element_text(color = "maroon"),
+    axis.title.y.right = element_text(color = "steelblue"),
+    axis.text.y.right = element_text(color = "steelblue"),
+    panel.background = element_rect(
+      fill = "white",
+      color = NA
+    ),
+    plot.background = element_rect(
+      fill = "white",
+      color = NA
+    ),
+    plot.caption = element_text(hjust = 0),
+    legend.position = "none"
+  )
+
+print(First_flush_flux)
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
